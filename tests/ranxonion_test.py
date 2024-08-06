@@ -1,3 +1,4 @@
+import sys
 import sqlite3 as sql
 import json
 import sqlite3 as sql
@@ -15,6 +16,7 @@ class DB_Operations(Logger):
     Delete Column on table
     '''
        
+
     def __init__(self, location: str) -> None:
         super().__init__()
         self.db_location = f'{location}/test.db'
@@ -47,7 +49,56 @@ class DB_Operations(Logger):
             filename_table
         ]
 
+    def _value_insert() -> bool: #Creating values for DB
+
+        insert_table = '''
+            INSERT INTO Files (
+            filename, 
+            label, 
+            rating, 
+            type, 
+            label_group,
+            label_subgroup,
+            EXIF ) 
+            VALUES (
+            'Overwatch',
+            'Blizzard',
+            2,
+            'game',
+            'bruh',
+            'subBruh',
+            'BlaBlaBla'
+            );'''
+            
+        return insert_table
+    
+
+
+    def _select_values() -> bool:
         
+        select_val ='''
+            SELECT * 
+            FROM Files'''
+        
+        return select_val
+
+    def _update_values() -> bool:
+
+        update_val = '''
+            UPDATE Files
+            SET 
+            (filename = 'Gigachad.png', 
+            rating = 4); '''
+        
+        return update_val
+
+    def _delete_values() -> bool:
+
+        del_val = '''
+            DELETE FROM Type 
+            WHERE rating < 5'''
+        
+        return del_val
 
     def create_tables(self) -> bool:
         '''
@@ -65,3 +116,10 @@ class DB_Operations(Logger):
         else:
             self.logger.warning(f'Not creating tables, database file exists at {self.db_location}')
             return False
+        
+
+        
+    def insert_table(self) -> bool:
+        if not os.path.exists(self.db_location):
+            self.logger.info(f'Creating database "test.db" in the location {self.db_location}')
+            with sql.connect(self.db_location) 
