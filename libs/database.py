@@ -3,29 +3,30 @@ import sqlite3 as sql
 import os
 import shutil
 
+from typing import List, Tuple, Dict, Any
+
 from libs.logger import Logger
 
 
 #
 #Module for all classes, related to db operations
 #
-class Basic_Db_Operations(Logger):
+class InitializeDb(Logger):
     '''
     Params:
         location: str - path to the DB file location (must be a directory!)
     Creates database and tables, backups DB, deletes DB
     '''
 
-    def __init__(self, location: str) -> None:
+    def __init__(self, db_location: str) -> None:
         super().__init__()
-        self.db_location = f'{location}/meret.db'
-        # self.db_path = Path(self.db_location)
+        self.db_location = f'{db_location}/meret.db'
         if not isinstance(self.db_location, str):
             self.logger.critical(f'DB location should be str type, not {type(self.db_location)}!')
             raise ValueError
         
     @staticmethod
-    def _table_list() -> list[str]:
+    def _table_list() -> List[str]:
 
         '''
         Returns: a list of SQL statements as strings
@@ -81,7 +82,7 @@ class Basic_Db_Operations(Logger):
             self.logger.info(f'Creating database "meret.db" in the location {self.db_location}')
             with sql.connect(self.db_location) as connect_obj:
                 cursor_obj = connect_obj.cursor()
-                tables_list = Basic_Db_Operations._table_list()
+                tables_list = InitializeDb._table_list()
                 for table_sql in tables_list:
                     cursor_obj.execute(table_sql)
             return True
@@ -139,3 +140,85 @@ class Basic_Db_Operations(Logger):
                 return True
         else:
             self.logger.warn('DB is not present, not deleting anything')
+
+
+class CommonDbOperations(Logger):
+    def __init__(self, db_location: str) -> None:
+        super().__init__()
+        self.db_location = f'{db_location}/meret.db'
+        if not isinstance(self.db_location, str):
+            self.logger.critical(f'DB location should be str type, not {type(self.db_location)}!')
+            raise ValueError
+        self.db_connection = sql.connect(self.db_location)
+
+    def _execute_query(self, query: str, new_conn: bool=False) -> bool:
+        if new_conn:
+            if self.separate_connection(query=query):
+                return True
+            else:
+                return False
+        else:
+            cursor_obj = self.db_connection.cursor()
+            if cursor_obj.execute(query):
+                self.db_connection.commit()
+                return True
+            else:
+                return False
+
+    def separate_connection(self, query: str) -> List[Tuple[int, str]]:
+        self.logger.debug(f'Executing query {query}')
+        try:
+            with sql.connect(self.db_location) as conn:
+                cursor_obj = conn.cursor()
+                cursor_obj.execute(query)
+                conn.commit()
+                return cursor_obj.fetchall()
+        except Exception as ex:
+            self.logger.error(f'Exception occurs when trying to execute {query} as a separate connection: {ex}')
+        
+    def insert(self, table: str, data: Dict[str, Any], new_conn: bool=False) -> bool:
+        columns = ', '.join(data.keys())
+        values = ', '.join(data.values())
+        query = f'INSERT INTO {table} ({columns}) VALUES ({values});'
+        return self._execute_query(query=query, new_conn=new_conn)
+
+    def select(self, 
+        table: str, 
+        columns: str='*', 
+        condition: str=None,
+        new_conn: bool=False
+    ) -> List[Tuple[int, str]]:
+        if condition:
+            query = f'SELECT {columns} from {table} where {condition};'
+        else:
+            query = f'SELECT {columns} from {table};'
+        if new_conn:
+            return self.separate_connection(query=query)
+        else:
+            cursor_obj = self.db_connection.cursor()
+            cursor_obj.execute(query)
+            return cursor_obj.fetchall()
+        
+    def update(self,
+        table: str,
+        data: Dict[str, Any], 
+        condition: str,
+        new_conn: bool=False
+    ) -> bool:
+        set_str = ''
+        for column, value in data.items():
+            instance_str = f'{column} = {value}, '
+            set_str += instance_str
+        query = f'UPDATE {table} SET {set_str} WHERE {condition};'
+        return self._execute_query(query=query, new_conn=new_conn)
+    
+    def delete(self,
+        table: str,
+        condition: str,
+        new_conn: bool=False
+    ) -> bool:
+        query = f'DELETE FROM {table} WHERE {condition}'
+        return self._execute_query(query=query, new_conn=new_conn)
+
+
+        
