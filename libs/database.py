@@ -34,7 +34,7 @@ class InitializeDb(Logger):
         #Labels and EXIF are meant to be stored as JSON and then loaded if needed
         filename_table = '''
             CREATE TABLE Files (
-            filename TEXT NOT NULL,
+            filename TEXT PRIMARY KEY,
             labels TEXT,
             rating INT,
             type TEXT,
@@ -46,14 +46,14 @@ class InitializeDb(Logger):
         #Label_subgroup should be a JSON
         group_table = '''
             CREATE TABLE Groups (
-            Label_group TEXT NOT NULL,
+            Label_group TEXT PRIMARY KEY,
             Label_subgroups TEXT
         );
         ''' 
         #Labels should be a JSON
         subroup_table = '''
             CREATE TABLE Subgroup (
-            Label_subgroup TEXT NOT NULL,
+            Label_subgroup TEXT PRIMARY KEY,
             Labels TEXT,
             Colour TEXT
         );
@@ -61,7 +61,7 @@ class InitializeDb(Logger):
         #Files should be a JSON
         labels_table = '''
             CREATE TABLE Labels (
-            Label TEXT NOT NULL,
+            Label TEXT PRIMARY KEY,
             Files TEXT
         );
         '''
@@ -152,6 +152,7 @@ class CommonDbOperations(Logger):
         self.db_connection = sql.connect(self.db_location)
 
     def _execute_query(self, query: str, new_conn: bool=False) -> bool:
+        self.logger.debug(f'Executing {query}, new connection is {new_conn}')
         if new_conn:
             if self.separate_connection(query=query):
                 return True
@@ -180,7 +181,12 @@ class CommonDbOperations(Logger):
         columns = ', '.join(data.keys())
         values = ', '.join(data.values())
         query = f'INSERT INTO {table} ({columns}) VALUES ({values});'
-        return self._execute_query(query=query, new_conn=new_conn)
+        check = f"SELECT EXISTS(SELECT filename FROM {table} WHERE filename={data['filename']} LIMIT 1);"
+        if check == '0':
+            return self._execute_query(query=query, new_conn=new_conn)
+        else:
+            self.logger.debug(f'Not inserting {data}, row already exists')
+            return False
 
     def select(self, 
         table: str, 
