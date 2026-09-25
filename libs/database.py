@@ -31,7 +31,7 @@ class InitializeDb(Logger):
         '''
         Returns: a list of SQL statements as strings
         '''
-        #Labels and EXIF are meant to be stored as JSON and then loaded if needed
+        #Labels and metadata are meant to be stored as JSON and then loaded if needed
         filename_table = '''
             CREATE TABLE Files (
             filename TEXT PRIMARY KEY,
@@ -40,7 +40,7 @@ class InitializeDb(Logger):
             type TEXT,
             label_group TEXT,
             label_subgroup TEXT,
-            EXIF TEXT
+            metadata TEXT
         ); 
         '''
         #Label_subgroup should be a JSON
