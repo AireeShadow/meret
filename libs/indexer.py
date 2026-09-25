@@ -1,10 +1,13 @@
+import json
+import threading
 from pathlib import Path
+from typing import Dict, Any, Optional, Generator
 from PIL import Image, ExifTags
 from ffmpeg import probe
 from mimetypes import guess_type
 
-from database import CommonDbOperations
-from logger import Logger
+from libs.database import CommonDbOperations
+from libs.logger import Logger
 
 
 class Indexer(Logger):
@@ -12,16 +15,27 @@ class Indexer(Logger):
         super().__init__()
         self.library_location = Path(library_location)
         self.db_location = db_location
+        self.db = CommonDbOperations(db_location)
+        self._supported_image = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
+        self._supported_video = {'.mp4', '.avi', '.mkv', '.mov', '.webm', '.flv', '.wmv'}
+        self._supported_audio = {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a'}
 
-    def _get_files(self):
-        return self.library_location.rglob("*")
+    def _get_files(self) -> Generator[Path, None, None]:
+        """Generator for all files recursively"""
+        if not self.library_location.exists():
+            self.logger.error(f"Library path does not exist: {self.library_location}")
+            return
+        yield from self.library_location.rglob("*")
 
-    def _get_exif(self, filename: str) -> dict | None:
+    def _get_exif(self, filename: Path) -> Optional[Dict]:
+        """Extract EXIF data from image"""
         try:
             with Image.open(filename) as img:
                 exif_data = img.getexif()
+                if not exif_data:
+                    return None
                 return {
-                    ExifTags.TAGS.get(k, k): v
+                    ExifTags.TAGS.get(k, k): str(v)
                     for k, v in exif_data.items()
                     if k in ExifTags.TAGS
                 }
@@ -29,56 +43,124 @@ class Indexer(Logger):
             self.logger.warning(f"Failed to extract EXIF from {filename}: {ex}")
             return None
 
-    def _get_metadata(self, filename: str) -> dict | None:
+    def _get_media_metadata(self, filename: Path) -> Optional[Dict]:
+        """Extract metadata from video/audio using ffmpeg"""
         try:
-            return probe(filename)["streams"]
+            result = probe(str(filename))
+            return {
+                'format': result.get('format', {}),
+                'streams': result.get('streams', [])
+            }
         except Exception as ex:
-            self.logger.error(f"Exception fetching metadata for {filename}: {type(ex).__name__}: {ex}")
+            self.logger.debug(f"No ffmpeg metadata for {filename}: {ex}")
             return None
 
-    def _get_file_type(self, filename: str) -> str | None:
-        file_type, _ = guess_type(filename)
+    def _get_file_type(self, filename: Path) -> Optional[str]:
+        """Determine file type"""
+        file_type, _ = guess_type(str(filename))
         return file_type
 
-    def _index(self, filename: str) -> dict | None:
-        file_type = self._get_file_type(filename)
-        if file_type is None:
-            self.logger.info(f"Unknown file type for {filename}")
+    def _categorize_file(self, filename: Path) -> tuple[str, Optional[Dict]]:
+        """
+        Categorize file and extract metadata.
+        Returns: (category, metadata)
+        """
+        suffix = filename.suffix.lower()
+        
+        if suffix in self._supported_image:
+            return "image", self._get_exif(filename)
+        elif suffix in self._supported_video:
+            return "video", self._get_media_metadata(filename)
+        elif suffix in self._supported_audio:
+            return "audio", self._get_media_metadata(filename)
+        else:
+            mime = self._get_file_type(filename)
+            if mime:
+                if mime.startswith("image"):
+                    return "image", self._get_exif(filename)
+                elif mime.startswith("video"):
+                    return "video", self._get_media_metadata(filename)
+                elif mime.startswith("audio"):
+                    return "audio", self._get_media_metadata(filename)
+            return "unknown", None
+
+    def _index_file(self, file_path: Path) -> Optional[Dict[str, Any]]:
+        """Index single file"""
+        if not file_path.is_file():
+            return None
+            
+        category, metadata = self._categorize_file(file_path)
+        
+        if category == "unknown":
+            self.logger.debug(f"Skipping unknown file: {file_path}")
             return None
 
-        is_media = False
-        metadata = None
+        return {
+            "filename": file_path.name,
+            "filepath": str(file_path),
+            "labels": [],
+            "rating": 0,
+            "type": category,
+            "label_group": "",
+            "label_subgroup": None,
+            "metadata": metadata
+        }
 
-        if file_type.startswith("audio") or file_type.startswith("video"):
-            metadata = self._get_metadata(filename)
-            is_media = True
-        elif file_type.startswith("image"):
-            metadata = self._get_exif(filename)
-            is_media = True
+    def run_index(self, filename: Optional[str] = None, batch_size: int = 100) -> Dict[str, int]:
+        """
+        Index files into database.
+        
+        Args:
+            filename: Optional single file to index
+            batch_size: Number of files to process before commit
+            
+        Returns:
+            Dict with stats: {'indexed': int, 'skipped': int, 'errors': int}
+        """
+        stats = {'indexed': 0, 'skipped': 0, 'errors': 0}
+        
+        if filename:
+            files_to_process = [Path(filename)]
         else:
-            self.logger.info(f"{filename} is not media: {file_type}")
-
-        if is_media and metadata is not None:
-            return {
-                "filename": str(filename),
-                "labels": None,
-                "rating": 0,
-                "type": file_type,
-                "label_group": "",
-                "label_subgroup": None,
-                "metadata": metadata
-            }
-
-        return None
-
-    def run_index(self, filename: str = None):
-        db = CommonDbOperations(db_location=self.db_location)
-
-        files_to_process = [Path(filename)] if filename else self._get_files()
-
+            files_to_process = self._get_files()
+        
+        batch = []
+        
         for file_path in files_to_process:
-            data = self._index(str(file_path))
-            if data:
-                db.insert(table="Files", data=data)
-            else:
-                self.logger.debug(f"Data is None, not writing {file_path} to db.")
+            try:
+                data = self._index_file(file_path)
+                if data:
+                    batch.append(data)
+                    if len(batch) >= batch_size:
+                        self._insert_batch(batch)
+                        stats['indexed'] += len(batch)
+                        batch = []
+                else:
+                    stats['skipped'] += 1
+            except Exception as ex:
+                self.logger.error(f"Error indexing {file_path}: {ex}")
+                stats['errors'] += 1
+        
+        # Insert remaining
+        if batch:
+            self._insert_batch(batch)
+            stats['indexed'] += len(batch)
+        
+        self.logger.info(f"Indexing complete: {stats}")
+        return stats
+
+    def _insert_batch(self, batch: list):
+        """Insert batch of files with upsert"""
+        for data in batch:
+            try:
+                self.db.insert_or_update(
+                    table="Files",
+                    data=data,
+                    unique_key="filepath"
+                )
+            except Exception as ex:
+                self.logger.error(f"Failed to insert {data['filepath']}: {ex}")
+
+    def close(self):
+        """Cleanup"""
+        self.db.close()
