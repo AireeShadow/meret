@@ -10,12 +10,10 @@ from meret.core.indexer import Indexer
 from meret.core.repository import AbstractRepository
 from meret.core.sqlite_repo import SQLiteRepository
 
+from meret.cli.deps import get_repo
+
 app = typer.Typer(help="Meret — tagged media file system", no_args_is_help=True)
 console = Console()
-
-
-def get_repo(db_path: Path) -> AbstractRepository:
-    return SQLiteRepository(str(db_path / "meret.db"))
 
 
 @app.command()
@@ -156,3 +154,5 @@ def stats(db_path: Path = typer.Option(Path("."), "--db", "-d")):
 
 if __name__ == "__main__":
     app()
+
+from meret.cli import vfs_cmds  # noqa: E402,F401  — регистрирует ls/open/stat
