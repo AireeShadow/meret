@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "meret"
-version = "0.1.0"
+dynamic = ["version"]                 # ← ЗДЕСЬ, и без этого никак
 description = "Tagged media file system with virtual folders"
 readme = "README.md"
 license = {text = "GPL-3.0"}
@@ -17,18 +17,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "black",
-    "ruff",
-    "mypy",
-]
+dev = ["pytest>=7.0", "black", "ruff", "mypy"]
 vfs-fsspec = ["fsspec"]
 vfs-fuse   = ["fusepy"]
 vfs-win    = ["winfspy"]
 
 [project.scripts]
 meret = "meret.cli.app:app"
+
+[tool.hatch.version]
+path = "meret/__init__.py"
 
 [tool.black]
 line-length = 100
@@ -46,4 +44,3 @@ packages = ["meret"]
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["."]
-

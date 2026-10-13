@@ -10,21 +10,26 @@ from meret.core.indexer import Indexer
 from meret.core.repository import AbstractRepository
 from meret.core.sqlite_repo import SQLiteRepository
 
-from meret.cli.deps import get_repo
+from meret.cli.deps import get_repo, resolve_db_path
 
 app = typer.Typer(help="Meret — tagged media file system", no_args_is_help=True)
 console = Console()
 
 
 @app.command()
-def init(path: Path = typer.Argument(..., help="Каталог для БД"), force: bool = False):
+def init(
+    path: Path = typer.Argument(..., help="Каталог или файл БД"),
+    force: bool = False,
+):
     """Создать базу."""
-    db_file = path / "meret.db"
+    db_file = resolve_db_path(path)
+
     if db_file.exists() and not force:
         console.print(f"[yellow]БД уже есть: {db_file}[/yellow]")
         raise typer.Exit(1)
     if force and db_file.exists():
         db_file.unlink()
+
     get_repo(path)
     console.print(f"[green]✓ База создана: {db_file}[/green]")
 
