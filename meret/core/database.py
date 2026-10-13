@@ -4,7 +4,7 @@ import os
 import shutil
 from typing import List, Tuple, Dict, Any, Optional
 from contextlib import contextmanager
-from libs.logger import Logger
+from meret.logger import Logger
 
 
 class DatabaseError(Exception):
