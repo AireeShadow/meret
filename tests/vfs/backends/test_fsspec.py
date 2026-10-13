@@ -13,7 +13,12 @@ def fs(mock_repo, tmp_path):
     real.write_bytes(b"PNGDATA")
 
     f = mock_repo.save_file(
-        FileEntry(filename="beach.png", filepath=str(real), type=FileType.IMAGE)
+        FileEntry(
+            filename="beach.png",
+            filepath=str(real),
+            type=FileType.IMAGE,
+            metadata={"size_bytes": 7},
+        )
     )
     mock_repo.add_tag(f, "пляж")
     register()

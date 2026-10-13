@@ -1,7 +1,7 @@
 """Монтирование виртуальной ФС. Только чтение.
 
 Linux/macOS — libfuse через fusepy.
-Windows     — WinFsp через winfspy (см. заметку в конце).
+Windows     — WinFsp через winfspy.
 """
 
 import errno
@@ -70,6 +70,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
     from winfspy import (
         FILE_ATTRIBUTE,
         NTStatusEndOfFile,
+        NTStatusMediaWriteProtected,
         NTStatusNotADirectory,
         NTStatusObjectNameNotFound,
         BaseFileSystemOperations,
@@ -78,6 +79,11 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
     from winfspy.plumbing.security_descriptor import SecurityDescriptor
 
     _SD = SecurityDescriptor.from_string("O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)")
+
+    def _norm(name: str) -> str:
+        """Windows отдаёт '\\пляж\\file.png' — приводим к '/пляж/file.png'."""
+        name = name.replace("\\", "/")
+        return name if name.startswith("/") else "/" + name
 
     class MeretOperations(BaseFileSystemOperations):
         def get_volume_info(self):
@@ -95,12 +101,35 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             attrs = FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY if node.is_dir else 0
             return attrs, _SD.handle, _SD.size
 
+        def _context(self, vpath: str) -> dict:
+            node = tree.stat(vpath)
+            return {"is_dir": node.is_dir, "size": node.size, "path": vpath}
+
         def open(self, file_name, create_options, granted_access):
+            vpath = _norm(file_name)
             try:
-                node = tree.stat(_norm(file_name))
+                return 0, self._context(vpath)
             except NotFound:
                 raise NTStatusObjectNameNotFound()
-            return 0, {"is_dir": node.is_dir, "size": node.size, "path": _norm(file_name)}
+
+        def create(
+            self,
+            file_name,
+            create_options,
+            granted_access,
+            file_attributes,
+            security_descriptor,
+            allocation_size,
+        ):
+            """WinFsp зовёт create даже для существующих файлов.
+
+            Файл есть — отдаём контекст. Нет — создать не можем, мы read-only.
+            """
+            vpath = _norm(file_name)
+            try:
+                return 0, self._context(vpath)
+            except NotFound:
+                raise NTStatusMediaWriteProtected()
 
         def close(self, file_context):
             return None
@@ -111,8 +140,8 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 "file_attributes": (
                     FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY if node.is_dir else 0
                 ),
-                "file_size": 0 if node.is_dir else node.size,
                 "allocation_size": 0,
+                "file_size": 0 if node.is_dir else node.size,
                 "creation_time": 0,
                 "last_access_time": 0,
                 "last_write_time": 0,
@@ -142,6 +171,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
             entries = []
 
+            # "." и ".." только для не-корня
             if path != "/":
                 entries.append({"file_name": ".", **_info(tree.stat(path))})
                 parent = path.rsplit("/", 1)[0] or "/"
@@ -164,11 +194,6 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 raise NTStatusEndOfFile()
             return data[offset:offset + length]
 
-    def _norm(name: str) -> str:
-        """Windows отдаёт '\\пляж\\file.png' — приводим к '/пляж/file.png'."""
-        name = name.replace("\\", "/")
-        return name if name.startswith("/") else "/" + name
-
     fs = FileSystem(
         mountpoint,
         MeretOperations(),
@@ -176,7 +201,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         sectors_per_allocation_unit=1,
         file_info_timeout=1000,
         case_sensitive_search=1,
-        case_preserved_names=1,
+        case_preserved_names=1,      # обязательно — иначе кириллица поедет
         unicode_on_disk=1,
         post_cleanup_when_modified_only=1,
         file_system_name=mountpoint,
