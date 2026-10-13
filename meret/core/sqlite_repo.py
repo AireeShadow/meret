@@ -249,7 +249,6 @@ class SQLiteRepository(AbstractRepository, Logger):
         file_type: Optional[str] = None,
         limit: int = 100,
     ) -> List[FileEntry]:
-        # пустой список тегов = "без фильтра по тегам"
         if not tags:
             sql = f"{self._SELECT_FILES} WHERE 1=1"
             params: list = []
@@ -260,23 +259,22 @@ class SQLiteRepository(AbstractRepository, Logger):
             params.append(limit)
             with self._connect() as conn:
                 return [self._row_to_file(r) for r in conn.execute(sql, params).fetchall()]
-            
-        placeholders = ",".join("?" for _ in tags)
-        having = "HAVING COUNT(DISTINCT t.id) = ?" if match_all else ""
 
-        sql = f"""
-            {self._SELECT_FILES}
-            JOIN tags t ON t.id = ft.tag_id
-            WHERE t.name IN ({placeholders})
-        """
-        params: list = list(tags)
+        placeholders = ",".join("?" for _ in tags)
+
+        # t и ft уже приджойнены внутри _SELECT_FILES — добавлять JOIN не нужно
+        sql = f"{self._SELECT_FILES} WHERE t.name IN ({placeholders})"
+        params = list(tags)
+
         if file_type:
             sql += " AND f.type = ?"
             params.append(file_type)
+
         sql += " GROUP BY f.id"
-        if having:
-            sql += " " + having
+        if match_all:
+            sql += " HAVING COUNT(DISTINCT t.id) = ?"
             params.append(len(tags))
+
         sql += " LIMIT ?"
         params.append(limit)
 
