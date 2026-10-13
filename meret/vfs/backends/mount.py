@@ -7,6 +7,7 @@ Windows     — WinFsp через winfspy (см. заметку в конце).
 import errno
 import platform
 import stat
+import time
 from pathlib import Path
 
 from meret.vfs import IsADirectory, NotFound, VirtualTree
@@ -76,7 +77,30 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         FileSystem,
     )
     from winfspy.plumbing.security_descriptor import SecurityDescriptor
+
     _SD = SecurityDescriptor.from_string("O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)")
+
+    fs = FileSystem(
+        mountpoint,
+        MeretOperations(),
+        sector_size=512,
+        sectors_per_allocation_unit=1,
+        file_info_timeout=1000,
+        case_sensitive_search=1,
+        case_preserved_names=1,
+        unicode_on_disk=1,
+        post_cleanup_when_modified_only=1,
+        file_system_name=mountpoint,
+    )
+    try:
+        fs.start()
+        if foreground:
+            while True:
+                time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        fs.stop()
 
     class MeretOperations(BaseFileSystemOperations):
         def get_volume_info(self):
