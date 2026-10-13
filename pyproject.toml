@@ -23,6 +23,9 @@ dev = [
     "ruff",
     "mypy",
 ]
+vfs-fsspec = ["fsspec"]
+vfs-fuse   = ["fusepy"]
+vfs-win    = ["winfspy"]
 
 [project.scripts]
 meret = "meret.cli.app:app"
@@ -44,7 +47,3 @@ testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["."]
 
-[project.optional-dependencies]
-vfs-fsspec = ["fsspec"]
-vfs-fuse   = ["fusepy"]
-vfs-win    = ["winfspy"]
