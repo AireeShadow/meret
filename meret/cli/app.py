@@ -1,6 +1,6 @@
 import typer
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
