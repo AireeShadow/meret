@@ -80,7 +80,11 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
     class MeretOperations(BaseFileSystemOperations):
         def get_volume_info(self):
-            return {"total_size": 0, "free_size": 0, "volume_label": "meret"}
+            return {
+                "total_size": 1 << 40,
+                "free_size": 1 << 39,
+                "volume_label": "meret",
+            }
 
         def get_security_by_name(self, file_name):
             try:
@@ -117,34 +121,67 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         def read_directory(self, file_context, marker):
             if not file_context["is_dir"]:
                 raise NTStatusNotADirectory()
-            return [
-                {
-                    "file_name": n.name,
+
+            path = file_context["path"]
+
+            def _info(node):
+                return {
                     "file_attributes": (
-                        FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY if n.is_dir else 0
+                        FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY if node.is_dir else 0
                     ),
-                    "file_size": 0 if n.is_dir else n.size,
                     "allocation_size": 0,
+                    "file_size": 0 if node.is_dir else node.size,
                     "creation_time": 0,
                     "last_access_time": 0,
                     "last_write_time": 0,
-                    "index_number": n.file_id or 0,
+                    "change_time": 0,
+                    "index_number": node.file_id or 0,
                 }
-                for n in tree.listdir(file_context["path"])
+
+            entries = []
+
+            # "." и ".." только для не-корня
+            if path != "/":
+                entries.append({"file_name": ".", **_info(tree.stat(path))})
+                parent = path.rsplit("/", 1)[0] or "/"
+                entries.append({"file_name": "..", **_info(tree.stat(parent))})
+
+            entries += [
+                {"file_name": n.name, **_info(n)} for n in tree.listdir(path)
             ]
+            entries.sort(key=lambda e: e["file_name"])
+
+            if marker is None:
+                return entries
+
+            for i, entry in enumerate(entries):
+                if entry["file_name"] == marker:
+                    return entries[i + 1:]
+            return []
 
         def read(self, file_context, offset, length):
-            data = tree.read(file_context["path"])[offset:offset + length]
-            if not data:
+            data = tree.read(file_context["path"])
+            if offset >= len(data):
                 raise NTStatusEndOfFile()
-            return data
+            return data[offset:offset + length]
 
     def _norm(name: str) -> str:
         """Windows отдаёт '\\пляж\\file.png' — приводим к '/пляж/file.png'."""
         name = name.replace("\\", "/")
         return name if name.startswith("/") else "/" + name
 
-    FileSystem(mountpoint, MeretOperations(), sector_size=4096, volume_label="meret")
+    FileSystem(
+        mountpoint,
+        MeretOperations(),
+        sector_size=512,
+        sectors_per_allocation_unit=1,
+        file_info_timeout=1000,
+        case_sensitive_search=1,
+        case_preserved_names=1,      # обязательно — иначе кириллица поедет
+        unicode_on_disk=1,
+        post_cleanup_when_modified_only=1,
+        file_system_name=mountpoint,
+    )
 
 
 # ---------- диспетчер ----------
