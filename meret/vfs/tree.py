@@ -9,37 +9,7 @@ from meret.core.repository import AbstractRepository
 from meret.vfs.errors import IsADirectory, NotFound   # ← было локально
 
 _FORBIDDEN = '/\\:*?"<>|'
-_SAFE_SUB = "∕"
-
-import posixpath
-import unicodedata
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
-
-from meret.core.models import FileEntry, Tag
-from meret.core.repository import AbstractRepository
-
-# символы, недопустимые в путях на Windows/Linux/macOS
-_FORBIDDEN = '/\\:*?"<>|'
 _SAFE_SUB = "∕"  # U+2215 DIVISION SLASH
-
-
-class VfsError(Exception):
-    """Базовая ошибка виртуальной ФС."""
-
-
-class NotFound(VfsError):
-    """Узел не найден."""
-
-
-class NotADirectory(VfsError):
-    """Ожидался каталог, а это файл."""
-
-
-class IsADirectory(VfsError):
-    """Ожидался файл, а это каталог."""
-
 
 @dataclass(frozen=True)
 class Node:
