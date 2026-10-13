@@ -1,154 +1,81 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional, Generator
-from PIL import Image, ExifTags
-from ffmpeg import probe
+from typing import Dict, Generator, List, Optional
 
+from meret.core.extractors import ExtractorRegistry
+from meret.core.logger import Logger
 from meret.core.models import FileEntry, FileType
 from meret.core.repository import AbstractRepository
 
 
-class Indexer:
+class Indexer(Logger):
     def __init__(
-        self, 
+        self,
         repository: AbstractRepository,
-        library_path: Path
-    ):
+        library_path: str | Path,
+        workers: int = 4,
+    ) -> None:
+        super().__init__()
         self.repo = repository
         self.library = Path(library_path)
-        
-        self._extractors = {
-            FileType.IMAGE: self._extract_image_meta,
-            FileType.VIDEO: self._extract_video_meta,
-            FileType.AUDIO: self._extract_audio_meta,
-        }
-    
-    def scan(self, single_file: Optional[Path] = None) -> List[FileEntry]:
-        """Сканирует файлы и возвращает список FileEntry"""
-        files_to_scan = [single_file] if single_file else self._iter_files()
-        
-        entries = []
-        for file_path in files_to_scan:
-            if not file_path or not file_path.is_file():
-                continue
-            
-            entry = self._process_file(file_path)
-            if entry:
-                entries.append(entry)
-        
-        return entries
-    
-    def index(self, entries: List[FileEntry]) -> dict:
-        """Сохраняет записи в БД"""
-        indexed = 0
-        updated = 0
-        
-        for entry in entries:
-            existing = self.repo.get_file_by_path(entry.filepath)
-            if existing:
-                updated += 1
-            else:
-                indexed += 1
-            
-            self.repo.save_file(entry)
-        
-        return {"indexed": indexed, "updated": updated}
-    
-    def _iter_files(self) -> Generator[Path, None, None]:
-        """Генератор всех файлов"""
+        self.workers = max(1, workers)
+        self.registry = ExtractorRegistry()
+
+    def _iter_files(self, single_file: Optional[Path] = None) -> Generator[Path, None, None]:
+        if single_file is not None:
+            if single_file.is_file():
+                yield single_file
+            return
         for path in self.library.rglob("*"):
             if path.is_file():
                 yield path
-    
+
     def _process_file(self, file_path: Path) -> Optional[FileEntry]:
-        """Определяет тип и извлекает метаданные"""
-        file_type = self._detect_type(file_path)
-        
-        if file_type == FileType.UNKNOWN:
+        """Только извлечение — БД не трогаем (важно для потоков)."""
+        file_type = self.registry.get_file_type(file_path)
+        if file_type is FileType.UNKNOWN:
             return None
-        
-        metadata = None
-        if file_type in self._extractors:
-            metadata = self._extractors[file_type](file_path)
-        
         return FileEntry(
             filename=file_path.name,
             filepath=str(file_path),
             type=file_type,
-            metadata=metadata
+            metadata=self.registry.extract(file_path),
         )
-    
-    def _detect_type(self, path: Path) -> FileType:
-        suffix = path.suffix.lower()
-        
-        if suffix in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.raw'}:
-            return FileType.IMAGE
-        elif suffix in {'.mp4', '.avi', '.mkv', '.mov', '.webm', '.flv', '.wmv', '.m4v'}:
-            return FileType.VIDEO
-        elif suffix in {'.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.wma'}:
-            return FileType.AUDIO
-        
-        # Fallback на mimetypes
-        import mimetypes
-        mime, _ = mimetypes.guess_type(str(path))
-        if mime:
-            if mime.startswith('image'):
-                return FileType.IMAGE
-            elif mime.startswith('video'):
-                return FileType.VIDEO
-            elif mime.startswith('audio'):
-                return FileType.AUDIO
-        
-        return FileType.UNKNOWN
-    
-    def _extract_image_meta(self, path: Path) -> dict:
-        try:
-            with Image.open(path) as img:
-                meta = {
-                    "width": img.width,
-                    "height": img.height,
-                    "mode": img.mode,
-                    "format": img.format,
-                }
-                
-                # EXIF
-                exif = img.getexif()
-                if exif:
-                    meta["exif"] = {
-                        ExifTags.TAGS.get(k, k): str(v)
-                        for k, v in exif.items()
-                    }
-                
-                return meta
-        except Exception as e:
-            return {"error": str(e), "width": 0, "height": 0}
-    
-    def _extract_video_meta(self, path: Path) -> dict:
-        try:
-            result = probe(str(path))
-            return {
-                "duration": float(result['format'].get('duration', 0)),
-                "bitrate": int(result['format'].get('bit_rate', 0)),
-                "size": int(result['format'].get('size', 0)),
-                "streams": [
-                    {
-                        "codec_type": s.get('codec_type'),
-                        "width": s.get('width'),
-                        "height": s.get('height'),
-                        "duration": s.get('duration')
-                    }
-                    for s in result.get('streams', [])
-                ]
-            }
-        except Exception as e:
-            return {"error": str(e)}
-    
-    def _extract_audio_meta(self, path: Path) -> dict:
-        try:
-            result = probe(str(path))
-            return {
-                "duration": float(result['format'].get('duration', 0)),
-                "bitrate": int(result['format'].get('bit_rate', 0)),
-                "sample_rate": result['streams'][0].get('sample_rate') if result.get('streams') else None
-            }
-        except Exception as e:
-            return {"error": str(e)}
+
+    def scan(self, single_file: Optional[Path] = None, progress_callback=None) -> List[FileEntry]:
+        files = list(self._iter_files(single_file))
+        entries: List[FileEntry] = []
+        if not files:
+            self.logger.warning("No files to scan")
+            return entries
+
+        with ThreadPoolExecutor(max_workers=self.workers) as pool:
+            futures = {pool.submit(self._process_file, f): f for f in files}
+            for done, future in enumerate(as_completed(futures), start=1):
+                try:
+                    entry = future.result()
+                    if entry:
+                        entries.append(entry)
+                except Exception as e:
+                    self.logger.error(f"Failed: {futures[future]}: {e}")
+                if progress_callback:
+                    progress_callback(done, len(files))
+        return entries
+
+    def index(self, entries: List[FileEntry]) -> Dict[str, int]:
+        stats = {"indexed": 0, "updated": 0, "errors": 0}
+        for entry in entries:
+            try:
+                exists = self.repo.get_file_by_path(entry.filepath) is not None
+                self.repo.save_file(entry)
+                stats["updated" if exists else "indexed"] += 1
+            except Exception as e:
+                stats["errors"] += 1
+                self.logger.error(f"Failed to index {entry.filepath}: {e}")
+        return stats
+
+    def run(self, single_file=None, dry_run: bool = False, progress_callback=None):
+        entries = self.scan(single_file=single_file, progress_callback=progress_callback)
+        if dry_run:
+            return {"indexed": 0, "updated": 0, "errors": 0, "found": len(entries)}
+        return self.index(entries)
