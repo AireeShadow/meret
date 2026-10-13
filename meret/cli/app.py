@@ -1,191 +1,157 @@
 import typer
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Optional
+
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.tree import Tree
 
-from meret.core.sqlite_repo import SQLiteRepository
 from meret.core.indexer import Indexer
+from meret.core.repository import AbstractRepository
+from meret.core.sqlite_repo import SQLiteRepository
 
-app = typer.Typer(help="Meret - Tagged Media File System")
+app = typer.Typer(help="Meret — tagged media file system", no_args_is_help=True)
 console = Console()
 
 
-def get_repo(db_path: Path):
-    """Фабрика репозитория"""
+def get_repo(db_path: Path) -> AbstractRepository:
     return SQLiteRepository(str(db_path / "meret.db"))
 
 
 @app.command()
-def init(
-    path: Path = typer.Argument(..., help="Directory to initialize"),
-    force: bool = typer.Option(False, "--force", "-f")
-):
-    """Initialize meret database"""
+def init(path: Path = typer.Argument(..., help="Каталог для БД"), force: bool = False):
+    """Создать базу."""
     db_file = path / "meret.db"
-    
     if db_file.exists() and not force:
-        console.print(f"[yellow]Database already exists at {db_file}[/yellow]")
+        console.print(f"[yellow]БД уже есть: {db_file}[/yellow]")
         raise typer.Exit(1)
-    
     if force and db_file.exists():
         db_file.unlink()
-    
-    # Создаём через репозиторий (автоматически создаёт таблицы)
-    repo = get_repo(path)
-    stats = repo.get_stats()
-    
-    console.print(f"[green]✓ Database initialized at {db_file}[/green]")
-    console.print(f"[dim]Total files: {stats['total_files']}[/dim]")
+    get_repo(path)
+    console.print(f"[green]✓ База создана: {db_file}[/green]")
 
 
 @app.command()
 def scan(
-    library: Path = typer.Argument(..., help="Directory to scan"),
+    library: Path = typer.Argument(..., help="Что сканировать"),
     db_path: Path = typer.Option(Path("."), "--db", "-d"),
-    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Don't save to database")
+    dry_run: bool = typer.Option(False, "--dry-run", "-n"),
 ):
-    """Scan and index media files"""
+    """Просканировать и проиндексировать медиа."""
     if not library.exists():
-        console.print(f"[red]Path does not exist: {library}[/red]")
+        console.print(f"[red]Нет такого пути: {library}[/red]")
         raise typer.Exit(1)
-    
-    repo = get_repo(db_path)
-    indexer = Indexer(repo, library)
-    
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console
-    ) as progress:
-        progress.add_task(description="Scanning files...", total=None)
-        entries = indexer.scan()
-    
-    console.print(f"[cyan]Found {len(entries)} media files[/cyan]")
-    
+
+    indexer = Indexer(get_repo(db_path), library)
+    with console.status("Сканирую..."):
+        stats = indexer.run(dry_run=dry_run)
+
     if dry_run:
-        table = Table(title="Files (dry run)")
-        table.add_column("File", style="cyan")
-        table.add_column("Type", style="green")
-        table.add_column("Size", style="yellow")
-        
-        for entry in entries[:20]:  # Показываем первые 20
-            size = entry.metadata.get('size', 0) if entry.metadata else 0
-            size_mb = f"{size / 1024 / 1024:.1f} MB" if size else "N/A"
-            table.add_row(entry.filename, entry.type.value, size_mb)
-        
-        if len(entries) > 20:
-            table.add_row("...", "...", f"+{len(entries) - 20} more")
-        
-        console.print(table)
+        console.print(f"[cyan]Найдено файлов: {stats['found']}[/cyan]")
     else:
-        with Progress() as progress:
-            task = progress.add_task("[cyan]Indexing...", total=len(entries))
-            
-            # Индексируем пачками
-            batch_size = 50
-            for i in range(0, len(entries), batch_size):
-                batch = entries[i:i + batch_size]
-                indexer.index(batch)
-                progress.update(task, advance=len(batch))
-        
-        console.print(f"[green]✓ Indexed {len(entries)} files[/green]")
+        console.print(
+            f"[green]✓ Новых: {stats['indexed']}, "
+            f"обновлено: {stats['updated']}, ошибок: {stats['errors']}[/green]"
+        )
 
 
 @app.command()
 def search(
-    query: str = typer.Argument(..., help="Search query"),
+    query: str = typer.Argument("", help="Текст в имени файла"),
     db_path: Path = typer.Option(Path("."), "--db", "-d"),
+    tags: Optional[List[str]] = typer.Option(None, "--tag", "-g"),
+    match_all: bool = typer.Option(False, "--all", help="Файлы со ВСЕМИ тегами"),
     file_type: Optional[str] = typer.Option(None, "--type", "-t"),
-    tags: Optional[List[str]] = typer.Option(None, "--tag", "-g")
 ):
-    """Search files"""
+    """Поиск по имени и/или тегам."""
     repo = get_repo(db_path)
-    
+
     if tags:
-        results = repo.search_by_tags(tags, file_type=file_type)
+        results = repo.search_by_tags(tags, match_all=match_all, file_type=file_type)
     else:
-        # Поиск по имени (пока простой)
-        # Можно добавить полнотекстовый поиск потом
-        console.print("[yellow]Use --tag for tag search or provide query[/yellow]")
-        raise typer.Exit(1)
-    
+        results = repo.search_by_name(query) if query else []
+
     if not results:
-        console.print("[yellow]No results found[/yellow]")
+        console.print("[yellow]Ничего не найдено[/yellow]")
         return
-    
-    table = Table(title=f"Found {len(results)} files")
-    table.add_column("File", style="cyan")
-    table.add_column("Type", style="green")
-    table.add_column("Rating", style="yellow")
-    table.add_column("Tags", style="magenta")
-    
-    for file in results[:50]:
-        table.add_row(
-            file.filename,
-            file.type.value,
-            "⭐" * file.rating,
-            ", ".join(file.labels[:3])
-        )
-    
+
+    table = Table(title=f"Найдено: {len(results)}")
+    for col, style in (("Файл", "cyan"), ("Тип", "green"), ("Рейтинг", "yellow"), ("Теги", "magenta")):
+        table.add_column(col, style=style)
+
+    for f in results[:50]:
+        table.add_row(f.filename, f.type.value, "⭐" * f.rating, ", ".join(f.labels))
     console.print(table)
 
 
 @app.command()
 def tag(
-    filepath: Path = typer.Argument(..., help="File to tag"),
-    labels: List[str] = typer.Argument(..., help="Tags to add"),
+    filepath: Path = typer.Argument(..., help="Файл"),
+    labels: List[str] = typer.Argument(..., help="Теги"),
     db_path: Path = typer.Option(Path("."), "--db", "-d"),
-    remove: bool = typer.Option(False, "--remove", "-r", help="Remove tags instead of adding")
+    remove: bool = typer.Option(False, "--remove", "-r"),
 ):
-    """Add or remove tags from file"""
+    """Добавить/убрать теги у файла."""
     repo = get_repo(db_path)
-    
-    file_entry = repo.get_file_by_path(str(filepath))
-    if not file_entry:
-        console.print(f"[red]File not in database: {filepath}[/red]")
-        console.print("[dim]Run 'meret scan' first[/dim]")
+    entry = repo.get_file_by_path(str(filepath))
+    if not entry:
+        console.print(f"[red]Файл не в базе: {filepath}[/red]")
         raise typer.Exit(1)
-    
-    if remove:
-        for label in labels:
-            file_entry.remove_label(label)
-        action = "removed from"
-    else:
-        for label in labels:
-            file_entry.add_label(label)
-        action = "added to"
-    
-    repo.update_file_labels(file_entry.id, file_entry.labels)
-    console.print(f"[green]✓ Tags {action} {filepath.name}[/green]")
-    console.print(f"[dim]Current tags: {', '.join(file_entry.labels)}[/dim]")
+
+    for label in labels:
+        repo.remove_tag(entry.id, label) if remove else repo.add_tag(entry.id, label)
+
+    updated = repo.get_file_by_id(entry.id)
+    console.print(f"[green]✓ {'Убрано' if remove else 'Добавлено'}: {', '.join(labels)}[/green]")
+    console.print(f"[dim]Теги: {', '.join(updated.labels) or '—'}[/dim]")
+
+
+@app.command("tags")
+def list_tags(db_path: Path = typer.Option(Path("."), "--db", "-d")):
+    """Показать теги с количеством файлов."""
+    repo = get_repo(db_path)
+    usage = repo.get_tag_usage()
+    if not usage:
+        console.print("[yellow]Тегов пока нет[/yellow]")
+        return
+    table = Table(title=f"Теги: {len(usage)}")
+    table.add_column("Тег", style="magenta")
+    table.add_column("Файлов", style="cyan", justify="right")
+    for t in usage:
+        table.add_row(t.name, str(t.usage_count))
+    console.print(table)
 
 
 @app.command()
-def stats(
-    db_path: Path = typer.Option(Path("."), "--db", "-d")
-):
-    """Show database statistics"""
-    repo = get_repo(db_path)
-    db_stats = repo.get_stats()
-    tags = repo.get_all_tags()
-    
-    console.print(f"\n[bold cyan]Database Statistics[/bold cyan]")
-    console.print(f"Total files: {db_stats['total_files']}")
-    console.print(f"Unique tags: {len(tags)}")
-    
-    if db_stats['by_type']:
-        console.print("\n[bold]By type:[/bold]")
-        for ftype, count in db_stats['by_type'].items():
-            console.print(f"  {ftype}: {count}")
-    
-    if tags:
-        console.print(f"\n[bold]Tags ({len(tags)}):[/bold]")
-        tag_names = [t.name for t in tags[:20]]
-        console.print(f"  {', '.join(tag_names)}")
-        if len(tags) > 20:
-            console.print(f"  ... and {len(tags) - 20} more")
+def rename(old: str = typer.Argument(...), new: str = typer.Argument(...),
+           db_path: Path = typer.Option(Path("."), "--db", "-d")):
+    """Переименовать тег (или слить с существующим)."""
+    ok = get_repo(db_path).rename_tag(old, new)
+    console.print(f"[green]✓ {old} → {new}[/green]" if ok else f"[red]Нет тега {old}[/red]")
+
+
+@app.command()
+def tree(db_path: Path = typer.Option(Path("."), "--db", "-d")):
+    """Показать иерархию тегов как дерево."""
+    roots = get_repo(db_path).get_tag_tree()
+
+    def build(nodes, node):
+        for n in sorted(nodes, key=lambda x: x.name.lower()):
+            child = node.add(f"{n.name} [dim]({n.usage_count})[/dim]")
+            build(n.children, child)
+
+    root = Tree("[bold]Теги[/bold]")
+    build(roots, root)
+    console.print(root)
+
+
+@app.command()
+def stats(db_path: Path = typer.Option(Path("."), "--db", "-d")):
+    """Статистика базы."""
+    s = get_repo(db_path).get_stats()
+    console.print(f"Файлов: {s['total_files']}, тегов: {s['total_tags']}")
+    for t, c in s["by_type"].items():
+        console.print(f"  {t}: {c}")
 
 
 if __name__ == "__main__":
