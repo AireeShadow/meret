@@ -102,6 +102,17 @@ class VirtualTree:
                 result.append(f"{name}~{seen[key]}")
         return result
 
+    @staticmethod
+    def _file_size(entry: FileEntry) -> int:
+        """Размер из метаданных, иначе — с диска."""
+        size = (entry.metadata or {}).get("size_bytes")
+        if size:
+            return int(size)
+        try:
+            return Path(entry.filepath).stat().st_size
+        except OSError:
+            return 0
+
     # ---------- листинг ----------
 
     def listdir(self, vpath: str = "/") -> List[Node]:
@@ -197,3 +208,4 @@ class VirtualTree:
             yield node
             if node.is_dir:
                 yield from self.walk(node.vpath)
+
