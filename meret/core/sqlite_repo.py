@@ -11,6 +11,17 @@ SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 _TAG_SEP = "\x1f"  # разделитель для GROUP_CONCAT
 
 
+def _iter_statements(script: str):
+    """Режет SQL-скрипт на операторы, уважая BEGIN...END в триггерах."""
+    buffer = ""
+    for line in script.splitlines(keepends=True):
+        buffer += line
+        if sqlite3.complete_statement(buffer):
+            yield buffer.strip()
+            buffer = ""
+    if buffer.strip():
+        yield buffer.strip()
+
 class SQLiteRepository(AbstractRepository, Logger):
     def __init__(self, db_path: str):
         Logger.__init__(self)
@@ -29,15 +40,11 @@ class SQLiteRepository(AbstractRepository, Logger):
     def _init_tables(self) -> None:
         schema = SCHEMA_PATH.read_text(encoding="utf-8")
         with self._connect() as conn:
-            for statement in schema.split(";"):
-                stmt = statement.strip()
-                if not stmt:
-                    continue
+            for stmt in _iter_statements(schema):
                 try:
                     conn.execute(stmt)
                 except sqlite3.OperationalError as e:
-                    # FTS5 может отсутствовать в сборке Python — не падаем
-                    if "fts5" in stmt.lower():
+                    if "fts5" in stmt.lower():          # сборка без FTS5 — не падаем
                         self.fts_enabled = False
                         self.logger.warning(f"FTS5 unavailable: {e}")
                     else:
