@@ -2,6 +2,7 @@
 import os
 import platform
 import subprocess
+import signal
 from pathlib import Path
 
 import typer
@@ -132,7 +133,7 @@ def mount_cmd(
     """Смонтировать теги как диск/каталог (только чтение)."""
     from meret.vfs.backends.mount import mount as _mount
 
-    console.print(f"[cyan]Монтирую в {mountpoint}... Ctrl+C для выхода[/cyan]")
+    console.print(f"[cyan]Монтирую в {mountpoint}... Ctrl+C или Enter для выхода[/cyan]")
     try:
         _mount(_get_tree(db_path), mountpoint)
     except KeyboardInterrupt:
@@ -142,3 +143,43 @@ def mount_cmd(
         console.print("[dim]Linux/macOS: pip install fusepy[/dim]")
         console.print("[dim]Windows: WinFsp + pip install winfspy[/dim]")
         raise typer.Exit(1)
+
+def _pids_for_mountpoint(mountpoint: str) -> list[int]:
+    """Находит процессы монтирования по точке монтирования."""
+    needle = mountpoint.rstrip("\\/")
+    if platform.system() == "Windows":
+        script = (
+            "Get-CimInstance Win32_Process | "
+            "Where-Object { $_.CommandLine -like '*meret*mount*' "
+            f"-and $_.CommandLine -like '*{needle}*' }} | "
+            "Select-Object -ExpandProperty ProcessId"
+        )
+        cmd = ["powershell", "-NoProfile", "-Command", script]
+    else:
+        cmd = ["pgrep", "-f", f"meret mount.*{needle}"]
+
+    out = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
+    return [int(tok) for tok in out.stdout.split() if tok.strip().isdigit()]
+
+
+@app.command("umount")
+def umount_cmd(
+    mountpoint: str = typer.Argument(..., help="Точка монтирования, напр. M: или K:\\tags"),
+):
+    """Отмонтировать: найти процесс монтирования и завершить его."""
+    pids = [pid for pid in _pids_for_mountpoint(mountpoint) if pid != os.getpid()]
+
+    if not pids:
+        console.print(f"[yellow]Ничего не смонтировано в {mountpoint}[/yellow]")
+        raise typer.Exit(1)
+
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)      # на Windows это TerminateProcess
+            console.print(f"[green]завершил PID {pid}[/green]")
+        except OSError as exc:
+            console.print(f"[red]PID {pid}: {exc}[/red]")
+
+    console.print("[dim]Если Проводник показывает точку — нажми F5[/dim]")
