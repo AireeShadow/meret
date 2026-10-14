@@ -128,99 +128,65 @@ class SQLiteRepository(AbstractRepository, Logger):
             return cur.rowcount > 0
 
     # ---------- теги ----------
-    def _ensure_tag(self, conn, name: str, colour: Optional[str] = None) -> int:
-        """Возвращает id тега, создавая при необходимости."""
-        conn.execute(
-            "INSERT OR IGNORE INTO tags (name, colour) VALUES (?, ?)", (name, colour)
-        )
+    def _tag_id(self, conn, name: str) -> Optional[int]:
         row = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()
-        return row["id"]
+        return row["id"] if row else None
 
-    def add_tag(self, file_id: int, tag: str, colour: Optional[str] = None) -> int:
-        with self._connect() as conn:
-            tag_id = self._ensure_tag(conn, tag, colour)
-            conn.execute(
-                "INSERT OR IGNORE INTO file_tags (file_id, tag_id) VALUES (?, ?)",
-                (file_id, tag_id),
-            )
-            conn.commit()
-            return tag_id
+    def _is_ancestor(self, conn, candidate: int, tag_id: int) -> bool:
+        """True, если candidate — сам tag_id или кто-то из его предков."""
+        seen: set[int] = set()
+        cur: Optional[int] = tag_id
+        while cur is not None and cur not in seen:
+            if cur == candidate:
+                return True
+            seen.add(cur)
+            row = conn.execute("SELECT parent_id FROM tags WHERE id = ?", (cur,)).fetchone()
+            cur = row["parent_id"] if row else None
+        return False
 
-    def remove_tag(self, file_id: int, tag: str) -> bool:
+    def create_tag(self, name: str, colour: Optional[str] = None) -> bool:
         with self._connect() as conn:
-            cur = conn.execute(
-                """DELETE FROM file_tags
-                   WHERE file_id = ?
-                     AND tag_id = (SELECT id FROM tags WHERE name = ?)""",
-                (file_id, tag),
-            )
-            conn.commit()
-            return cur.rowcount > 0
-
-    def set_file_tags(self, file_id: int, tags: List[str]) -> bool:
-        with self._connect() as conn:
-            conn.execute("DELETE FROM file_tags WHERE file_id = ?", (file_id,))
-            for name in dict.fromkeys(tags):  # без дублей, с сохранением порядка
-                tag_id = self._ensure_tag(conn, name)
-                conn.execute(
-                    "INSERT INTO file_tags (file_id, tag_id) VALUES (?, ?)",
-                    (file_id, tag_id),
-                )
+            if self._tag_id(conn, name) is not None:
+                return False
+            conn.execute("INSERT INTO tags (name, colour) VALUES (?, ?)", (name, colour))
             conn.commit()
             return True
 
-    def rename_tag(self, old: str, new: str) -> bool:
-        """Переименование = ОДНА строка. Если new существует — слияние."""
+    def delete_tag(self, name: str) -> bool:
+        """Удаляет тег: дети поднимаются на уровень его родителя, ссылки уходят каскадом."""
         with self._connect() as conn:
-            src = conn.execute("SELECT id FROM tags WHERE name = ?", (old,)).fetchone()
-            if not src:
+            tag_id = self._tag_id(conn, name)
+            if tag_id is None:
                 return False
-            dst = conn.execute("SELECT id FROM tags WHERE name = ?", (new,)).fetchone()
-
-            if dst and dst["id"] != src["id"]:
-                conn.execute(
-                    """INSERT OR IGNORE INTO file_tags (file_id, tag_id)
-                       SELECT file_id, ? FROM file_tags WHERE tag_id = ?""",
-                    (dst["id"], src["id"]),
-                )
-                conn.execute("DELETE FROM file_tags WHERE tag_id = ?", (src["id"],))
-                conn.execute("DELETE FROM tags WHERE id = ?", (src["id"],))
-            else:
-                conn.execute("UPDATE tags SET name = ? WHERE id = ?", (new, src["id"]))
+            row = conn.execute("SELECT parent_id FROM tags WHERE id = ?", (tag_id,)).fetchone()
+            conn.execute(
+                "UPDATE tags SET parent_id = ? WHERE parent_id = ?",
+                (row["parent_id"], tag_id),
+            )
+            conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
             conn.commit()
             return True
 
     def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
         with self._connect() as conn:
-            if parent:
-                p = conn.execute("SELECT id FROM tags WHERE name = ?", (parent,)).fetchone()
-                if not p:
-                    return False
-                parent_id = p["id"]
-            else:
+            tag_id = self._tag_id(conn, tag)
+            if tag_id is None:
+                return False
+
+            if parent is None:
                 parent_id = None
-            cur = conn.execute(
-                "UPDATE tags SET parent_id = ? WHERE name = ?", (parent_id, tag)
+            else:
+                parent_id = self._tag_id(conn, parent)
+                if parent_id is None:
+                    return False
+                if self._is_ancestor(conn, parent_id, tag_id):
+                    return False          # был бы цикл
+
+            conn.execute(
+                "UPDATE tags SET parent_id = ? WHERE id = ?", (parent_id, tag_id)
             )
             conn.commit()
-            return cur.rowcount > 0
-
-    def get_all_tags(self) -> List[Tag]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT id, name, colour, parent_id FROM tags ORDER BY name COLLATE NOCASE"
-            ).fetchall()
-            return [Tag(**dict(r)) for r in rows]
-
-    def get_tag_usage(self, limit: int = 100) -> List[Tag]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                """SELECT t.id, t.name, t.colour, t.parent_id, COUNT(ft.file_id) AS usage_count
-                   FROM tags t LEFT JOIN file_tags ft ON ft.tag_id = t.id
-                   GROUP BY t.id ORDER BY usage_count DESC, t.name LIMIT ?""",
-                (limit,),
-            ).fetchall()
-            return [Tag(**dict(r)) for r in rows]
+            return True
 
     def get_tag_tree(self) -> List[TagNode]:
         tags = self.get_all_tags()
@@ -228,15 +194,37 @@ class SQLiteRepository(AbstractRepository, Logger):
         roots: List[TagNode] = []
         for node in nodes.values():
             parent = nodes.get(node.parent_id)
-            (parent.children if parent else roots).append(node)
+            if parent is None or parent is node:
+                roots.append(node)
+            else:
+                parent.children.append(node)
+
+        # страховка от циклов: что не достижимо от корней — тоже показываем
+        reachable: set[int] = set()
+        stack = list(roots)
+        while stack:
+            n = stack.pop()
+            if n.id in reachable:
+                continue
+            reachable.add(n.id)
+            stack.extend(n.children)
+        for node in nodes.values():
+            if node.id not in reachable:
+                roots.append(node)
         return roots
 
     def prune_orphan_tags(self) -> int:
-        """Удаляет теги без файлов."""
+        """Удаляет теги без файлов И без детей.
+
+        Тег-раздел («жанр») обычно сам файлов не имеет — только детей,
+        поэтому его трогать нельзя.
+        """
         with self._connect() as conn:
             cur = conn.execute(
-                """DELETE FROM tags WHERE id NOT IN
-                   (SELECT DISTINCT tag_id FROM file_tags)"""
+                """DELETE FROM tags
+                   WHERE id NOT IN (SELECT DISTINCT tag_id FROM file_tags)
+                     AND id NOT IN (SELECT parent_id FROM tags
+                                    WHERE parent_id IS NOT NULL)"""
             )
             conn.commit()
             return cur.rowcount

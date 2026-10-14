@@ -79,37 +79,34 @@ class MockRepository(AbstractRepository):
         return True
 
     # ---------- tags ----------
-    def add_tag(self, file_id: int, tag: str, colour: Optional[str] = None) -> int:
-        tag_id = self._ensure_tag(tag, colour)
-        self._links.add((file_id, tag_id))
-        return tag_id
+    def _is_ancestor(self, candidate: int, tag_id: int) -> bool:
+        seen: Set[int] = set()
+        cur: Optional[int] = tag_id
+        while cur is not None and cur not in seen:
+            if cur == candidate:
+                return True
+            seen.add(cur)
+            tag = self._tags.get(cur)
+            cur = tag.parent_id if tag else None
+        return False
 
-    def remove_tag(self, file_id: int, tag: str) -> bool:
-        tag = self._find_tag(tag)
-        if not tag or (file_id, tag.id) not in self._links:
+    def create_tag(self, name: str, colour: Optional[str] = None) -> bool:
+        if self._find_tag(name):
             return False
-        self._links.discard((file_id, tag.id))
+        tag = Tag(id=self._next_tag_id, name=name, colour=colour)
+        self._tags[tag.id] = tag
+        self._next_tag_id += 1
         return True
 
-    def set_file_tags(self, file_id: int, tags: List[str]) -> bool:
-        self._links = {(f, t) for (f, t) in self._links if f != file_id}
-        for name in dict.fromkeys(tags):
-            self._links.add((file_id, self._ensure_tag(name)))
-        return True
-
-    def rename_tag(self, old: str, new: str) -> bool:
-        src = self._find_tag(old)
-        if not src:
+    def delete_tag(self, name: str) -> bool:
+        tag = self._find_tag(name)
+        if not tag:
             return False
-        dst = self._find_tag(new)
-        if dst and dst.id != src.id:
-            for (f, t) in list(self._links):
-                if t == src.id:
-                    self._links.add((f, dst.id))
-            self._links = {(f, t) for (f, t) in self._links if t != src.id}
-            del self._tags[src.id]
-        else:
-            src.name = new
+        for other in self._tags.values():
+            if other.parent_id == tag.id:
+                other.parent_id = tag.parent_id
+        del self._tags[tag.id]
+        self._links = {(f, t) for (f, t) in self._links if t != tag.id}
         return True
 
     def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
@@ -120,25 +117,10 @@ class MockRepository(AbstractRepository):
             node.parent_id = None
             return True
         parent_tag = self._find_tag(parent)
-        if not parent_tag:
+        if not parent_tag or self._is_ancestor(parent_tag.id, node.id):
             return False
         node.parent_id = parent_tag.id
         return True
-
-    def get_all_tags(self) -> List[Tag]:
-        return sorted(
-            (t.model_copy() for t in self._tags.values()),
-            key=lambda t: t.name.casefold(),
-        )
-
-    def get_tag_usage(self, limit: int = 100) -> List[Tag]:
-        tags = []
-        for tag in self._tags.values():
-            clone = tag.model_copy()
-            clone.usage_count = self._usage(tag.id)
-            tags.append(clone)
-        tags.sort(key=lambda t: (-t.usage_count, t.name.casefold()))
-        return tags[:limit]
 
     def get_tag_tree(self) -> List[TagNode]:
         nodes = {
@@ -148,11 +130,18 @@ class MockRepository(AbstractRepository):
         roots: List[TagNode] = []
         for node in nodes.values():
             parent = nodes.get(node.parent_id)
-            (parent.children if parent else roots).append(node)
+            if parent is None or parent is node:
+                roots.append(node)
+            else:
+                parent.children.append(node)
         return roots
 
     def prune_orphan_tags(self) -> int:
-        orphans = [tid for tid in self._tags if self._usage(tid) == 0]
+        parents = {t.parent_id for t in self._tags.values() if t.parent_id}
+        orphans = [
+            tid for tid in self._tags
+            if self._usage(tid) == 0 and tid not in parents
+        ]
         for tid in orphans:
             del self._tags[tid]
         for tag in self._tags.values():

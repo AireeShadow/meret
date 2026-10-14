@@ -158,3 +158,48 @@ def test_stats(repo):
     stats = repo.get_stats()
     assert stats["total_files"] == 2
     assert stats["by_type"] == {"image": 1, "video": 1}
+
+def test_create_tag(repo):
+    assert repo.create_tag("жанр") is True
+    assert repo.create_tag("жанр") is False        # уже есть
+    assert repo.create_tag("ЖАНР") is False        # и регистр не важен
+    assert [t.name for t in repo.get_all_tags()] == ["жанр"]
+
+
+def test_set_tag_parent_cycle_is_rejected(repo):
+    for name in ("a", "b", "c"):
+        repo.create_tag(name)
+    assert repo.set_tag_parent("b", "a") is True
+    assert repo.set_tag_parent("c", "b") is True
+    assert repo.set_tag_parent("a", "c") is False   # a под своим потомком
+    assert repo.set_tag_parent("a", "a") is False   # сам под собой
+    assert [n.name for n in repo.get_tag_tree()] == ["a"]
+    assert [n.name for n in repo.get_tag_tree()[0].children] == ["b"]
+
+
+def test_set_tag_parent_to_root(repo):
+    repo.create_tag("a")
+    repo.create_tag("b")
+    repo.set_tag_parent("b", "a")
+    assert repo.set_tag_parent("b", None) is True
+    assert sorted(n.name for n in repo.get_tag_tree()) == ["a", "b"]
+
+
+def test_delete_tag_keeps_children(repo):
+    repo.create_tag("жанр")
+    repo.create_tag("детектив")
+    repo.set_tag_parent("детектив", "жанр")
+    assert repo.delete_tag("жанр") is True
+    assert [n.name for n in repo.get_tag_tree()] == ["детектив"]
+    assert repo.delete_tag("нет такого") is False
+
+
+def test_prune_keeps_parent_of_children(repo):
+    fid = repo.save_file(FileEntry(filename="a.png", filepath="/x/a.png", type=FileType.IMAGE))
+    repo.create_tag("жанр")            # без файлов, но с ребёнком
+    repo.create_tag("детектив")
+    repo.set_tag_parent("детектив", "жанр")
+    repo.add_tag(fid, "лишний")
+    repo.remove_tag(fid, "лишний")
+    assert repo.prune_orphan_tags() == 1          # только «лишний»
+    assert sorted(t.name for t in repo.get_all_tags()) == ["детектив", "жанр"]
