@@ -1,3 +1,9 @@
+"""File indexer — оркестратор сканирования.
+
+Сам ничего не знает про форматы: за метаданные отвечают экстракторы,
+за хранение — репозиторий. Тут только логика обхода и координации.
+"""
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Generator, List, Optional
@@ -7,8 +13,13 @@ from meret.core.logger import Logger
 from meret.core.models import FileEntry, FileType
 from meret.core.repository import AbstractRepository
 
+PHASE_COLLECT = "collect"
+PHASE_EXTRACT = "extract"
+
 
 class Indexer(Logger):
+    """Обходит директорию, извлекает метаданные и пишет в репозиторий."""
+
     def __init__(
         self,
         repository: AbstractRepository,
@@ -22,6 +33,8 @@ class Indexer(Logger):
         self.registry = ExtractorRegistry()
         self.interrupted = False
 
+    # ---------- обход ----------
+
     def _iter_files(self, single_file: Optional[Path] = None) -> Generator[Path, None, None]:
         if single_file is not None:
             if single_file.is_file():
@@ -30,6 +43,38 @@ class Indexer(Logger):
         for path in self.library.rglob("*"):
             if path.is_file():
                 yield path
+
+    def collect(
+        self,
+        single_file: Optional[Path] = None,
+        progress_callback=None,
+    ) -> List[Path]:
+        """ЭТАП 1: собрать список поддерживаемых файлов. Быстро, без метаданных."""
+        found: List[Path] = []
+
+        if single_file is not None:
+            candidates = [single_file] if single_file.is_file() else []
+            for done, path in enumerate(candidates, start=1):
+                if self.registry.get_file_type(path) is not FileType.UNKNOWN:
+                    found.append(path)
+                if progress_callback:
+                    progress_callback(PHASE_COLLECT, done, len(candidates))
+            return found
+
+        # rglob ленивый — сначала соберём всё, чтобы знать total
+        all_files = list(self._iter_files())
+        total = len(all_files)
+
+        for done, path in enumerate(all_files, start=1):
+            if self.registry.get_file_type(path) is not FileType.UNKNOWN:
+                found.append(path)
+            if progress_callback:
+                progress_callback(PHASE_COLLECT, done, total)
+
+        self.logger.info(f"Collected {len(found)}/{total} supported files")
+        return found
+
+    # ---------- обработка ----------
 
     def _process_file(self, file_path: Path) -> Optional[FileEntry]:
         """Только извлечение — БД не трогаем (важно для потоков)."""
@@ -43,14 +88,16 @@ class Indexer(Logger):
             metadata=self.registry.extract(file_path),
         )
 
-    def scan(self, single_file=None, progress_callback=None) -> List[FileEntry]:
-        files = list(self._iter_files(single_file))
+    def extract(
+        self,
+        files: List[Path],
+        progress_callback=None,
+    ) -> List[FileEntry]:
+        """ЭТАП 2: извлечь метаданные параллельно."""
         entries: List[FileEntry] = []
         if not files:
-            self.logger.warning("No files to scan")
             return entries
 
-        self.interrupted = False
         pool = ThreadPoolExecutor(max_workers=self.workers)
         futures = {pool.submit(self._process_file, f): f for f in files}
 
@@ -63,17 +110,19 @@ class Indexer(Logger):
                 except Exception as e:
                     self.logger.error(f"Failed: {futures[future]}: {e}")
                 if progress_callback:
-                    progress_callback(done, len(files))
+                    progress_callback(PHASE_EXTRACT, done, len(files))
         except KeyboardInterrupt:
             self.interrupted = True
-            self.logger.warning("Сканирование прервано пользователем")
+            self.logger.warning("Извлечение прервано пользователем")
             for future in futures:
-                future.cancel()                          # отменяет то, что ещё в очереди
+                future.cancel()
             pool.shutdown(wait=False, cancel_futures=True)
         else:
             pool.shutdown(wait=True)
 
         return entries
+
+    # ---------- запись ----------
 
     def index(self, entries: List[FileEntry]) -> Dict[str, int]:
         stats = {"indexed": 0, "updated": 0, "errors": 0}
@@ -87,12 +136,24 @@ class Indexer(Logger):
                 self.logger.error(f"Failed to index {entry.filepath}: {e}")
         return stats
 
-    def run(self, single_file=None, dry_run: bool = False, progress_callback=None):
-        entries = self.scan(single_file=single_file, progress_callback=progress_callback)
+    # ---------- оркестрация ----------
+
+    def run(
+        self,
+        single_file: Optional[Path] = None,
+        dry_run: bool = False,
+        progress_callback=None,
+    ) -> Dict[str, int]:
+        self.interrupted = False
+
+        files = self.collect(single_file=single_file, progress_callback=progress_callback)
+        entries = self.extract(files, progress_callback=progress_callback)
 
         if dry_run:
-            return {"indexed": 0, "updated": 0, "errors": 0,
-                    "found": len(entries), "interrupted": self.interrupted}
+            return {
+                "indexed": 0, "updated": 0, "errors": 0,
+                "found": len(entries), "interrupted": self.interrupted,
+            }
 
         stats = self.index(entries)
         stats["interrupted"] = self.interrupted

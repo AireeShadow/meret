@@ -12,8 +12,10 @@ def test_scan_only_supported(tmp_path, make_png, mock_repo):
     (tmp_path / "note.txt").write_text("hello")
 
     indexer = Indexer(mock_repo, tmp_path)
-    entries = indexer.scan()
-    assert len(entries) == 2
+    files = indexer.collect()
+    assert len(files) == 2
+
+    entries = indexer.extract(files)
     assert all(e.type.value == "image" for e in entries)
 
 
@@ -58,9 +60,14 @@ def test_run_indexes(tmp_path, make_png, mock_repo):
 def test_progress_callback(tmp_path, make_png, mock_repo):
     for _ in range(3):
         make_png("a")
+
     seen = []
-    Indexer(mock_repo, tmp_path).scan(progress_callback=lambda d, t: seen.append((d, t)))
-    assert seen[-1] == (3, 3)
+    indexer = Indexer(mock_repo, tmp_path)
+    indexer.run(progress_callback=lambda phase, d, t: seen.append((phase, d, t)))
+
+    phases = {p for p, _, _ in seen}
+    assert phases == {"collect", "extract"}
+    assert seen[-1][1:] == (3, 3)
 
 
 def test_missing_library(mock_repo, tmp_path):
