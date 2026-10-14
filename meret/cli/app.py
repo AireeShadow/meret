@@ -10,6 +10,7 @@ from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from meret.core.indexer import PHASE_COLLECT, PHASE_EXTRACT, Indexer
 from meret.core.repository import AbstractRepository
 from meret.core.sqlite_repo import SQLiteRepository
+from meret.core import tagpaths
 
 from meret.cli.deps import get_repo, resolve_db_path
 
@@ -87,12 +88,12 @@ def search(
 ):
     """Поиск по имени и/или тегам."""
     repo = get_repo(db_path)
-
     if tags:
-        results = repo.search_by_tags(tags, match_all=match_all, file_type=file_type)
-    else:
-        results = repo.search_by_name(query) if query else []
-
+        all_tags = repo.get_all_tags()
+        names: List[str] = []
+        for path in tags:
+            names.extend(tagpaths.subtree_names(path, all_tags))
+        results = repo.search_by_tags(names, match_all=match_all, file_type=file_type)
     if not results:
         console.print("[yellow]Ничего не найдено[/yellow]")
         return
@@ -105,66 +106,156 @@ def search(
         table.add_row(f.filename, f.type.value, "⭐" * f.rating, ", ".join(f.labels))
     console.print(table)
 
+# -----Tags-----
+
+def _print_tree(repo: AbstractRepository) -> None:
+    def build(nodes, node):
+        for n in sorted(nodes, key=lambda x: x.name.casefold()):
+            child = node.add(f"{n.name} [dim]({n.usage_count})[/dim]")
+            build(n.children, child)
+
+    root = Tree("[bold]Теги[/bold]")
+    build(repo.get_tag_tree(), root)
+    console.print(root)
+
+
+def _ensure_path(repo: AbstractRepository, path: str, colour: Optional[str] = None):
+    """Тег по пути; недостающих родителей создаёт. None — пустой путь."""
+    path = tagpaths.normalize(path)
+    if not path:
+        return None
+
+    missing = tagpaths.missing_ancestors(path, repo.get_all_tags())
+    for i, missing_path in enumerate(missing):
+        leaf = tagpaths.parts(missing_path)[-1]
+        if not repo.create_tag(leaf, colour if i == len(missing) - 1 else None):
+            continue
+        parent = tagpaths.parts(missing_path)[:-1]
+        if parent:
+            repo.set_tag_parent(leaf, parent[-1])
+
+    return tagpaths.resolve(path, repo.get_all_tags())
+
+
+def _path_of(repo: AbstractRepository, name: str) -> str:
+    return tagpaths.name_to_path(repo.get_all_tags()).get(name.casefold(), name)
 
 @app.command()
 def tag(
     filepath: Path = typer.Argument(..., help="Файл"),
-    labels: List[str] = typer.Argument(..., help="Теги"),
+    labels: List[str] = typer.Argument(..., help="Пути тегов: жанр/детектив"),
     db_path: Path = typer.Option(Path("."), "--db", "-d"),
     remove: bool = typer.Option(False, "--remove", "-r"),
 ):
-    """Добавить/убрать теги у файла."""
+    """Добавить/убрать теги у файла. Путь достраивает недостающих родителей."""
     repo = get_repo(db_path)
     entry = repo.get_file_by_path(str(filepath))
     if not entry:
         console.print(f"[red]Файл не в базе: {filepath}[/red]")
         raise typer.Exit(1)
 
+    done: List[str] = []
     for label in labels:
-        repo.remove_tag(entry.id, label) if remove else repo.add_tag(entry.id, label)
+        found = _ensure_path(repo, label) if not remove else tagpaths.resolve(label, repo.get_all_tags())
+        if found is None:
+            console.print(f"[yellow]Нет такого пути: {label}[/yellow]")
+            continue
+        repo.remove_tag(entry.id, found.name) if remove else repo.add_tag(entry.id, found.name)
+        done.append(_path_of(repo, found.name))
 
     updated = repo.get_file_by_id(entry.id)
-    console.print(f"[green]✓ {'Убрано' if remove else 'Добавлено'}: {', '.join(labels)}[/green]")
-    console.print(f"[dim]Теги: {', '.join(updated.labels) or '—'}[/dim]")
+    console.print(f"[green]✓ {'Убрано' if remove else 'Добавлено'}: {', '.join(done)}[/green]")
+    console.print(f"[dim]Теги: {', '.join(_path_of(repo, n) for n in updated.labels) or '—'}[/dim]")
+
+
+@app.command("tag-new")
+def tag_new(
+    path: str = typer.Argument(..., help="Путь тега: жанр/детектив"),
+    colour: Optional[str] = typer.Option(None, "--colour", "-c"),
+    db_path: Path = typer.Option(Path("."), "--db", "-d"),
+):
+    """Создать тег и всех недостающих родителей по пути."""
+    repo = get_repo(db_path)
+    found = _ensure_path(repo, path, colour)
+    if found is None:
+        console.print("[red]Пустой путь[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]✓ Тег: {_path_of(repo, found.name)}[/green]")
+
+
+@app.command("tag-del")
+def tag_del(path: str = typer.Argument(..., help="Путь тега"), db_path: Path = typer.Option(Path("."), "--db", "-d")):
+    """Удалить тег. Дети поднимаются на уровень его родителя."""
+    repo = get_repo(db_path)
+    found = tagpaths.resolve(path, repo.get_all_tags())
+    if found is None:
+        console.print(f"[red]Нет такого пути: {path}[/red]")
+        raise typer.Exit(1)
+    repo.delete_tag(found.name)
+    console.print(f"[green]✓ Удалён: {path}[/green]")
+
+
+@app.command()
+def parent(
+    child: str = typer.Argument(..., help="Путь тега, который перевешиваем"),
+    new_parent: Optional[str] = typer.Argument(None, help="Новый родитель. Не указан — в корень"),
+    db_path: Path = typer.Option(Path("."), "--db", "-d"),
+):
+    """Перевесить тег по пути. Иерархия = папки в виртуальной ФС."""
+    repo = get_repo(db_path)
+    tags = repo.get_all_tags()
+
+    node = tagpaths.resolve(child, tags)
+    if node is None:
+        console.print(f"[red]Нет такого пути: {child}[/red]")
+        raise typer.Exit(1)
+
+    target = None
+    if new_parent is not None:
+        target = tagpaths.resolve(new_parent, tags)
+        if target is None:
+            console.print(f"[red]Нет такого пути: {new_parent}[/red]")
+            raise typer.Exit(1)
+
+    by_id = {t.id: t for t in tags}
+    walk = target
+    while walk is not None:
+        if walk.id == node.id:
+            console.print(f"[red]{new_parent} лежит внутри {child} — вышел бы цикл[/red]")
+            raise typer.Exit(1)
+        walk = by_id.get(walk.parent_id)
+
+    if not repo.set_tag_parent(node.name, target.name if target else None):
+        console.print("[red]Не получилось[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[green]✓ {child} → {new_parent or 'корень'}[/green]")
+    _print_tree(repo)
 
 
 @app.command("tags")
 def list_tags(db_path: Path = typer.Option(Path("."), "--db", "-d")):
-    """Показать теги с количеством файлов."""
+    """Показать теги путями, с количеством файлов."""
     repo = get_repo(db_path)
     usage = repo.get_tag_usage()
     if not usage:
         console.print("[yellow]Тегов пока нет[/yellow]")
         return
+    paths = tagpaths.name_to_path(repo.get_all_tags())
     table = Table(title=f"Теги: {len(usage)}")
-    table.add_column("Тег", style="magenta")
+    table.add_column("Путь", style="magenta")
     table.add_column("Файлов", style="cyan", justify="right")
     for t in usage:
-        table.add_row(t.name, str(t.usage_count))
+        table.add_row(paths.get(t.name.casefold(), t.name), str(t.usage_count))
     console.print(table)
-
-
-@app.command()
-def rename(old: str = typer.Argument(...), new: str = typer.Argument(...),
-           db_path: Path = typer.Option(Path("."), "--db", "-d")):
-    """Переименовать тег (или слить с существующим)."""
-    ok = get_repo(db_path).rename_tag(old, new)
-    console.print(f"[green]✓ {old} → {new}[/green]" if ok else f"[red]Нет тега {old}[/red]")
 
 
 @app.command()
 def tree(db_path: Path = typer.Option(Path("."), "--db", "-d")):
     """Показать иерархию тегов как дерево."""
-    roots = get_repo(db_path).get_tag_tree()
+    _print_tree(get_repo(db_path))
 
-    def build(nodes, node):
-        for n in sorted(nodes, key=lambda x: x.name.lower()):
-            child = node.add(f"{n.name} [dim]({n.usage_count})[/dim]")
-            build(n.children, child)
-
-    root = Tree("[bold]Теги[/bold]")
-    build(roots, root)
-    console.print(root)
+#-----Misc-----
 
 
 @app.command()

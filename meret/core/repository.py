@@ -34,7 +34,12 @@ class AbstractRepository(ABC):
     def rename_tag(self, old: str, new: str) -> bool: ...
 
     @abstractmethod
-    def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool: ...
+    def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
+        """Перевесить тег под другого родителя (parent=None → в корень).
+
+        False — если тег или родитель не найдены, либо получился бы цикл
+        (тег под своим же потомком или сам под собой).
+        """
 
     @abstractmethod
     def get_all_tags(self) -> List[Tag]: ...
@@ -47,6 +52,12 @@ class AbstractRepository(ABC):
 
     @abstractmethod
     def prune_orphan_tags(self) -> int: ...
+
+    @abstractmethod
+    def create_tag(self, name: str, colour: Optional[str] = None) -> bool: ...
+
+    @abstractmethod
+    def delete_tag(self, name: str) -> bool: ...
 
     # --- поиск ---
     @abstractmethod
