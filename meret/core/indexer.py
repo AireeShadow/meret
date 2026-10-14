@@ -20,6 +20,7 @@ class Indexer(Logger):
         self.library = Path(library_path)
         self.workers = max(1, workers)
         self.registry = ExtractorRegistry()
+        self.interrupted = False
 
     def _iter_files(self, single_file: Optional[Path] = None) -> Generator[Path, None, None]:
         if single_file is not None:
@@ -42,15 +43,18 @@ class Indexer(Logger):
             metadata=self.registry.extract(file_path),
         )
 
-    def scan(self, single_file: Optional[Path] = None, progress_callback=None) -> List[FileEntry]:
+    def scan(self, single_file=None, progress_callback=None) -> List[FileEntry]:
         files = list(self._iter_files(single_file))
         entries: List[FileEntry] = []
         if not files:
             self.logger.warning("No files to scan")
             return entries
 
-        with ThreadPoolExecutor(max_workers=self.workers) as pool:
-            futures = {pool.submit(self._process_file, f): f for f in files}
+        self.interrupted = False
+        pool = ThreadPoolExecutor(max_workers=self.workers)
+        futures = {pool.submit(self._process_file, f): f for f in files}
+
+        try:
             for done, future in enumerate(as_completed(futures), start=1):
                 try:
                     entry = future.result()
@@ -60,6 +64,15 @@ class Indexer(Logger):
                     self.logger.error(f"Failed: {futures[future]}: {e}")
                 if progress_callback:
                     progress_callback(done, len(files))
+        except KeyboardInterrupt:
+            self.interrupted = True
+            self.logger.warning("Сканирование прервано пользователем")
+            for future in futures:
+                future.cancel()                          # отменяет то, что ещё в очереди
+            pool.shutdown(wait=False, cancel_futures=True)
+        else:
+            pool.shutdown(wait=True)
+
         return entries
 
     def index(self, entries: List[FileEntry]) -> Dict[str, int]:
@@ -76,6 +89,11 @@ class Indexer(Logger):
 
     def run(self, single_file=None, dry_run: bool = False, progress_callback=None):
         entries = self.scan(single_file=single_file, progress_callback=progress_callback)
+
         if dry_run:
-            return {"indexed": 0, "updated": 0, "errors": 0, "found": len(entries)}
-        return self.index(entries)
+            return {"indexed": 0, "updated": 0, "errors": 0,
+                    "found": len(entries), "interrupted": self.interrupted}
+
+        stats = self.index(entries)
+        stats["interrupted"] = self.interrupted
+        return stats

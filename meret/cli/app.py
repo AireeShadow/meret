@@ -5,6 +5,7 @@ from typing import List, Optional
 from rich.console import Console
 from rich.table import Table
 from rich.tree import Tree
+from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from meret.core.indexer import Indexer
 from meret.core.repository import AbstractRepository
@@ -46,8 +47,23 @@ def scan(
         raise typer.Exit(1)
 
     indexer = Indexer(get_repo(db_path), library)
-    with console.status("Сканирую..."):
-        stats = indexer.run(dry_run=dry_run)
+
+    with Progress(
+        TextColumn("[cyan]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Сканирую", total=None)
+
+        def on_progress(done: int, total: int) -> None:
+            progress.update(task, total=total, completed=done)
+
+        stats = indexer.run(dry_run=dry_run, progress_callback=on_progress)
+
+    if stats.get("interrupted"):
+        console.print("[yellow]⚠ Прервано пользователем[/yellow]")
 
     if dry_run:
         console.print(f"[cyan]Найдено файлов: {stats['found']}[/cyan]")
