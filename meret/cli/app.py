@@ -7,7 +7,7 @@ from rich.table import Table
 from rich.tree import Tree
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
-from meret.core.indexer import Indexer
+from meret.core.indexer import PHASE_COLLECT, PHASE_EXTRACT, Indexer
 from meret.core.repository import AbstractRepository
 from meret.core.sqlite_repo import SQLiteRepository
 
@@ -55,10 +55,13 @@ def scan(
         TimeElapsedColumn(),
         console=console,
     ) as progress:
-        task = progress.add_task("Сканирую", total=None)
+        tasks = {
+            PHASE_COLLECT: progress.add_task("Ищу файлы", total=None),
+            PHASE_EXTRACT: progress.add_task("Читаю метаданные", total=None),
+        }
 
-        def on_progress(done: int, total: int) -> None:
-            progress.update(task, total=total, completed=done)
+        def on_progress(phase: str, done: int, total: int) -> None:
+            progress.update(tasks[phase], total=total, completed=done)
 
         stats = indexer.run(dry_run=dry_run, progress_callback=on_progress)
 
