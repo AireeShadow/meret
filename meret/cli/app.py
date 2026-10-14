@@ -235,6 +235,7 @@ def parent(
             console.print(f"[red]Нет такого пути: {new_parent}[/red]")
             raise typer.Exit(1)
 
+    # понятная диагностика: идём вверх от нового родителя и ищем наш тег
     by_id = {t.id: t for t in tags}
     walk = target
     while walk is not None:
@@ -244,7 +245,7 @@ def parent(
         walk = by_id.get(walk.parent_id)
 
     if not repo.set_tag_parent(node.name, target.name if target else None):
-        console.print("[red]Не получилось[/red]")
+        console.print("[red]Не получилось — возможно, вышел бы цикл[/red]")
         raise typer.Exit(1)
 
     console.print(f"[green]✓ {child} → {new_parent or 'корень'}[/green]")

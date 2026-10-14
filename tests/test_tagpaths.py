@@ -48,3 +48,13 @@ def test_path_of_survives_cycle():
     broken = [Tag(id=1, name="a", parent_id=2), Tag(id=2, name="b", parent_id=1)]
     by_id = {t.id: t for t in broken}
     assert tagpaths.path_of(broken[0], by_id) == "b/a"     # не зацикливаемся
+
+def test_resolve_falls_back_to_name(tags):
+    # «нуар» лежит по пути жанр/детектив/нуар — по имени тоже находим
+    assert tagpaths.resolve("нуар", tags).name == "нуар"
+    assert tagpaths.resolve("ЖАНР/Детектив/Нуар", tags).name == "нуар"
+    assert tagpaths.resolve("нет/такого", tags) is None
+
+
+def test_name_map(tags):
+    assert tagpaths.name_map(tags)["студия"].name == "студия"

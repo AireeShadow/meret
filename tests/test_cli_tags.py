@@ -16,11 +16,17 @@ def test_tag_new_builds_ancestors(tmp_path):
 
 def test_parent_rejects_cycle(tmp_path):
     db = tmp_path / "meret.db"
-    for path in ("a", "b", "c"):
-        runner.invoke(app, ["tag-new", path, "--db", str(db)])
-    runner.invoke(app, ["parent", "b", "a", "--db", str(db)])
-    runner.invoke(app, ["parent", "c", "b", "--db", str(db)])
 
-    result = runner.invoke(app, ["parent", "a", "c", "--db", str(db)])
-    assert result.exit_code == 1
-    assert "цикл" in result.output
+    for path in ("a", "b", "c"):
+        res = runner.invoke(app, ["tag-new", path, "--db", str(db)])
+        assert res.exit_code == 0, res.output
+
+    res = runner.invoke(app, ["parent", "b", "a", "--db", str(db)])
+    assert res.exit_code == 0, res.output
+
+    res = runner.invoke(app, ["parent", "c", "b", "--db", str(db)])
+    assert res.exit_code == 0, res.output
+
+    res = runner.invoke(app, ["parent", "a", "c", "--db", str(db)])
+    assert res.exit_code == 1, res.output
+    assert "цикл" in res.output

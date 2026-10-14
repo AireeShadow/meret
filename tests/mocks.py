@@ -78,12 +78,51 @@ class MockRepository(AbstractRepository):
         self._links = {(f, t) for (f, t) in self._links if f != file_id}
         return True
 
-    # ---------- tags ----------
-    def _is_ancestor(self, candidate: int, tag_id: int) -> bool:
+    # ---------- tags: связи с файлами ----------
+    def add_tag(self, file_id: int, tag: str, colour: Optional[str] = None) -> int:
+        tag_id = self._ensure_tag(tag, colour)
+        self._links.add((file_id, tag_id))
+        return tag_id
+
+    def remove_tag(self, file_id: int, tag: str) -> bool:
+        tag = self._find_tag(tag)
+        if not tag or (file_id, tag.id) not in self._links:
+            return False
+        self._links.discard((file_id, tag.id))
+        return True
+
+    def set_file_tags(self, file_id: int, tags: List[str]) -> bool:
+        self._links = {(f, t) for (f, t) in self._links if f != file_id}
+        for name in dict.fromkeys(tags):
+            self._links.add((file_id, self._ensure_tag(name)))
+        return True
+
+    def rename_tag(self, old: str, new: str) -> bool:
+        src = self._find_tag(old)
+        if not src:
+            return False
+        dst = self._find_tag(new)
+        if dst and dst.id != src.id:
+            for (f, t) in list(self._links):
+                if t == src.id:
+                    self._links.add((f, dst.id))
+            self._links = {(f, t) for (f, t) in self._links if t != src.id}
+            del self._tags[src.id]
+        else:
+            src.name = new
+        return True
+
+    # ---------- tags: создание и иерархия ----------
+    def _would_cycle(self, tag_id: int, parent_id: int) -> bool:
+        """True, если parent_id — сам tag_id или его потомок.
+
+        Идём вверх ОТ РОДИТЕЛЯ и ищем тег: наткнулись — родитель внутри
+        поддерева тега, перевешивание даст петлю.
+        """
         seen: Set[int] = set()
-        cur: Optional[int] = tag_id
+        cur: Optional[int] = parent_id
         while cur is not None and cur not in seen:
-            if cur == candidate:
+            if cur == tag_id:
                 return True
             seen.add(cur)
             tag = self._tags.get(cur)
@@ -117,10 +156,26 @@ class MockRepository(AbstractRepository):
             node.parent_id = None
             return True
         parent_tag = self._find_tag(parent)
-        if not parent_tag or self._is_ancestor(parent_tag.id, node.id):
+        if not parent_tag or self._would_cycle(node.id, parent_tag.id):
             return False
         node.parent_id = parent_tag.id
         return True
+
+    # ---------- tags: чтение ----------
+    def get_all_tags(self) -> List[Tag]:
+        return sorted(
+            (t.model_copy() for t in self._tags.values()),
+            key=lambda t: t.name.casefold(),
+        )
+
+    def get_tag_usage(self, limit: int = 100) -> List[Tag]:
+        tags = []
+        for tag in self._tags.values():
+            clone = tag.model_copy()
+            clone.usage_count = self._usage(tag.id)
+            tags.append(clone)
+        tags.sort(key=lambda t: (-t.usage_count, t.name.casefold()))
+        return tags[:limit]
 
     def get_tag_tree(self) -> List[TagNode]:
         nodes = {
