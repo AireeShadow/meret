@@ -153,7 +153,12 @@ class VideoExtractor(MetadataExtractor):
         result = subprocess.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json",
              "-show_format", "-show_streams", str(file_path)],
-            capture_output=True, text=True, check=True, timeout=30
+            capture_output=True,
+            text=True,
+            encoding="utf-8",       
+            errors="replace",       
+            check=True,
+            timeout=30,
         )
         return json.loads(result.stdout)
     
@@ -210,10 +215,15 @@ class AudioExtractor(MetadataExtractor):
     @staticmethod
     def _probe(file_path: Path) -> Dict[str, Any]:
         result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
-             "-show_format", "-show_streams", str(file_path)],
-            capture_output=True, text=True, check=True, timeout=30
-        )
+                    ["ffprobe", "-v", "quiet", "-print_format", "json",
+                     "-show_format", "-show_streams", str(file_path)],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",       
+                    errors="replace",       
+                    check=True,
+                    timeout=30,
+                )
         return json.loads(result.stdout)
 
 
