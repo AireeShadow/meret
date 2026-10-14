@@ -159,20 +159,12 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         BaseFileSystemOperations,
         FileSystem,
     )
-    from winfspy.plumbing import lib, ffi
+    from winfspy.plumbing import lib, ffi, NTSTATUS, NTStatusError
     from winfspy.plumbing.security_descriptor import SecurityDescriptor
 
     _SD = SecurityDescriptor.from_string("O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)")
 
     class MeretOperations(BaseFileSystemOperations):
-        def __init__(self) -> None:
-            super().__init__()
-            # Все выданные хендлы держим живыми: WinFsp умеет позвать Close
-            # повторно с тем же указателем, а winfspy в ll_close делает
-            # `del self._opened_objs[...]` и освобождает хендл. Без этого
-            # повторный Close читает освобождённую память → Py_FatalError.
-            self._alive: dict[object, object] = {}
-
         # ---------- отладка (MERET_DEBUG=1) ----------
 
         def _log(self, msg: str) -> None:
@@ -183,43 +175,40 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         def _addr(handle) -> int:
             return int(ffi.cast("size_t", handle))
 
-        def _remember(self, p_file_context) -> None:
-            """Запоминает cdata-владельца хендла, чтобы GC его не съел."""
-            handle = p_file_context[0]
-            if handle == ffi.NULL:
-                return
-            for key in self._opened_objs:
-                if key == handle:          # cdata сравниваются по адресу
-                    self._alive[handle] = key
-                    return
-
         def ll_create(self, *args):
             status = super().ll_create(*args)
-            self._remember(args[-2])
             self._log(f"ll_create -> status={status:#x} ctx={self._addr(args[-2][0]):#x}")
             return status
 
         def ll_open(self, *args):
             status = super().ll_open(*args)
-            self._remember(args[-2])
             self._log(f"ll_open   -> status={status:#x} ctx={self._addr(args[-2][0]):#x}")
             return status
 
         def ll_close(self, file_context):
-            known = file_context in self._opened_objs
-            revived = False
-            if not known:
-                key = self._alive.get(file_context)
-                if key is not None:
-                    # повторный Close: возвращаем ключ, иначе `del` в super()
-                    # упадёт с KeyError
-                    self._opened_objs[key] = {}
-                    revived = True
-            self._log(
-                f"ll_close  <- ptr={self._addr(file_context):#x} "
-                f"known={known} revived={revived}"
-            )
-            return super().ll_close(file_context)
+            """Свой ll_close вместо winfspy-евского.
+
+            winfspy делает `del self._opened_objs[file_context]` — это
+            единственная ссылка на cdata-хендл, и он освобождается. А WinFsp
+            умеет позвать Close повторно (и из разных потоков) → from_handle
+            читает освобождённую память → Py_FatalError. Плюс сам `del`
+            гоняется с параллельным Close → KeyError.
+
+            Поэтому записи не удаляем: `_opened_objs` = реестр всех выданных
+            хендлов, и они живут до конца процесса.
+            """
+            if file_context not in self._opened_objs:
+                # указатель нам не знаком — пусть решает winfspy
+                return super().ll_close(file_context)
+
+            self._log(f"ll_close  <- ptr={self._addr(file_context):#x}")
+            try:
+                self.close(ffi.from_handle(file_context))
+            except NTStatusError as exc:
+                return exc.value
+            except Exception:  # noqa: BLE001
+                return NTSTATUS.STATUS_UNEXPECTED_IO_ERROR
+            return NTSTATUS.STATUS_SUCCESS
         
         def get_volume_info(self):
             return {
