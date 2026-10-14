@@ -1,3 +1,5 @@
+0.3.4 - adding an option to skip existing files
+0.3.3 - fix for automatic db creation
 0.3.2 - shitload of tag fixes and fixes in the tests
 0.3.1 - added lost lines
 0.3.0 - initial tag hierarchy

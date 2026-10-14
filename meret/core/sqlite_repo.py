@@ -1,7 +1,7 @@
 import json
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Set, Optional
 
 from meret.core.logger import Logger
 from meret.core.models import FileEntry, FileType, Tag, TagNode
@@ -479,3 +479,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             by_type = dict(conn.execute("SELECT type, COUNT(*) FROM files GROUP BY type"))
             tags = conn.execute("SELECT COUNT(*) FROM tags").fetchone()[0]
             return {"total_files": total, "by_type": by_type, "total_tags": tags}
+
+    def known_paths(self) -> Set[str]:
+        with self._connect() as conn:
+            return {row[0] for row in conn.execute("SELECT filepath FROM files")}

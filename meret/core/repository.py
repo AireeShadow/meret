@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Set, Optional
 
 from meret.core.models import FileEntry, Tag, TagNode
 
@@ -87,3 +87,11 @@ class AbstractRepository(ABC):
 
     @abstractmethod
     def get_stats(self) -> dict: ...
+
+    @abstractmethod
+    def known_paths(self) -> Set[str]:
+        """Все пути, уже известные базе.
+
+        Один запрос на весь скан — чтобы инкрементальный режим не делал
+        SELECT на каждый файл (иначе та же история, что была с записью).
+        """
