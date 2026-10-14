@@ -5,6 +5,10 @@
 
 Почему путь: CLI и виртуальная ФС показывают иерархию папками,
 и «жанр/детектив» однозначнее, чем «перевесь детектив под жанр».
+
+Имена тегов глобально уникальны, поэтому resolve принимает и полный путь,
+и просто имя: после `parent b a` путь тега `b` становится `a/b`, и по имени
+его всё равно надо находить.
 """
 
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
@@ -43,6 +47,11 @@ def path_of(tag: Tag, by_id: Dict[int, Tag]) -> str:
     return SEP.join(reversed(names))
 
 
+def name_map(tags: Iterable[Tag]) -> Dict[str, Tag]:
+    """{имя_в_нижнем_регистре: Tag}."""
+    return {t.name.casefold(): t for t in tags}
+
+
 def path_map(tags: Iterable[Tag]) -> Dict[str, Tag]:
     """{'жанр/детектив': Tag}. Ключи в нижнем регистре."""
     tags = list(tags)
@@ -56,8 +65,14 @@ def name_to_path(tags: Iterable[Tag]) -> Dict[str, str]:
 
 
 def resolve(path: str, tags: Iterable[Tag]) -> Optional[Tag]:
-    """Тег по пути, регистр не важен. None — если нет."""
-    return path_map(tags).get(normalize(path).casefold())
+    """Тег по полному пути ИЛИ по имени. Регистр не важен. None — если нет.
+
+    Сначала пробуем путь (он точнее), потом имя — имена всё равно уникальны,
+    а после перевешивания тег перестаёт быть корневым и его путь меняется.
+    """
+    tags = list(tags)
+    key = normalize(path).casefold()
+    return path_map(tags).get(key) or name_map(tags).get(key)
 
 
 def missing_ancestors(path: str, tags: Iterable[Tag]) -> List[str]:
@@ -73,7 +88,7 @@ def missing_ancestors(path: str, tags: Iterable[Tag]) -> List[str]:
 
 
 def subtree_names(path: str, tags: Iterable[Tag]) -> List[str]:
-    """Имя тега по пути и всех его потомков (для поиска по ветке)."""
+    """Имя тега по пути/имени и всех его потомков (для поиска по ветке)."""
     tags = list(tags)
     node = resolve(path, tags)
     if node is None:

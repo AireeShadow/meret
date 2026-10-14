@@ -201,5 +201,7 @@ def test_prune_keeps_parent_of_children(repo):
     repo.set_tag_parent("детектив", "жанр")
     repo.add_tag(fid, "лишний")
     repo.remove_tag(fid, "лишний")
-    assert repo.prune_orphan_tags() == 1          # только «лишний»
-    assert sorted(t.name for t in repo.get_all_tags()) == ["детектив", "жанр"]
+
+    # уходят «лишний» и пустой лист «детектив»; «жанр» выживает как родитель
+    assert repo.prune_orphan_tags() == 2
+    assert [t.name for t in repo.get_all_tags()] == ["жанр"]

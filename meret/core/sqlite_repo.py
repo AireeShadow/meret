@@ -50,7 +50,35 @@ class SQLiteRepository(AbstractRepository, Logger):
                         self.logger.warning(f"FTS5 unavailable: {e}")
                     else:
                         raise
+            self._migrate_name_key(conn)
             conn.commit()
+
+    def _migrate_name_key(self, conn) -> None:
+        """Доводит старую БД до схемы с name_key.
+
+        COLLATE NOCASE в SQLite сворачивает только ASCII, поэтому «жанр» и
+        «ЖАНР» для неё разные. Регистронезависимость делаем сами: колонка
+        name_key = name.casefold(), и все поиски идут по ней.
+        """
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(tags)")}
+        if "name_key" not in cols:
+            conn.execute("ALTER TABLE tags ADD COLUMN name_key TEXT")
+
+        rows = conn.execute(
+            "SELECT id, name FROM tags WHERE name_key IS NULL OR name_key = ''"
+        ).fetchall()
+        for row in rows:
+            conn.execute(
+                "UPDATE tags SET name_key = ? WHERE id = ?",
+                (row["name"].casefold(), row["id"]),
+            )
+
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_key ON tags(name_key)"
+            )
+        except sqlite3.OperationalError as e:
+            self.logger.warning(f"дубли по name_key, уникальный индекс не создан: {e}")
 
     # ---------- конвертация ----------
     @staticmethod
@@ -130,26 +158,37 @@ class SQLiteRepository(AbstractRepository, Logger):
 
     # ---------- теги: поиск и связи ----------
     def _tag_id(self, conn, name: str) -> Optional[int]:
-        row = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()
+        row = conn.execute(
+            "SELECT id FROM tags WHERE name_key = ?", (name.casefold(),)
+        ).fetchone()
         return row["id"] if row else None
 
     def _ensure_tag(self, conn, name: str, colour: Optional[str] = None) -> int:
         """Возвращает id тега, создавая при необходимости."""
         conn.execute(
-            "INSERT OR IGNORE INTO tags (name, colour) VALUES (?, ?)", (name, colour)
+            "INSERT OR IGNORE INTO tags (name, name_key, colour) VALUES (?, ?, ?)",
+            (name, name.casefold(), colour),
         )
-        row = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()
+        row = conn.execute(
+            "SELECT id FROM tags WHERE name_key = ?", (name.casefold(),)
+        ).fetchone()
         return row["id"]
 
-    def _is_ancestor(self, conn, candidate: int, tag_id: int) -> bool:
-        """True, если candidate — сам tag_id или кто-то из его предков."""
+    def _would_cycle(self, conn, tag_id: int, parent_id: int) -> bool:
+        """True, если parent_id — сам tag_id или его потомок.
+
+        Идём вверх ОТ РОДИТЕЛЯ и ищем тег: если наткнулись — родитель лежит
+        внутри поддерева тега, и перевешивание даст петлю.
+        """
         seen: set[int] = set()
-        cur: Optional[int] = tag_id
+        cur: Optional[int] = parent_id
         while cur is not None and cur not in seen:
-            if cur == candidate:
+            if cur == tag_id:
                 return True
             seen.add(cur)
-            row = conn.execute("SELECT parent_id FROM tags WHERE id = ?", (cur,)).fetchone()
+            row = conn.execute(
+                "SELECT parent_id FROM tags WHERE id = ?", (cur,)
+            ).fetchone()
             cur = row["parent_id"] if row else None
         return False
 
@@ -168,8 +207,8 @@ class SQLiteRepository(AbstractRepository, Logger):
             cur = conn.execute(
                 """DELETE FROM file_tags
                    WHERE file_id = ?
-                     AND tag_id = (SELECT id FROM tags WHERE name = ?)""",
-                (file_id, tag),
+                     AND tag_id = (SELECT id FROM tags WHERE name_key = ?)""",
+                (file_id, tag.casefold()),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -189,10 +228,14 @@ class SQLiteRepository(AbstractRepository, Logger):
     def rename_tag(self, old: str, new: str) -> bool:
         """Переименование = ОДНА строка. Если new существует — слияние."""
         with self._connect() as conn:
-            src = conn.execute("SELECT id FROM tags WHERE name = ?", (old,)).fetchone()
+            src = conn.execute(
+                "SELECT id FROM tags WHERE name_key = ?", (old.casefold(),)
+            ).fetchone()
             if not src:
                 return False
-            dst = conn.execute("SELECT id FROM tags WHERE name = ?", (new,)).fetchone()
+            dst = conn.execute(
+                "SELECT id FROM tags WHERE name_key = ?", (new.casefold(),)
+            ).fetchone()
 
             if dst and dst["id"] != src["id"]:
                 conn.execute(
@@ -203,7 +246,10 @@ class SQLiteRepository(AbstractRepository, Logger):
                 conn.execute("DELETE FROM file_tags WHERE tag_id = ?", (src["id"],))
                 conn.execute("DELETE FROM tags WHERE id = ?", (src["id"],))
             else:
-                conn.execute("UPDATE tags SET name = ? WHERE id = ?", (new, src["id"]))
+                conn.execute(
+                    "UPDATE tags SET name = ?, name_key = ? WHERE id = ?",
+                    (new, new.casefold(), src["id"]),
+                )
             conn.commit()
             return True
 
@@ -212,7 +258,10 @@ class SQLiteRepository(AbstractRepository, Logger):
         with self._connect() as conn:
             if self._tag_id(conn, name) is not None:
                 return False
-            conn.execute("INSERT INTO tags (name, colour) VALUES (?, ?)", (name, colour))
+            conn.execute(
+                "INSERT INTO tags (name, name_key, colour) VALUES (?, ?, ?)",
+                (name, name.casefold(), colour),
+            )
             conn.commit()
             return True
 
@@ -245,7 +294,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                 parent_id = self._tag_id(conn, parent)
                 if parent_id is None:
                     return False
-                if self._is_ancestor(conn, parent_id, tag_id):
+                if self._would_cycle(conn, tag_id, parent_id):
                     return False          # был бы цикл
 
             conn.execute(
@@ -258,16 +307,17 @@ class SQLiteRepository(AbstractRepository, Logger):
     def get_all_tags(self) -> List[Tag]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, name, colour, parent_id FROM tags ORDER BY name COLLATE NOCASE"
+                "SELECT id, name, colour, parent_id FROM tags ORDER BY name_key"
             ).fetchall()
             return [Tag(**dict(r)) for r in rows]
 
     def get_tag_usage(self, limit: int = 100) -> List[Tag]:
         with self._connect() as conn:
             rows = conn.execute(
-                """SELECT t.id, t.name, t.colour, t.parent_id, COUNT(ft.file_id) AS usage_count
+                """SELECT t.id, t.name, t.colour, t.parent_id,
+                          COUNT(ft.file_id) AS usage_count
                    FROM tags t LEFT JOIN file_tags ft ON ft.tag_id = t.id
-                   GROUP BY t.id ORDER BY usage_count DESC, t.name LIMIT ?""",
+                   GROUP BY t.id ORDER BY usage_count DESC, t.name_key LIMIT ?""",
                 (limit,),
             ).fetchall()
             return [Tag(**dict(r)) for r in rows]
@@ -333,3 +383,52 @@ class SQLiteRepository(AbstractRepository, Logger):
                 return [self._row_to_file(r) for r in conn.execute(sql, params).fetchall()]
 
         placeholders = ",".join("?" for _ in tags)
+
+        # t и ft уже приджойнены внутри _SELECT_FILES — добавлять JOIN не нужно
+        sql = f"{self._SELECT_FILES} WHERE t.name_key IN ({placeholders})"
+        params = [t.casefold() for t in tags]
+
+        if file_type:
+            sql += " AND f.type = ?"
+            params.append(file_type)
+
+        sql += " GROUP BY f.id"
+        if match_all:
+            sql += " HAVING COUNT(DISTINCT t.id) = ?"
+            params.append(len(tags))
+
+        sql += " LIMIT ?"
+        params.append(limit)
+
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+            return [self._row_to_file(r) for r in rows]
+
+    def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]:
+        with self._connect() as conn:
+            if self.fts_enabled and query.strip():
+                # FTS5: префиксный поиск по словам
+                safe = " ".join(f'"{w}"*' for w in query.split())
+                rows = conn.execute(
+                    f"""{self._SELECT_FILES}
+                        JOIN files_fts fts ON fts.rowid = f.id
+                        WHERE files_fts MATCH ?
+                        GROUP BY f.id LIMIT ?""",
+                    (safe, limit),
+                ).fetchall()
+                if rows:
+                    return [self._row_to_file(r) for r in rows]
+
+            # fallback: подстрока
+            rows = conn.execute(
+                f"{self._SELECT_FILES} WHERE f.filename LIKE ? GROUP BY f.id LIMIT ?",
+                (f"%{query}%", limit),
+            ).fetchall()
+            return [self._row_to_file(r) for r in rows]
+
+    def get_stats(self) -> dict:
+        with self._connect() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+            by_type = dict(conn.execute("SELECT type, COUNT(*) FROM files GROUP BY type"))
+            tags = conn.execute("SELECT COUNT(*) FROM tags").fetchone()[0]
+            return {"total_files": total, "by_type": by_type, "total_tags": tags}
