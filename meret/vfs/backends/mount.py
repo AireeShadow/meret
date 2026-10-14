@@ -3,20 +3,22 @@
 Linux/macOS — libfuse через fusepy.
 Windows     — WinFsp через winfspy.
 
+Контракт winfspy (важно!)
+-------------------------
+``ll_open`` / ``ll_create`` делают ``ffi.new_handle(cooked_file_context)`` —
+значит, что вернул из ``open``/``create``, то и станет контекстом файла.
+Никакой распаковки кортежа нет: возвращаем САМ объект контекста.
+
 Остановка монтирования (Windows)
 --------------------------------
 ``FileSystem.stop()`` вызывает ``FspFileSystemStopDispatcher``, который ждёт
 завершения всех выданных драйвером IRP. Пока Проводник держит окно с буквой
 диска, IRP приходят непрерывно, и stop() может висеть бесконечно. Поэтому:
 
-1. перед stop() снимаем точку монтирования (``FspFileSystemRemoveMountPoint``)
-   — Проводник теряет том и перестаёт слать новые запросы;
-2. stop() выполняется в отдельном потоке, главный поток ждёт его с таймаутом
-   (значит, главный поток не держит GIL внутри C-вызова);
-3. повторный Ctrl+C — принудительный ``os._exit(0)``.
-
-У winfspy нет демонизации: ``start()`` возвращает управление сразу, поэтому
-ожидание сигнала здесь всегда блокирующее, независимо от ``foreground``.
+1. перед stop() снимаем точку монтирования (``FspFileSystemRemoveMountPoint``);
+2. stop() выполняется в отдельном потоке, главный ждёт его с таймаутом;
+3. страховочный watchdog-поток делает ``os._exit(0)`` безусловно;
+4. повторный Ctrl+C (или Enter) — выход немедленно.
 """
 
 import errno
@@ -62,6 +64,23 @@ def _install_signal_handlers(handler) -> None:
         except ValueError:
             # mount() позвали не из главного потока — сигналы не наши
             pass
+
+
+def _watch_stdin(is_done, on_quit) -> None:
+    """Enter в терминале = выход.
+
+    Страховка на случай, когда Ctrl+C перехватывает консоль
+    (QuickEdit в conhost, выделение текста в Windows Terminal).
+    """
+    try:
+        while not is_done():
+            line = sys.stdin.readline()
+            if line == "":
+                return          # stdin закрыт — молча выходим из потока
+            on_quit()
+            return
+    except Exception:  # noqa: BLE001
+        return
 
 
 # ---------- Linux / macOS ----------
@@ -154,14 +173,24 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             attrs = FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY if node.is_dir else 0
             return attrs, _SD.handle, _SD.size
 
+        def get_security(self, file_context):
+            # Без этой реализации winfspy кидает NotImplementedError на QuerySecurity.
+            return _SD.handle, _SD.size
+
         def _context(self, vpath: str) -> dict:
+            """Контекст открытого хендла. Возвращаем ЕГО, а не кортеж."""
             node = tree.stat(vpath)
-            return {"is_dir": node.is_dir, "size": node.size, "path": vpath}
+            return {
+                "is_dir": node.is_dir,
+                "size": node.size,
+                "path": vpath,
+                "data": None,   # ленивый кэш содержимого
+            }
 
         def open(self, file_name, create_options, granted_access):
             vpath = _norm_windows_path(file_name)
             try:
-                return 0, self._context(vpath)
+                return self._context(vpath)
             except NotFound:
                 raise NTStatusObjectNameNotFound()
 
@@ -180,11 +209,18 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             """
             vpath = _norm_windows_path(file_name)
             try:
-                return 0, self._context(vpath)
+                return self._context(vpath)
             except NotFound:
                 raise NTStatusMediaWriteProtected()
 
         def close(self, file_context):
+            return None
+
+        def cleanup(self, file_context, file_name, flags):
+            # Вызывается при закрытии хендла. Мы read-only — ничего не делаем.
+            return None
+
+        def flush(self, file_context):
             return None
 
         def _info(self, node):
@@ -202,7 +238,11 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             }
 
         def get_file_info(self, file_context):
-            return self._info(tree.stat(file_context["path"]))
+            try:
+                node = tree.stat(file_context["path"])
+            except NotFound:
+                raise NTStatusObjectNameNotFound()
+            return self._info(node)
 
         def read_directory(self, file_context, marker):
             if not file_context["is_dir"]:
@@ -229,7 +269,12 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             return []
 
         def read(self, file_context, offset, length):
-            data = tree.read(file_context["path"])
+            data = file_context["data"]
+            if data is None:
+                # tree.read() читает файл целиком; Проводник читает по 64 КБ,
+                # поэтому кэшируем на время жизни хендла.
+                data = tree.read(file_context["path"])
+                file_context["data"] = data
             if offset >= len(data):
                 raise NTStatusEndOfFile()
             return data[offset:offset + length]
@@ -273,28 +318,65 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         finally:
             stopped.set()
 
-    def _on_signal(signum, frame) -> None:
-        if shutdown.is_set():
-            print("\nmeret: выхожу принудительно")
+    def _start_watchdog() -> None:
+        """Гарантированный выход: даже если главный поток залип — умрём."""
+
+        def _watchdog() -> None:
+            if not stopped.wait(STOP_GRACE_SECONDS):
+                print(
+                    f"\nmeret: ФС не остановилась за {STOP_GRACE_SECONDS:g} с — "
+                    "выхожу принудительно",
+                    file=sys.stderr,
+                )
             _flush_streams()
             os._exit(0)
 
+        threading.Thread(target=_watchdog, name="meret-watchdog", daemon=True).start()
+
+    def _request_shutdown(reason: str) -> None:
+        if shutdown.is_set():
+            print(f"\nmeret: {reason} — выхожу принудительно")
+            _flush_streams()
+            os._exit(0)
+
+        print(
+            f"\nmeret: {reason} — останавливаю ФС "
+            "(Ctrl+C или Enter ещё раз — выйти сразу)",
+            flush=True,
+        )
         shutdown.set()
-        print("\nmeret: останавливаю ФС… (Ctrl+C ещё раз — выйти немедленно)")
         threading.Thread(target=_stop, name="meret-stop", daemon=True).start()
+        _start_watchdog()
 
     try:
         fs.start()
     except KeyboardInterrupt:
-        # Сигнал прилетел во время старта — там ещё нет наших хендлеров.
+        # Сигнал прилетел во время старта — наших хендлеров там ещё нет.
         _flush_streams()
         try:
             fs.stop()
         except Exception:  # noqa: BLE001
             pass
         os._exit(0)
+    except BaseException:
+        # Старт упал: диспетчер мог успеть запуститься — прибираем за собой.
+        _flush_streams()
+        try:
+            fs.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        raise
 
-    _install_signal_handlers(_on_signal)
+    _install_signal_handlers(lambda signum, frame: _request_shutdown("сигнал получен"))
+
+    # Enter в терминале — второй, независимый от сигналов способ выхода.
+    if sys.stdin is not None and sys.stdin.isatty():
+        threading.Thread(
+            target=_watch_stdin,
+            args=(shutdown.is_set, lambda: _request_shutdown("Enter нажат")),
+            name="meret-stdin",
+            daemon=True,
+        ).start()
 
     try:
         while not shutdown.is_set():
