@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Callable, Dict, List, Optional
 
 from meret.core.models import FileEntry, Tag, TagNode
 
@@ -16,6 +16,19 @@ class AbstractRepository(ABC):
 
     @abstractmethod
     def save_file(self, file: FileEntry) -> int: ...
+
+    @abstractmethod
+    def save_files(
+        self,
+        files: List[FileEntry],
+        chunk_size: int = 1000,
+        on_progress: Optional[Callable[[int, int], None]] = None,
+    ) -> Dict[str, int]:
+        """Пакетная запись: одна транзакция на chunk_size файлов.
+
+        Возвращает {"indexed": n, "updated": m, "errors": k}.
+        on_progress(done, total) — вызывается после каждого чанка.
+        """
 
     @abstractmethod
     def delete_file(self, file_id: int) -> bool: ...

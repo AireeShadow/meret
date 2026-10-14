@@ -8,7 +8,7 @@ from rich.tree import Tree
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from meret.core import tagpaths
-from meret.core.indexer import PHASE_COLLECT, PHASE_EXTRACT, Indexer
+from meret.core.indexer import PHASE_COLLECT, PHASE_EXTRACT, PHASE_INDEX, Indexer
 from meret.core.repository import AbstractRepository
 
 from meret.cli.deps import get_repo, resolve_db_path
@@ -19,34 +19,34 @@ console = Console()
 
 @app.command()
 def init(
-    path: Path = typer.Argument(..., help="Каталог или файл БД"),
-    force: bool = False,
+    path: Optional[Path] = typer.Argument(None, help="Каталог для базы или путь к .db"),
+    force: bool = typer.Option(False, "--force", "-f", help="Пересоздать, если есть"),
 ):
     """Создать базу."""
     db_file = resolve_db_path(path)
 
-    if db_file.exists() and not force:
-        console.print(f"[yellow]БД уже есть: {db_file}[/yellow]")
-        raise typer.Exit(1)
-    if force and db_file.exists():
+    if db_file.exists():
+        if not force:
+            console.print(f"[yellow]БД уже есть: {db_file}[/yellow]")
+            raise typer.Exit(1)
         db_file.unlink()
 
-    get_repo(path)
+    get_repo(path, create=True)
     console.print(f"[green]✓ База создана: {db_file}[/green]")
-
 
 @app.command()
 def scan(
     library: Path = typer.Argument(..., help="Что сканировать"),
-    db_path: Path = typer.Option(Path("."), "--db", "-d"),
+    db_path: Optional[Path] = typer.Option(None, "--db", "-d", help="Каталог с базой или путь к .db"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n"),
+    workers: int = typer.Option(8, "--workers", "-w", help="Потоков на чтение метаданных"),
 ):
     """Просканировать и проиндексировать медиа."""
     if not library.exists():
         console.print(f"[red]Нет такого пути: {library}[/red]")
         raise typer.Exit(1)
 
-    indexer = Indexer(get_repo(db_path), library)
+    indexer = Indexer(get_repo(db_path), library, workers=workers)
 
     with Progress(
         TextColumn("[cyan]{task.description}"),
@@ -58,6 +58,7 @@ def scan(
         tasks = {
             PHASE_COLLECT: progress.add_task("Ищу файлы", total=None),
             PHASE_EXTRACT: progress.add_task("Читаю метаданные", total=None),
+            PHASE_INDEX: progress.add_task("Пишу в базу", total=None),
         }
 
         def on_progress(phase: str, done: int, total: int) -> None:
@@ -291,6 +292,13 @@ def stats(db_path: Path = typer.Option(Path("."), "--db", "-d")):
     console.print(f"Файлов: {s['total_files']}, тегов: {s['total_tags']}")
     for t, c in s["by_type"].items():
         console.print(f"  {t}: {c}")
+
+@app.command()
+def where(db_path: Optional[Path] = typer.Option(None, "--db", "-d")):
+    """Показать, какую базу видит meret."""
+    path = resolve_db_path(db_path)
+    mark = "[green]✓ есть[/green]" if path.exists() else "[red]✗ нет[/red]"
+    console.print(f"{path}  {mark}")
 
 
 if __name__ == "__main__":

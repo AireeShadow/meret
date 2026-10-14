@@ -1,7 +1,7 @@
 import json
 import sqlite3
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from meret.core.logger import Logger
 from meret.core.models import FileEntry, FileType, Tag, TagNode
@@ -29,6 +29,16 @@ class SQLiteRepository(AbstractRepository, Logger):
         self.db_path = str(db_path)
         self.fts_enabled = True
         self._init_tables()
+        self._SAVE_FILE_SQL = """
+            INSERT INTO files (filepath, filename, rating, type, metadata)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(filepath) DO UPDATE SET
+                filename = excluded.filename,
+                rating = excluded.rating,
+                type = excluded.type,
+                metadata = excluded.metadata,
+                updated_at = CURRENT_TIMESTAMP
+        """
 
     # ---------- соединение ----------
     def _connect(self) -> sqlite3.Connection:
@@ -36,6 +46,7 @@ class SQLiteRepository(AbstractRepository, Logger):
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")   # меньше блокировок
+        conn.execute("PRAGMA synchronous = NORMAL")  # fsync не на каждый commit
         return conn
 
     def _init_tables(self) -> None:
@@ -124,22 +135,13 @@ class SQLiteRepository(AbstractRepository, Logger):
     def save_file(self, file: FileEntry) -> int:
         with self._connect() as conn:
             cur = conn.execute(
-                """
-                INSERT INTO files (filepath, filename, rating, type, metadata)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(filepath) DO UPDATE SET
-                    filename = excluded.filename,
-                    rating = excluded.rating,
-                    type = excluded.type,
-                    metadata = excluded.metadata,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
+                self._SAVE_FILE_SQL,
                 (
                     file.filepath,
                     file.filename,
                     file.rating,
                     file.type.value,
-                    json.dumps(file.metadata) if file.metadata else None,
+                    json.dumps(file.metadata, ensure_ascii=False) if file.metadata else None,
                 ),
             )
             conn.commit()
@@ -149,6 +151,51 @@ class SQLiteRepository(AbstractRepository, Logger):
                 "SELECT id FROM files WHERE filepath = ?", (file.filepath,)
             ).fetchone()
             return row["id"]
+
+    def save_files(
+        self,
+        files: List[FileEntry],
+        chunk_size: int = 1000,
+        on_progress=None,
+    ) -> Dict[str, int]:
+        """Пачка файлов: одно соединение, транзакция на чанк, executemany."""
+        stats = {"indexed": 0, "updated": 0, "errors": 0}
+        if not files:
+            return stats
+
+        total = len(files)
+        with self._connect() as conn:
+            known = {row[0] for row in conn.execute("SELECT filepath FROM files")}
+
+            for start in range(0, total, chunk_size):
+                part = files[start:start + chunk_size]
+                rows = []
+                for entry in part:
+                    try:
+                        meta = (
+                            json.dumps(entry.metadata, ensure_ascii=False)
+                            if entry.metadata else None
+                        )
+                    except (TypeError, ValueError) as e:
+                        stats["errors"] += 1
+                        meta = None
+                        self.logger.error(f"metadata не сериализуется: {entry.filepath}: {e}")
+                    rows.append(
+                        (entry.filepath, entry.filename, entry.rating, entry.type.value, meta)
+                    )
+
+                conn.executemany(self._SAVE_FILE_SQL, rows)
+                conn.commit()
+
+                new = sum(1 for e in part if e.filepath not in known)
+                stats["indexed"] += new
+                stats["updated"] += len(part) - new
+                known.update(e.filepath for e in part)
+
+                if on_progress:
+                    on_progress(min(start + chunk_size, total), total)
+
+        return stats
 
     def delete_file(self, file_id: int) -> bool:
         with self._connect() as conn:
