@@ -71,6 +71,17 @@ class MockRepository(AbstractRepository):
         self._files[file.id] = file.model_copy(deep=True)
         return file.id
 
+    def save_files(self, files, chunk_size: int = 1000, on_progress=None) -> Dict[str, int]:
+        stats = {"indexed": 0, "updated": 0, "errors": 0}
+        total = len(files)
+        for i, entry in enumerate(files, start=1):
+            existed = self.get_file_by_path(entry.filepath) is not None
+            self.save_file(entry)
+            stats["updated" if existed else "indexed"] += 1
+            if on_progress and (i % chunk_size == 0 or i == total):
+                on_progress(i, total)
+        return stats
+
     def delete_file(self, file_id: int) -> bool:
         if file_id not in self._files:
             return False

@@ -15,6 +15,7 @@ from meret.core.repository import AbstractRepository
 
 PHASE_COLLECT = "collect"
 PHASE_EXTRACT = "extract"
+PHASE_INDEX = "index"
 
 
 class Indexer(Logger):
@@ -24,12 +25,14 @@ class Indexer(Logger):
         self,
         repository: AbstractRepository,
         library_path: str | Path,
-        workers: int = 4,
+        workers: int = 8,
+        chunk_size: int = 1000,
     ) -> None:
         super().__init__()
         self.repo = repository
         self.library = Path(library_path)
         self.workers = max(1, workers)
+        self.chunk_size = max(1, chunk_size)
         self.registry = ExtractorRegistry()
         self.interrupted = False
 
@@ -124,17 +127,18 @@ class Indexer(Logger):
 
     # ---------- запись ----------
 
-    def index(self, entries: List[FileEntry]) -> Dict[str, int]:
-        stats = {"indexed": 0, "updated": 0, "errors": 0}
-        for entry in entries:
-            try:
-                exists = self.repo.get_file_by_path(entry.filepath) is not None
-                self.repo.save_file(entry)
-                stats["updated" if exists else "indexed"] += 1
-            except Exception as e:
-                stats["errors"] += 1
-                self.logger.error(f"Failed to index {entry.filepath}: {e}")
-        return stats
+    def index(self, entries: List[FileEntry], progress_callback=None) -> Dict[str, int]:
+        """ЭТАП 3: записать в БД пачками. Одна транзакция на chunk_size файлов."""
+        if not entries:
+            return {"indexed": 0, "updated": 0, "errors": 0}
+
+        def on_chunk(done: int, total: int) -> None:
+            if progress_callback:
+                progress_callback(PHASE_INDEX, done, total)
+
+        return self.repo.save_files(
+            entries, chunk_size=self.chunk_size, on_progress=on_chunk
+        )
 
     # ---------- оркестрация ----------
 
@@ -155,6 +159,6 @@ class Indexer(Logger):
                 "found": len(entries), "interrupted": self.interrupted,
             }
 
-        stats = self.index(entries)
+        stats = self.index(entries, progress_callback=progress_callback)
         stats["interrupted"] = self.interrupted
         return stats
