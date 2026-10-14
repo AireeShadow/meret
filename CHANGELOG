@@ -1,3 +1,4 @@
+0.3.5 - logic refactoring
 0.3.4 - adding an option to skip existing files
 0.3.3 - fix for automatic db creation
 0.3.2 - shitload of tag fixes and fixes in the tests

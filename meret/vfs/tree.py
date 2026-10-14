@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from meret.core import tagpaths
 from meret.core.models import FileEntry, Tag
 from meret.core.repository import AbstractRepository
-from meret.vfs.errors import IsADirectory, NotFound   # ← было локально
+from meret.vfs.errors import IsADirectory, NotFound
 
 _FORBIDDEN = '/\\:*?"<>|'
 _SAFE_SUB = "∕"  # U+2215 DIVISION SLASH
@@ -53,25 +54,35 @@ class VirtualTree:
 
     # ---------- индекс тегов ----------
 
-    def _tag_index(self) -> Dict[Tuple[Optional[int], str], Tag]:
-        """{(parent_id, имя_в_нижнем_регистре): tag} — для быстрого поиска."""
-        index: Dict[Tuple[Optional[int], str], Tag] = {}
-        for tag in self.repo.get_all_tags():
-            index[(tag.parent_id, sanitize(tag.name).casefold())] = tag
-        return index
+    def _tag_index(
+        self, tags: Optional[List[Tag]] = None
+    ) -> Dict[Tuple[Optional[int], str], Tag]:
+        """{(parent_id, имя_в_нижнем_регистре): tag} — для быстрого поиска.
 
-    def _children_of(self, parent_id: Optional[int]) -> List[Tag]:
-        return [
-            t for t in self.repo.get_all_tags() if t.parent_id == parent_id
-        ]
+        Индекс строит tagpaths — одна логика на весь проект. Отличие только
+        в ключе: VFS сравнивает по sanitize(), а не по сырому имени.
+        tags можно передать готовым, чтобы не дёргать репозиторий лишний раз.
+        """
+        if tags is None:
+            tags = self.repo.get_all_tags()
+        return tagpaths.index_by_parent(tags, key=lambda t: sanitize(t.name).casefold())
 
-    def _resolve_tag(self, vpath: str) -> Optional[Tag]:
+    def _children_of(
+        self, parent_id: Optional[int], tags: Optional[List[Tag]] = None
+    ) -> List[Tag]:
+        if tags is None:
+            tags = self.repo.get_all_tags()
+        return [t for t in tags if t.parent_id == parent_id]
+
+    def _resolve_tag(
+        self, vpath: str, tags: Optional[List[Tag]] = None
+    ) -> Optional[Tag]:
         """Находит тег по пути. None — для корня. NotFound — если нет."""
         parts = self._parts(vpath)
         if not parts:
             return None
 
-        index = self._tag_index()
+        index = self._tag_index(tags)
         parent_id: Optional[int] = None
         tag: Optional[Tag] = None
         for part in parts:
@@ -118,11 +129,14 @@ class VirtualTree:
     def listdir(self, vpath: str = "/") -> List[Node]:
         """Возвращает содержимое каталога: подтеги (папки) + файлы."""
         vpath = self.normalize(vpath)
-        tag = self._resolve_tag(vpath)
+        tags = self.repo.get_all_tags()
+        tag = self._resolve_tag(vpath, tags)
 
         # подкаталоги = дочерние теги
-        child_tags = sorted(self._children_of(tag.id if tag else None),
-                            key=lambda t: sanitize(t.name).casefold())
+        child_tags = sorted(
+            self._children_of(tag.id if tag else None, tags),
+            key=lambda t: sanitize(t.name).casefold(),
+        )
 
         dir_names = self._dedupe([sanitize(t.name) for t in child_tags])
         nodes = [

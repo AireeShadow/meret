@@ -156,3 +156,22 @@ def test_normalize_paths(tree):
 def test_sanitize_forbidden_chars():
     assert sanitize("a/b") == "a∕b"
     assert sanitize("  ") == "_"
+
+def test_tag_index_matches_tagpaths(tree, mock_repo):
+    """Индекс VFS — ровно то, что строит tagpaths (а не своя копия логики)."""
+    from meret.core import tagpaths
+
+    mock_repo.create_tag("жанр")
+    mock_repo.create_tag("детектив")
+    mock_repo.set_tag_parent("детектив", "жанр")
+
+    tags = mock_repo.get_all_tags()
+    expected = tagpaths.index_by_parent(tags, key=lambda t: sanitize(t.name).casefold())
+    assert tree._tag_index() == expected
+    assert len(expected) == 2
+
+
+def test_resolve_tag_uses_sanitized_name(tree, mock_repo):
+    """Ключ индекса — sanitize(name), поэтому слэш в имени тега не ломает путь."""
+    mock_repo.create_tag("a/b")
+    assert tree.stat("/a∕b").is_dir
