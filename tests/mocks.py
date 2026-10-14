@@ -251,3 +251,6 @@ class MockRepository(AbstractRepository):
             "by_type": by_type,
             "total_tags": len(self._tags),
         }
+
+    def known_paths(self) -> Set[str]:
+        return {entry.filepath for entry in self._files.values()}

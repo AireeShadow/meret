@@ -27,12 +27,14 @@ class Indexer(Logger):
         library_path: str | Path,
         workers: int = 8,
         chunk_size: int = 1000,
+        skip_existing: bool = False,
     ) -> None:
         super().__init__()
         self.repo = repository
         self.library = Path(library_path)
         self.workers = max(1, workers)
         self.chunk_size = max(1, chunk_size)
+        self.skip_existing = skip_existing
         self.registry = ExtractorRegistry()
         self.interrupted = False
 
@@ -151,14 +153,25 @@ class Indexer(Logger):
         self.interrupted = False
 
         files = self.collect(single_file=single_file, progress_callback=progress_callback)
+
+        skipped = 0
+        if self.skip_existing and files:
+            known = self.repo.known_paths()
+            before = len(files)
+            files = [f for f in files if str(f) not in known]
+            skipped = before - len(files)
+            self.logger.info(f"Skipped {skipped}/{before} already indexed files")
+
         entries = self.extract(files, progress_callback=progress_callback)
 
         if dry_run:
             return {
                 "indexed": 0, "updated": 0, "errors": 0,
-                "found": len(entries), "interrupted": self.interrupted,
+                "found": len(entries), "skipped": skipped,
+                "interrupted": self.interrupted,
             }
 
         stats = self.index(entries, progress_callback=progress_callback)
+        stats["skipped"] = skipped
         stats["interrupted"] = self.interrupted
         return stats

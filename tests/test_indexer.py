@@ -125,3 +125,39 @@ def test_progress_callback_single_file(tmp_path, make_png, mock_repo):
 
 def test_interrupted_defaults_false(mock_repo, tmp_path):
     assert Indexer(mock_repo, tmp_path).interrupted is False
+
+def test_skip_existing_skips_indexed(tmp_path, make_png, mock_repo):
+    make_png("a")
+    make_png("b")
+    Indexer(mock_repo, tmp_path).run()
+
+    seen = []
+    stats = Indexer(mock_repo, tmp_path, skip_existing=True).run(
+        progress_callback=lambda phase, done, total: seen.append(phase)
+    )
+
+    assert stats["skipped"] == 2
+    assert stats["indexed"] == 0
+    assert mock_repo.get_stats()["total_files"] == 2
+    assert PHASE_EXTRACT not in seen          # извлекать было нечего
+
+
+def test_skip_existing_indexes_only_new(tmp_path, make_png, mock_repo):
+    make_png("a")
+    Indexer(mock_repo, tmp_path).run()
+
+    make_png("b")
+    stats = Indexer(mock_repo, tmp_path, skip_existing=True).run()
+
+    assert stats["skipped"] == 1
+    assert stats["indexed"] == 1
+    assert mock_repo.get_stats()["total_files"] == 2
+
+
+def test_skip_existing_off_by_default(tmp_path, make_png, mock_repo):
+    make_png("a")
+    Indexer(mock_repo, tmp_path).run()
+    stats = Indexer(mock_repo, tmp_path).run()
+
+    assert stats["skipped"] == 0
+    assert stats["updated"] == 1

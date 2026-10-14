@@ -39,6 +39,10 @@ def scan(
     library: Path = typer.Argument(..., help="Что сканировать"),
     db_path: Optional[Path] = typer.Option(None, "--db", "-d", help="Каталог с базой или путь к .db"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n"),
+    skip_existing: bool = typer.Option(
+        False, "--skip-existing", "-s",
+        help="Не трогать файлы, которые уже есть в базе",
+    ),
     workers: int = typer.Option(8, "--workers", "-w", help="Потоков на чтение метаданных"),
 ):
     """Просканировать и проиндексировать медиа."""
@@ -46,7 +50,7 @@ def scan(
         console.print(f"[red]Нет такого пути: {library}[/red]")
         raise typer.Exit(1)
 
-    indexer = Indexer(get_repo(db_path), library, workers=workers)
+    indexer = Indexer(get_repo(db_path), library, workers=workers, skip_existing=skip_existing)
 
     with Progress(
         TextColumn("[cyan]{task.description}"),
@@ -70,11 +74,15 @@ def scan(
         console.print("[yellow]⚠ Прервано пользователем[/yellow]")
 
     if dry_run:
-        console.print(f"[cyan]Найдено файлов: {stats['found']}[/cyan]")
+        console.print(
+            f"[cyan]Новых файлов: {stats['found']}, пропущено: {stats['skipped']}[/cyan]"
+        )
     else:
         console.print(
             f"[green]✓ Новых: {stats['indexed']}, "
-            f"обновлено: {stats['updated']}, ошибок: {stats['errors']}[/green]"
+            f"обновлено: {stats['updated']}, "
+            f"пропущено: {stats['skipped']}, "
+            f"ошибок: {stats['errors']}[/green]"
         )
 
 
