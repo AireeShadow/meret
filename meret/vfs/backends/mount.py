@@ -33,6 +33,10 @@ from pathlib import Path
 
 from meret.vfs import IsADirectory, NotFound, VirtualTree
 
+import logging
+
+_DEBUG = bool(os.environ.get("MERET_DEBUG"))
+
 # Сколько ждём корректной остановки, прежде чем выйти принудительно.
 STOP_GRACE_SECONDS = 5.0
 
@@ -143,6 +147,9 @@ def _norm_windows_path(name: str) -> str:
 
 
 def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
+    if _DEBUG:
+        logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+
     from winfspy import (
         FILE_ATTRIBUTE,
         NTStatusEndOfFile,
@@ -152,12 +159,68 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         BaseFileSystemOperations,
         FileSystem,
     )
-    from winfspy.plumbing import lib
+    from winfspy.plumbing import lib, ffi
     from winfspy.plumbing.security_descriptor import SecurityDescriptor
 
     _SD = SecurityDescriptor.from_string("O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)")
 
     class MeretOperations(BaseFileSystemOperations):
+        def __init__(self) -> None:
+            super().__init__()
+            # Все выданные хендлы держим живыми: WinFsp умеет позвать Close
+            # повторно с тем же указателем, а winfspy в ll_close делает
+            # `del self._opened_objs[...]` и освобождает хендл. Без этого
+            # повторный Close читает освобождённую память → Py_FatalError.
+            self._alive: dict[object, object] = {}
+
+        # ---------- отладка (MERET_DEBUG=1) ----------
+
+        def _log(self, msg: str) -> None:
+            if _DEBUG:
+                print(f"[meret] {msg}", flush=True)
+
+        @staticmethod
+        def _addr(handle) -> int:
+            return int(ffi.cast("size_t", handle))
+
+        def _remember(self, p_file_context) -> None:
+            """Запоминает cdata-владельца хендла, чтобы GC его не съел."""
+            handle = p_file_context[0]
+            if handle == ffi.NULL:
+                return
+            for key in self._opened_objs:
+                if key == handle:          # cdata сравниваются по адресу
+                    self._alive[handle] = key
+                    return
+
+        def ll_create(self, *args):
+            status = super().ll_create(*args)
+            self._remember(args[-2])
+            self._log(f"ll_create -> status={status:#x} ctx={self._addr(args[-2][0]):#x}")
+            return status
+
+        def ll_open(self, *args):
+            status = super().ll_open(*args)
+            self._remember(args[-2])
+            self._log(f"ll_open   -> status={status:#x} ctx={self._addr(args[-2][0]):#x}")
+            return status
+
+        def ll_close(self, file_context):
+            known = file_context in self._opened_objs
+            revived = False
+            if not known:
+                key = self._alive.get(file_context)
+                if key is not None:
+                    # повторный Close: возвращаем ключ, иначе `del` в super()
+                    # упадёт с KeyError
+                    self._opened_objs[key] = {}
+                    revived = True
+            self._log(
+                f"ll_close  <- ptr={self._addr(file_context):#x} "
+                f"known={known} revived={revived}"
+            )
+            return super().ll_close(file_context)
+        
         def get_volume_info(self):
             return {
                 "total_size": 1 << 40,
@@ -214,6 +277,8 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 raise NTStatusMediaWriteProtected()
 
         def close(self, file_context):
+            if isinstance(file_context, dict):
+                file_context["data"] = None    # отпускаем кэш содержимого
             return None
 
         def cleanup(self, file_context, file_name, flags):
