@@ -2,7 +2,7 @@ import re
 import json
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, Set, Optional
+from typing import Dict, List, Set, Tuple, Optional
 
 from meret.core import tagpaths
 from meret.core.logger import Logger
@@ -87,15 +87,17 @@ def _iter_statements(script: str):
 
 class SQLiteRepository(AbstractRepository, Logger):
     _SAVE_FILE_SQL = """
-                INSERT INTO files (filepath, filename, rating, type, metadata)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(filepath) DO UPDATE SET
-                    filename = excluded.filename,
-                    rating = excluded.rating,
-                    type = excluded.type,
-                    metadata = excluded.metadata,
-                    updated_at = CURRENT_TIMESTAMP
-            """
+        INSERT INTO files (filepath, filename, rating, type, metadata, size_bytes, mtime)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(filepath) DO UPDATE SET
+            filename = excluded.filename,
+            rating = excluded.rating,
+            type = excluded.type,
+            metadata = excluded.metadata,
+            size_bytes = excluded.size_bytes,
+            mtime = excluded.mtime,
+            updated_at = CURRENT_TIMESTAMP
+    """
     _EXPECTED_TABLES = ("files", "tags", "file_tags")
 
     def __init__(self, db_path: str):
@@ -104,6 +106,21 @@ class SQLiteRepository(AbstractRepository, Logger):
         self.fts_enabled = True
         self._init_tables()
 
+    #----------- helpers -------------
+    @staticmethod
+    def _fingerprint(entry: FileEntry) -> Tuple[int, float]:
+        """(size, mtime) from the extracted metadata — the incremental scan key."""
+        meta = entry.metadata or {}
+        try:
+            size = int(meta.get("size_bytes") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        try:
+            mtime = float(meta.get("modified_at") or 0.0)
+        except (TypeError, ValueError):
+            mtime = 0.0
+        return size, mtime
+    
     # ---------- connection ----------
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -125,6 +142,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                         self.logger.warning(f"FTS5 unavailable: {e}")
                     else:
                         raise
+            self._migrate_files(conn)
             self._migrate_tags(conn)
             conn.commit()
             self._check_schema(conn)
@@ -206,6 +224,14 @@ class SQLiteRepository(AbstractRepository, Logger):
     """
 
     # ---------- files ----------
+    def _migrate_files(self, conn) -> None:
+        """Adds the size/mtime columns used by the incremental scan."""
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(files)")}
+        if "size_bytes" not in cols:
+            conn.execute("ALTER TABLE files ADD COLUMN size_bytes INTEGER DEFAULT 0")
+        if "mtime" not in cols:
+            conn.execute("ALTER TABLE files ADD COLUMN mtime REAL DEFAULT 0")
+
     def get_file_by_id(self, file_id: int) -> Optional[FileEntry]:
         with self._connect() as conn:
             row = conn.execute(
@@ -269,8 +295,17 @@ class SQLiteRepository(AbstractRepository, Logger):
                         stats["errors"] += 1
                         meta = None
                         self.logger.error(f"metadata is not serializable: {entry.filepath}: {e}")
+                    size, mtime = self._fingerprint(entry)
                     rows.append(
-                        (entry.filepath, entry.filename, entry.rating, entry.type.value, meta)
+                        (
+                            entry.filepath,
+                            entry.filename,
+                            entry.rating,
+                            entry.type.value,
+                            meta,
+                            size,
+                            mtime,
+                        )
                     )
 
                 conn.executemany(self._SAVE_FILE_SQL, rows)
@@ -676,3 +711,11 @@ class SQLiteRepository(AbstractRepository, Logger):
     def known_paths(self) -> Set[str]:
         with self._connect() as conn:
             return {row[0] for row in conn.execute("SELECT filepath FROM files")}
+
+    def known_fingerprints(self) -> Dict[str, Tuple[int, float]]:
+        """{filepath: (size, mtime)} — one query for the whole incremental scan."""
+        with self._connect() as conn:
+            return {
+                row["filepath"]: (row["size_bytes"] or 0, row["mtime"] or 0.0)
+                for row in conn.execute("SELECT filepath, size_bytes, mtime FROM files")
+            }

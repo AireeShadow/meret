@@ -61,7 +61,8 @@ def scan(
     db_path: Optional[Path] = DB_OPTION,
     dry_run: bool = typer.Option(False, "--dry-run", "-n"),
     skip_existing: bool = typer.Option(
-        False, "--skip-existing", "-s", help="Skip files that are already in the database"
+        False, "--skip-existing", "-s",
+        help="Skip files that are already indexed and unchanged on disk",
     ),
     workers: int = typer.Option(8, "--workers", "-w", help="Threads for reading metadata"),
 ):
