@@ -285,6 +285,20 @@ class MockRepository(AbstractRepository):
                 results.append(self._clone(entry))
         return results[:limit]
 
+    def search_by_tag_ids(self, groups, match_all=False, file_type=None, limit=None):
+        wanted = [set(g) for g in groups if g]
+        if not wanted:
+            return []
+        results = []
+        for entry in self._files.values():
+            if file_type and entry.type.value != file_type:
+                continue
+            mine = {t for (f, t) in self._links if f == entry.id}
+            hits = [bool(g & mine) for g in wanted]
+            if all(hits) if match_all else any(hits):
+                results.append(self._clone(entry))
+        return results[:limit] if limit is not None else results
+
     def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]:
         q = query.casefold()
         hits = [

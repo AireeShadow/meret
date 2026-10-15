@@ -613,6 +613,42 @@ class SQLiteRepository(AbstractRepository, Logger):
             rows = conn.execute(sql, params).fetchall()
             return [self._row_to_file(r) for r in rows]
 
+    def search_by_tag_ids(
+        self,
+        groups: List[List[int]],
+        match_all: bool = False,
+        file_type: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[FileEntry]:
+        groups = [g for g in groups if g]
+        if not groups:
+            return []
+
+        clauses: List[str] = []
+        params: list = []
+        for group in groups:
+            holes = ",".join("?" for _ in group)
+            clauses.append(
+                f"EXISTS (SELECT 1 FROM file_tags x "
+                f"WHERE x.file_id = f.id AND x.tag_id IN ({holes}))"
+            )
+            params.extend(group)
+
+        # parentheses matter: OR would otherwise swallow the type filter
+        joiner = " AND " if match_all else " OR "
+        sql = f"{self._SELECT_FILES} WHERE ({joiner.join(clauses)})"
+        if file_type:
+            sql += " AND f.type = ?"
+            params.append(file_type)
+        sql += " GROUP BY f.id"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+            return [self._row_to_file(r) for r in rows]
+
     def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]:
         with self._connect() as conn:
             if self.fts_enabled and query.strip():

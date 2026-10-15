@@ -266,3 +266,16 @@ def test_set_tag_parent_by_path(repo):
 def test_set_tag_parent_path_is_strict(repo):
     repo.create_tag("genre")
     assert repo.set_tag_parent("genre/missing", "genre") is False
+
+def test_search_by_tag_ids_distinguishes_namesakes(repo):
+    f1 = repo.save_file(FileEntry(filename="a.png", filepath="/x/a.png", type=FileType.IMAGE))
+    f2 = repo.save_file(FileEntry(filename="b.png", filepath="/x/b.png", type=FileType.IMAGE))
+    repo.create_tag("genre/mystery")
+    repo.create_tag("studio/mystery")
+    repo.add_tag(f1, "genre/mystery")
+    repo.add_tag(f2, "studio/mystery")
+
+    by_id = {t.id: t for t in repo.get_all_tags()}
+    genre = tagpaths.resolve("genre/mystery", repo.get_all_tags())
+
+    assert [f.filename for f in repo.search_by_tag_ids([[genre.id]])] == ["a.png"]

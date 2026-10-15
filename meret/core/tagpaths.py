@@ -110,14 +110,12 @@ def missing_ancestors(path: str, tags: Iterable[Tag]) -> List[str]:
             result.append(candidate)
     return result
 
-
-def subtree_names(path: str, tags: Iterable[Tag]) -> List[str]:
-    """Names of the tag (by path/name) and all its descendants (for subtree search)."""
+def subtree_ids(path: str, tags: Iterable[Tag]) -> List[int]:
+    """Ids of the tag (by path/name) and all of its descendants."""
     tags = list(tags)
     node = resolve(path, tags)
     if node is None:
-        chunks = parts(path)
-        return [chunks[-1]] if chunks else []
+        return []
 
     ids = {node.id}
     changed = True
@@ -127,4 +125,10 @@ def subtree_names(path: str, tags: Iterable[Tag]) -> List[str]:
             if t.parent_id in ids and t.id not in ids:
                 ids.add(t.id)
                 changed = True
+    return sorted(ids)
+
+def subtree_names(path: str, tags: Iterable[Tag]) -> List[str]:
+    """Names of the tag (by path/name) and all its descendants (for subtree search)."""
+    tags = list(tags)
+    ids = subtree_ids(path=path, tags=tags)
     return [t.name for t in tags if t.id in ids]

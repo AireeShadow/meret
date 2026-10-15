@@ -83,6 +83,20 @@ class AbstractRepository(ABC):
     ) -> List[FileEntry]: ...
 
     @abstractmethod
+    def search_by_tag_ids(
+        self,
+        groups: List[List[int]],
+        match_all: bool = False,
+        file_type: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[FileEntry]:
+        """Files matching any tag id of a group; all groups if match_all.
+
+        Unlike search_by_tags (which matches by name), this tells namesakes
+        like genre/mystery and studio/mystery apart.
+        """
+        
+    @abstractmethod
     def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]: ...
 
     @abstractmethod
