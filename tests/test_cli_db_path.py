@@ -1,4 +1,4 @@
-"""Путь к БД: без базы — ошибка, создаёт только init."""
+"""DB path: no database is an error; only init creates one."""
 import pytest
 from typer.testing import CliRunner
 
@@ -34,7 +34,7 @@ def test_command_without_db_errors(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     res = runner.invoke(app, ["tags"])
     assert res.exit_code == 1
-    assert "не найдена" in res.output
+    assert "not found" in res.output
 
 
 def test_init_then_read(tmp_path):

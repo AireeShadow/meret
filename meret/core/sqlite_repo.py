@@ -10,20 +10,20 @@ from meret.core.models import FileEntry, FileType, Tag, TagNode
 from meret.core.repository import AbstractRepository
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
-_TAG_SEP = "\x1f"  # разделитель для GROUP_CONCAT
+_TAG_SEP = "\x1f"  # separator for GROUP_CONCAT
 _WORD = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
 
 def _iter_statements(script: str):
-    """Режет SQL-скрипт на отдельные операторы.
+    """Splits an SQL script into individual statements.
 
-    Уважает строковые литералы, комментарии и BEGIN...END в триггерах.
-    Важно: execute() на склейке молча выполняет только первый оператор,
-    поэтому резать надо строго по одному.
+    Respects string literals, comments and BEGIN...END in triggers.
+    Important: execute() on a concatenation silently runs only the first statement,
+    so we must split them strictly one by one.
     """
     buf: list[str] = []
     quote: Optional[str] = None
-    depth = 0                      # вложенность BEGIN...END
+    depth = 0                      # BEGIN...END nesting depth
     i, n = 0, len(script)
 
     while i < n:
@@ -46,7 +46,7 @@ def _iter_statements(script: str):
         if quote is not None:
             buf.append(ch)
             if ch == quote:
-                if i + 1 < n and script[i + 1] == quote:   # '' — экранирование
+                if i + 1 < n and script[i + 1] == quote:   # '' is an escaped quote
                     buf.append(script[i + 1])
                     i += 2
                     continue
@@ -105,13 +105,13 @@ class SQLiteRepository(AbstractRepository, Logger):
         self._init_tables()
         
 
-    # ---------- соединение ----------
+    # ---------- connection ----------
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")   # меньше блокировок
-        conn.execute("PRAGMA synchronous = NORMAL")  # fsync не на каждый commit
+        conn.execute("PRAGMA journal_mode = WAL")   # fewer locks
+        conn.execute("PRAGMA synchronous = NORMAL")  # no fsync on every commit
         return conn
 
     def _init_tables(self) -> None:
@@ -121,7 +121,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                 try:
                     conn.execute(stmt)
                 except sqlite3.OperationalError as e:
-                    if "fts5" in stmt.lower():          # сборка без FTS5 — не падаем
+                    if "fts5" in stmt.lower():          # build without FTS5 — don't crash
                         self.fts_enabled = False
                         self.logger.warning(f"FTS5 unavailable: {e}")
                     else:
@@ -131,10 +131,10 @@ class SQLiteRepository(AbstractRepository, Logger):
             self._check_schema(conn)
 
     def _check_schema(self, conn) -> None:
-        """Схема обязана создаться целиком.
+        """The schema must be created in full.
 
-        execute() на склеенных операторах молча выполняет только первый,
-        поэтому проверяем результат, а не надеемся.
+        execute() on concatenated statements silently runs only the first one,
+        so we check the result instead of hoping.
         """
         have = {
             row["name"]
@@ -143,20 +143,20 @@ class SQLiteRepository(AbstractRepository, Logger):
         missing = [t for t in self._EXPECTED_TABLES if t not in have]
         if missing:
             raise RuntimeError(
-                f"схема создана не полностью, нет таблиц: {', '.join(missing)}. "
-                "Похоже, в schema.sql у оператора потерялась ';'"
+                f"schema was only partially created, missing tables: {', '.join(missing)}. "
+                "Looks like a statement in schema.sql lost its ';'"
             )
         
 
     def _migrate_tags(self, conn) -> None:
-        """Доводит старую таблицу тегов до текущей схемы.
+        """Brings an old tags table up to the current schema.
 
-        1. Добавляет name_key и заполняет (COLLATE NOCASE сворачивает только
-           ASCII, регистронезависимость делаем сами).
-        2. Снимает глобальную уникальность name_key.
-        3. Ставит уникальность среди братьев. COALESCE(parent_id, 0) нужен
-           потому, что NULL'ы в уникальном индексе SQLite считаются разными,
-           и два корневых «детектив» спокойно бы ужились.
+        1. Adds name_key and fills it in (COLLATE NOCASE only folds
+           ASCII, so we handle case-insensitivity ourselves).
+        2. Drops the global uniqueness of name_key.
+        3. Adds uniqueness among siblings. COALESCE(parent_id, 0) is needed
+           because SQLite treats NULLs in a unique index as distinct,
+           and two root-level "mystery" tags would happily coexist.
         """
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(tags)")}
         if "name_key" not in cols:
@@ -179,9 +179,9 @@ class SQLiteRepository(AbstractRepository, Logger):
                 "ON tags(COALESCE(parent_id, 0), name_key)"
             )
         except sqlite3.OperationalError as e:
-            self.logger.warning(f"тёзки среди братьев, уникальный индекс не создан: {e}")
+            self.logger.warning(f"same-name siblings found, unique index not created: {e}")
 
-    # ---------- конвертация ----------
+    # ---------- conversion ----------
     @staticmethod
     def _tags_from_row(row) -> List[str]:
         raw = row["tag_names"] if "tag_names" in row.keys() else ""
@@ -207,7 +207,7 @@ class SQLiteRepository(AbstractRepository, Logger):
         LEFT JOIN tags t ON t.id = ft.tag_id
     """
 
-    # ---------- файлы ----------
+    # ---------- files ----------
     def get_file_by_id(self, file_id: int) -> Optional[FileEntry]:
         with self._connect() as conn:
             row = conn.execute(
@@ -248,7 +248,7 @@ class SQLiteRepository(AbstractRepository, Logger):
         chunk_size: int = 1000,
         on_progress=None,
     ) -> Dict[str, int]:
-        """Пачка файлов: одно соединение, транзакция на чанк, executemany."""
+        """Batch of files: one connection, a transaction per chunk, executemany."""
         stats = {"indexed": 0, "updated": 0, "errors": 0}
         if not files:
             return stats
@@ -269,7 +269,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                     except (TypeError, ValueError) as e:
                         stats["errors"] += 1
                         meta = None
-                        self.logger.error(f"metadata не сериализуется: {entry.filepath}: {e}")
+                        self.logger.error(f"metadata is not serializable: {entry.filepath}: {e}")
                     rows.append(
                         (entry.filepath, entry.filename, entry.rating, entry.type.value, meta)
                     )
@@ -293,7 +293,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             conn.commit()
             return cur.rowcount > 0
 
-    # ---------- теги: поиск ----------
+    # ---------- tags: lookup ----------
 
     _TAG_COLS = "id, name, name_key, colour, parent_id"
 
@@ -306,7 +306,7 @@ class SQLiteRepository(AbstractRepository, Logger):
         return conn.execute(self._FIND_CHILD_SQL, (parent_id, chunk.casefold())).fetchone()
 
     def _tag_strict(self, conn, ref: str):
-        """Тег строго по пути от корня. None — если хоть одно звено не найдено."""
+        """Tag strictly by path from the root. None if any segment is not found."""
         chunks = tagpaths.parts(ref)
         if not chunks:
             return None
@@ -320,11 +320,11 @@ class SQLiteRepository(AbstractRepository, Logger):
         return row
 
     def _tag_row(self, conn, ref: str):
-        """Тег по пути («жанр/детектив») или по одиночному имени.
+        """Tag by path ("genre/mystery") or by a single name.
 
-        Путь строгий. Одиночное имя ищется сначала как корневой тег, потом
-        вообще: тёзки в разных ветках теперь законны, но выбор детерминирован
-        (корневой, затем минимальный id).
+        The path is strict. A single name is looked up as a root tag first, then
+        anywhere: namesakes in different branches are now allowed, but the choice
+        is deterministic (root first, then the lowest id).
         """
         chunks = tagpaths.parts(ref)
         if not chunks:
@@ -347,14 +347,14 @@ class SQLiteRepository(AbstractRepository, Logger):
     def _ensure_tag(
         self, conn, ref: str, colour: Optional[str] = None, reuse_any: bool = True
     ) -> int:
-        """Возвращает id тега, создавая его и недостающих родителей по пути.
+        """Returns the tag id, creating it and any missing parents along the path.
 
-        reuse_any=True: одиночное имя сначала ищется где угодно — тёзок не
-        размножаем. reuse_any=False (для create_tag): путь строгий.
+        reuse_any=True: a single name is first looked up anywhere, so we don't
+        multiply namesakes. reuse_any=False (for create_tag): the path is strict.
         """
         chunks = tagpaths.parts(ref)
         if not chunks:
-            raise ValueError(f"пустой путь тега: {ref!r}")
+            raise ValueError(f"empty tag path: {ref!r}")
 
         if reuse_any and len(chunks) == 1:
             row = self._tag_row(conn, chunks[0])
@@ -376,10 +376,10 @@ class SQLiteRepository(AbstractRepository, Logger):
         return tag_id
 
     def _would_cycle(self, conn, tag_id: int, parent_id: int) -> bool:
-        """True, если parent_id — сам tag_id или его потомок.
+        """True if parent_id is tag_id itself or one of its descendants.
 
-        Идём вверх ОТ РОДИТЕЛЯ и ищем тег: если наткнулись — родитель лежит
-        внутри поддерева тега, и перевешивание даст петлю.
+        Walk up FROM THE PARENT looking for the tag: if we hit it, the parent lies
+        inside the tag's subtree, and reparenting would create a loop.
         """
         seen: set[int] = set()
         cur: Optional[int] = parent_id
@@ -418,7 +418,7 @@ class SQLiteRepository(AbstractRepository, Logger):
     def set_file_tags(self, file_id: int, tags: List[str]) -> bool:
         with self._connect() as conn:
             conn.execute("DELETE FROM file_tags WHERE file_id = ?", (file_id,))
-            for name in dict.fromkeys(tags):  # без дублей, с сохранением порядка
+            for name in dict.fromkeys(tags):  # dedupe while preserving order
                 tag_id = self._ensure_tag(conn, name)
                 conn.execute(
                     "INSERT OR IGNORE INTO file_tags (file_id, tag_id) VALUES (?, ?)",
@@ -428,7 +428,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             return True
 
     def rename_tag(self, old: str, new: str) -> bool:
-        """Переименование = ОДНА строка. Если брат с таким именем есть — слияние."""
+        """Renaming = ONE row. If a sibling with that name exists, they are merged."""
         with self._connect() as conn:
             src = self._tag_row(conn, old)
             if src is None:
@@ -441,7 +441,7 @@ class SQLiteRepository(AbstractRepository, Logger):
 
             dst = self._child_row(conn, src["parent_id"], new_name)
             if dst is not None and dst["id"] != src["id"]:
-                # дети переезжают к родителю src, ссылки уходят на dst
+                # src's children move up to src's parent, links move to dst
                 conn.execute(
                     "UPDATE tags SET parent_id = ? WHERE parent_id = ?",
                     (src["parent_id"], src["id"]),
@@ -461,13 +461,13 @@ class SQLiteRepository(AbstractRepository, Logger):
             conn.commit()
             return True
 
-    # ---------- теги: создание и иерархия ----------
+    # ---------- tags: creation and hierarchy ----------
 
     def create_tag(self, name: str, colour: Optional[str] = None) -> bool:
-        """Создать тег по пути, достроив недостающих родителей.
+        """Create a tag by path, building any missing parents.
 
-        Путь строгий: create_tag("a") создаст корневой «a», даже если где-то
-        есть вложенный тёзка. False — если тег по этому пути уже есть.
+        The path is strict: create_tag("a") creates a root "a" even if a nested
+        namesake exists somewhere. False if a tag already exists at this path.
         """
         with self._connect() as conn:
             if self._tag_strict(conn, name) is not None:
@@ -477,7 +477,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             return True
 
     def delete_tag(self, name: str) -> bool:
-        """Удаляет тег: дети поднимаются на уровень его родителя, ссылки уходят каскадом."""
+        """Deletes a tag: children move up to its parent, links go away via cascade."""
         with self._connect() as conn:
             row = self._tag_row(conn, name)
             if row is None:
@@ -504,7 +504,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                     return False
                 parent_id = prow["id"]
                 if self._would_cycle(conn, row["id"], parent_id):
-                    return False          # был бы цикл
+                    return False          # it would be a cycle
 
             conn.execute(
                 "UPDATE tags SET parent_id = ? WHERE id = ?", (parent_id, row["id"])
@@ -512,7 +512,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             conn.commit()
             return True
 
-    # ---------- теги: чтение ----------
+    # ---------- tags: reading ----------
     def get_all_tags(self) -> List[Tag]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -542,7 +542,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             else:
                 parent.children.append(node)
 
-        # страховка от циклов: что не достижимо от корней — тоже показываем
+        # guard against cycles: also show whatever isn't reachable from the roots
         reachable: set[int] = set()
         stack = list(roots)
         while stack:
@@ -557,10 +557,10 @@ class SQLiteRepository(AbstractRepository, Logger):
         return roots
 
     def prune_orphan_tags(self) -> int:
-        """Удаляет теги без файлов И без детей.
+        """Deletes tags with no files AND no children.
 
-        Тег-раздел («жанр») обычно сам файлов не имеет — только детей,
-        поэтому его трогать нельзя.
+        A section tag ("genre") usually has no files of its own, only children,
+        so it must not be touched.
         """
         with self._connect() as conn:
             cur = conn.execute(
@@ -572,7 +572,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             conn.commit()
             return cur.rowcount
 
-    # ---------- поиск ----------
+    # ---------- search ----------
     def search_by_tags(
         self,
         tags: List[str],
@@ -593,7 +593,7 @@ class SQLiteRepository(AbstractRepository, Logger):
 
         placeholders = ",".join("?" for _ in tags)
 
-        # t и ft уже приджойнены внутри _SELECT_FILES — добавлять JOIN не нужно
+        # t and ft are already joined inside _SELECT_FILES — no extra JOIN needed
         sql = f"{self._SELECT_FILES} WHERE t.name_key IN ({placeholders})"
         params = [t.casefold() for t in tags]
 
@@ -616,7 +616,7 @@ class SQLiteRepository(AbstractRepository, Logger):
     def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]:
         with self._connect() as conn:
             if self.fts_enabled and query.strip():
-                # FTS5: префиксный поиск по словам
+                # FTS5: prefix search by words
                 safe = " ".join(f'"{w}"*' for w in query.split())
                 rows = conn.execute(
                     f"""{self._SELECT_FILES}
@@ -628,7 +628,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                 if rows:
                     return [self._row_to_file(r) for r in rows]
 
-            # fallback: подстрока
+            # fallback: substring
             rows = conn.execute(
                 f"{self._SELECT_FILES} WHERE f.filename LIKE ? GROUP BY f.id LIMIT ?",
                 (f"%{query}%", limit),

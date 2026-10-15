@@ -7,8 +7,8 @@ from meret.vfs.backends.mount import _norm_windows_path
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("\\пляж\\file.png", "/пляж/file.png"),
-        ("/пляж/file.png", "/пляж/file.png"),
+        ("\\seaside\\file.png", "/seaside/file.png"),
+        ("/seaside/file.png", "/seaside/file.png"),
         ("file.png", "/file.png"),
         ("\\", "/"),
         ("", "/"),

@@ -44,7 +44,7 @@ class Tag(BaseModel):
 
 
 class TagNode(Tag):
-    """Тег с детьми — для дерева (папки из тегов)."""
+    """Tag with children — for the tree (folders from tags)."""
     children: List["TagNode"] = Field(default_factory=list)
 
 

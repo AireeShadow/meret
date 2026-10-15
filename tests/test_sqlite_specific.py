@@ -19,9 +19,9 @@ def test_foreign_keys_cascade(sqlite_repo):
     fid = sqlite_repo.save_file(
         FileEntry(filename="a.png", filepath="/x/a.png", type=FileType.IMAGE)
     )
-    sqlite_repo.add_tag(fid, "тег")
+    sqlite_repo.add_tag(fid, "tag")
     sqlite_repo.delete_file(fid)
-    # связь должна уехать каскадом, тег остаться сиротой
+    # the link must be removed by cascade, leaving the tag orphaned
     assert sqlite_repo.get_tag_usage()[0].usage_count == 0
 
 def _first_word(stmt: str) -> str:
@@ -33,7 +33,7 @@ def _first_word(stmt: str) -> str:
 
 
 def test_schema_splits_into_separate_statements():
-    """Склеенные операторы execute() молча проглатывает — проверяем по одному."""
+    """execute() silently swallows concatenated statements — check them one by one."""
     from meret.core.sqlite_repo import SCHEMA_PATH, _iter_statements
 
     stmts = list(_iter_statements(SCHEMA_PATH.read_text(encoding="utf-8")))

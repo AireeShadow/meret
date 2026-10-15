@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "meret"
-dynamic = ["version"]                 # ← ЗДЕСЬ, и без этого никак
+dynamic = ["version"]                 # ← required: the version comes from meret/__init__.py
 description = "Tagged media file system with virtual folders"
 readme = "README.md"
 license = {text = "GPL-3.0"}

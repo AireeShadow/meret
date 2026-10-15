@@ -11,7 +11,7 @@ from tests.mocks import MockRepository
 
 @pytest.fixture(autouse=True)
 def clean_logger():
-    """Логгер глобальный — чистим хендлеры между тестами."""
+    """The logger is global — clear its handlers between tests."""
     logger = logging.getLogger("meret")
     logger.handlers.clear()
     yield logger
@@ -30,7 +30,7 @@ def mock_repo() -> MockRepository:
 
 @pytest.fixture(params=["sqlite", "mock"])
 def repo(request, sqlite_repo, mock_repo):
-    """Обе реализации гоняются через одни и те же тесты."""
+    """Both implementations run through the same tests."""
     return sqlite_repo if request.param == "sqlite" else mock_repo
 
 

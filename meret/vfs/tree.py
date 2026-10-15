@@ -21,11 +21,11 @@ class Node:
     mtime: float = 0.0
     tag_id: Optional[int] = None
     file_id: Optional[int] = None
-    source_path: Optional[str] = None  # реальный путь на диске
+    source_path: Optional[str] = None  # real path on disk
 
 
 def sanitize(name: str) -> str:
-    """Приводит имя тега к безопасному для файловых систем виду."""
+    """Makes a tag name safe for file systems."""
     name = unicodedata.normalize("NFC", name).strip()
     for ch in _FORBIDDEN:
         name = name.replace(ch, _SAFE_SUB)
@@ -33,12 +33,12 @@ def sanitize(name: str) -> str:
 
 
 class VirtualTree:
-    """Отображение иерархии тегов на виртуальные пути. Только чтение."""
+    """Maps the tag hierarchy onto virtual paths. Read-only."""
 
     def __init__(self, repo: AbstractRepository) -> None:
         self.repo = repo
 
-    # ---------- разбор путей ----------
+    # ---------- path parsing ----------
 
     @staticmethod
     def normalize(vpath: str) -> str:
@@ -52,16 +52,16 @@ class VirtualTree:
         norm = cls.normalize(vpath)
         return [p for p in norm.split("/") if p]
 
-    # ---------- индекс тегов ----------
+    # ---------- tag index ----------
 
     def _tag_index(
         self, tags: Optional[List[Tag]] = None
     ) -> Dict[Tuple[Optional[int], str], Tag]:
-        """{(parent_id, имя_в_нижнем_регистре): tag} — для быстрого поиска.
+        """{(parent_id, lowercase_name): tag} — for fast lookup.
 
-        Индекс строит tagpaths — одна логика на весь проект. Отличие только
-        в ключе: VFS сравнивает по sanitize(), а не по сырому имени.
-        tags можно передать готовым, чтобы не дёргать репозиторий лишний раз.
+        The index is built by tagpaths — one implementation for the whole project.
+        The only difference is the key: VFS compares by sanitize(), not the raw name.
+        tags may be passed in ready-made to avoid an extra repository call.
         """
         if tags is None:
             tags = self.repo.get_all_tags()
@@ -77,7 +77,7 @@ class VirtualTree:
     def _resolve_tag(
         self, vpath: str, tags: Optional[List[Tag]] = None
     ) -> Optional[Tag]:
-        """Находит тег по пути. None — для корня. NotFound — если нет."""
+        """Finds a tag by path. None for the root. NotFound if missing."""
         parts = self._parts(vpath)
         if not parts:
             return None
@@ -92,11 +92,11 @@ class VirtualTree:
             parent_id = tag.id
         return tag
 
-    # ---------- уникальные имена ----------
+    # ---------- unique names ----------
 
     @staticmethod
     def _dedupe(names: List[str]) -> List[str]:
-        """Разводит совпадающие имена суффиксом ~1, ~2 (стабильно)."""
+        """Disambiguates duplicate names with ~1, ~2 suffixes (stable)."""
         seen: Dict[str, int] = {}
         result: List[str] = []
         for name in names:
@@ -115,7 +115,7 @@ class VirtualTree:
 
     @staticmethod
     def _file_size(entry: FileEntry) -> int:
-        """Размер из метаданных, иначе — с диска."""
+        """Size from metadata, otherwise from disk."""
         size = (entry.metadata or {}).get("size_bytes")
         if size:
             return int(size)
@@ -124,15 +124,15 @@ class VirtualTree:
         except OSError:
             return 0
 
-    # ---------- листинг ----------
+    # ---------- listing ----------
 
     def listdir(self, vpath: str = "/") -> List[Node]:
-        """Возвращает содержимое каталога: подтеги (папки) + файлы."""
+        """Returns the directory contents: subtags (folders) + files."""
         vpath = self.normalize(vpath)
         tags = self.repo.get_all_tags()
         tag = self._resolve_tag(vpath, tags)
 
-        # подкаталоги = дочерние теги
+        # subdirectories = child tags
         child_tags = sorted(
             self._children_of(tag.id if tag else None, tags),
             key=lambda t: sanitize(t.name).casefold(),
@@ -149,7 +149,7 @@ class VirtualTree:
             for name, t in zip(dir_names, child_tags)
         ]
 
-        # файлы = помеченные этим тегом
+        # files = files tagged with this tag
         if tag is not None:
             files = self.repo.search_by_tags([tag.name])
             file_names = self._dedupe([f.filename for f in files])
@@ -166,7 +166,7 @@ class VirtualTree:
                 )
         return nodes
 
-    # ---------- stat / чтение ----------
+    # ---------- stat / read ----------
 
     def stat(self, vpath: str) -> Node:
         vpath = self.normalize(vpath)
@@ -210,14 +210,14 @@ class VirtualTree:
         return Path(node.source_path).read_bytes()
 
     def real_path(self, vpath: str) -> Path:
-        """Путь на диске — чтобы отдать файл внешнему плееру."""
+        """Path on disk — to hand the file to an external player."""
         node = self.stat(vpath)
         if node.is_dir or not node.source_path:
             raise IsADirectory(vpath)
         return Path(node.source_path)
 
     def walk(self, vpath: str = "/") -> Iterator[Node]:
-        """Обход всего дерева."""
+        """Walks the whole tree."""
         for node in self.listdir(vpath):
             yield node
             if node.is_dir:
