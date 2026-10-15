@@ -248,6 +248,7 @@ class SQLiteRepository(AbstractRepository, Logger):
 
     def save_file(self, file: FileEntry) -> int:
         with self._connect() as conn:
+            size, mtime = self._fingerprint(file)
             cur = conn.execute(
                 self._SAVE_FILE_SQL,
                 (
@@ -256,6 +257,8 @@ class SQLiteRepository(AbstractRepository, Logger):
                     file.rating,
                     file.type.value,
                     json.dumps(file.metadata, ensure_ascii=False) if file.metadata else None,
+                    size,
+                    mtime,
                 ),
             )
             conn.commit()
