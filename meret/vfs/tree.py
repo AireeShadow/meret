@@ -149,9 +149,9 @@ class VirtualTree:
             for name, t in zip(dir_names, child_tags)
         ]
 
-        # files = files tagged with this tag
+        # files = files tagged with this tag (by id: namesakes are distinct)
         if tag is not None:
-            files = self.repo.search_by_tags([tag.name])
+            files = self.repo.search_by_tag_ids([[tag.id]])
             file_names = self._dedupe([f.filename for f in files])
             for name, f in zip(file_names, files):
                 nodes.append(
@@ -159,7 +159,7 @@ class VirtualTree:
                         name=name,
                         vpath=posixpath.join(vpath, name),
                         is_dir=False,
-                        size=(f.metadata or {}).get("size_bytes", 0),
+                        size=self._file_size(f),
                         file_id=f.id,
                         source_path=f.filepath,
                     )

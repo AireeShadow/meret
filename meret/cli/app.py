@@ -36,7 +36,8 @@ def init(
         if not force:
             console.print(f"[yellow]Database already exists: {db_file}[/yellow]")
             raise typer.Exit(1)
-        db_file.unlink()
+        for suffix in ("", "-wal", "-shm"):
+            Path(f"{db_file}{suffix}").unlink(missing_ok=True)
 
     get_repo(path, create=True)
     console.print(f"[green]✓ Database created: {db_file}[/green]")
@@ -122,10 +123,10 @@ def search(
 
     if tags:
         all_tags = repo.get_all_tags()
-        names: List[str] = []
-        for path in tags:
-            names.extend(tagpaths.subtree_names(path, all_tags))
-        results = repo.search_by_tags(names, match_all=match_all, file_type=file_type)
+        groups = [tagpaths.subtree_ids(path, all_tags) for path in tags]
+        results = repo.search_by_tag_ids(
+            groups, match_all=match_all, file_type=file_type
+        )
     else:
         results = repo.search_by_name(query) if query else []
 
