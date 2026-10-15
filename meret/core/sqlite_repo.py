@@ -1,26 +1,88 @@
+import re
 import json
 import sqlite3
 from pathlib import Path
 from typing import Dict, List, Set, Optional
 
+from meret.core import tagpaths
 from meret.core.logger import Logger
 from meret.core.models import FileEntry, FileType, Tag, TagNode
 from meret.core.repository import AbstractRepository
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 _TAG_SEP = "\x1f"  # разделитель для GROUP_CONCAT
+_WORD = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
 
 def _iter_statements(script: str):
-    """Режет SQL-скрипт на операторы, уважая BEGIN...END в триггерах."""
-    buffer = ""
-    for line in script.splitlines(keepends=True):
-        buffer += line
-        if sqlite3.complete_statement(buffer):
-            yield buffer.strip()
-            buffer = ""
-    if buffer.strip():
-        yield buffer.strip()
+    """Режет SQL-скрипт на отдельные операторы.
+
+    Уважает строковые литералы, комментарии и BEGIN...END в триггерах.
+    Важно: execute() на склейке молча выполняет только первый оператор,
+    поэтому резать надо строго по одному.
+    """
+    buf: list[str] = []
+    quote: Optional[str] = None
+    depth = 0                      # вложенность BEGIN...END
+    i, n = 0, len(script)
+
+    while i < n:
+        if quote is None:
+            if script.startswith("--", i):
+                j = script.find("\n", i)
+                j = n if j == -1 else j
+                buf.append(script[i:j])
+                i = j
+                continue
+            if script.startswith("/*", i):
+                j = script.find("*/", i + 2)
+                j = n if j == -1 else j + 2
+                buf.append(script[i:j])
+                i = j
+                continue
+
+        ch = script[i]
+
+        if quote is not None:
+            buf.append(ch)
+            if ch == quote:
+                if i + 1 < n and script[i + 1] == quote:   # '' — экранирование
+                    buf.append(script[i + 1])
+                    i += 2
+                    continue
+                quote = None
+            i += 1
+            continue
+
+        if ch in "'\"`":
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+
+        if ch.isalpha() or ch == "_":
+            word = _WORD.match(script, i).group(0)
+            buf.append(word)
+            i += len(word)
+            upper = word.upper()
+            if upper == "BEGIN":
+                depth += 1
+            elif upper == "END":
+                depth = max(0, depth - 1)
+            continue
+
+        buf.append(ch)
+        i += 1
+
+        if ch == ";" and depth == 0:
+            stmt = "".join(buf).strip()
+            if stmt:
+                yield stmt
+            buf = []
+
+    tail = "".join(buf).strip()
+    if tail:
+        yield tail
 
 
 class SQLiteRepository(AbstractRepository, Logger):
@@ -39,6 +101,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                 metadata = excluded.metadata,
                 updated_at = CURRENT_TIMESTAMP
         """
+        self._EXPECTED_TABLES = ("files", "tags", "file_tags")
 
     # ---------- соединение ----------
     def _connect(self) -> sqlite3.Connection:
@@ -61,15 +124,37 @@ class SQLiteRepository(AbstractRepository, Logger):
                         self.logger.warning(f"FTS5 unavailable: {e}")
                     else:
                         raise
-            self._migrate_name_key(conn)
+            self._migrate_tags(conn)
             conn.commit()
+            self._check_schema(conn)
 
-    def _migrate_name_key(self, conn) -> None:
-        """Доводит старую БД до схемы с name_key.
+    def _check_schema(self, conn) -> None:
+        """Схема обязана создаться целиком.
 
-        COLLATE NOCASE в SQLite сворачивает только ASCII, поэтому «жанр» и
-        «ЖАНР» для неё разные. Регистронезависимость делаем сами: колонка
-        name_key = name.casefold(), и все поиски идут по ней.
+        execute() на склеенных операторах молча выполняет только первый,
+        поэтому проверяем результат, а не надеемся.
+        """
+        have = {
+            row["name"]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        missing = [t for t in self._EXPECTED_TABLES if t not in have]
+        if missing:
+            raise RuntimeError(
+                f"схема создана не полностью, нет таблиц: {', '.join(missing)}. "
+                "Похоже, в schema.sql у оператора потерялась ';'"
+            )
+        
+
+    def _migrate_tags(self, conn) -> None:
+        """Доводит старую таблицу тегов до текущей схемы.
+
+        1. Добавляет name_key и заполняет (COLLATE NOCASE сворачивает только
+           ASCII, регистронезависимость делаем сами).
+        2. Снимает глобальную уникальность name_key.
+        3. Ставит уникальность среди братьев. COALESCE(parent_id, 0) нужен
+           потому, что NULL'ы в уникальном индексе SQLite считаются разными,
+           и два корневых «детектив» спокойно бы ужились.
         """
         cols = {row["name"] for row in conn.execute("PRAGMA table_info(tags)")}
         if "name_key" not in cols:
@@ -84,12 +169,15 @@ class SQLiteRepository(AbstractRepository, Logger):
                 (row["name"].casefold(), row["id"]),
             )
 
+        conn.execute("DROP INDEX IF EXISTS idx_tags_name_key")
+
         try:
             conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_key ON tags(name_key)"
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_sibling "
+                "ON tags(COALESCE(parent_id, 0), name_key)"
             )
         except sqlite3.OperationalError as e:
-            self.logger.warning(f"дубли по name_key, уникальный индекс не создан: {e}")
+            self.logger.warning(f"тёзки среди братьев, уникальный индекс не создан: {e}")
 
     # ---------- конвертация ----------
     @staticmethod
@@ -203,23 +291,87 @@ class SQLiteRepository(AbstractRepository, Logger):
             conn.commit()
             return cur.rowcount > 0
 
-    # ---------- теги: поиск и связи ----------
-    def _tag_id(self, conn, name: str) -> Optional[int]:
-        row = conn.execute(
-            "SELECT id FROM tags WHERE name_key = ?", (name.casefold(),)
+    # ---------- теги: поиск ----------
+
+    _TAG_COLS = "id, name, name_key, colour, parent_id"
+
+    _FIND_CHILD_SQL = f"""
+        SELECT {_TAG_COLS} FROM tags
+        WHERE COALESCE(parent_id, 0) = COALESCE(?, 0) AND name_key = ?
+    """
+
+    def _child_row(self, conn, parent_id: Optional[int], chunk: str):
+        return conn.execute(self._FIND_CHILD_SQL, (parent_id, chunk.casefold())).fetchone()
+
+    def _tag_strict(self, conn, ref: str):
+        """Тег строго по пути от корня. None — если хоть одно звено не найдено."""
+        chunks = tagpaths.parts(ref)
+        if not chunks:
+            return None
+        row = None
+        parent_id: Optional[int] = None
+        for chunk in chunks:
+            row = self._child_row(conn, parent_id, chunk)
+            if row is None:
+                return None
+            parent_id = row["id"]
+        return row
+
+    def _tag_row(self, conn, ref: str):
+        """Тег по пути («жанр/детектив») или по одиночному имени.
+
+        Путь строгий. Одиночное имя ищется сначала как корневой тег, потом
+        вообще: тёзки в разных ветках теперь законны, но выбор детерминирован
+        (корневой, затем минимальный id).
+        """
+        chunks = tagpaths.parts(ref)
+        if not chunks:
+            return None
+
+        row = self._tag_strict(conn, ref)
+        if row is not None or len(chunks) > 1:
+            return row
+
+        return conn.execute(
+            f"SELECT {self._TAG_COLS} FROM tags WHERE name_key = ? "
+            "ORDER BY (parent_id IS NOT NULL), id LIMIT 1",
+            (chunks[0].casefold(),),
         ).fetchone()
+
+    def _tag_id(self, conn, ref: str) -> Optional[int]:
+        row = self._tag_row(conn, ref)
         return row["id"] if row else None
 
-    def _ensure_tag(self, conn, name: str, colour: Optional[str] = None) -> int:
-        """Возвращает id тега, создавая при необходимости."""
-        conn.execute(
-            "INSERT OR IGNORE INTO tags (name, name_key, colour) VALUES (?, ?, ?)",
-            (name, name.casefold(), colour),
-        )
-        row = conn.execute(
-            "SELECT id FROM tags WHERE name_key = ?", (name.casefold(),)
-        ).fetchone()
-        return row["id"]
+    def _ensure_tag(
+        self, conn, ref: str, colour: Optional[str] = None, reuse_any: bool = True
+    ) -> int:
+        """Возвращает id тега, создавая его и недостающих родителей по пути.
+
+        reuse_any=True: одиночное имя сначала ищется где угодно — тёзок не
+        размножаем. reuse_any=False (для create_tag): путь строгий.
+        """
+        chunks = tagpaths.parts(ref)
+        if not chunks:
+            raise ValueError(f"пустой путь тега: {ref!r}")
+
+        if reuse_any and len(chunks) == 1:
+            row = self._tag_row(conn, chunks[0])
+            if row is not None:
+                return row["id"]
+
+        parent_id: Optional[int] = None
+        tag_id: Optional[int] = None
+        for i, chunk in enumerate(chunks):
+            row = self._child_row(conn, parent_id, chunk)
+            if row is None:
+                conn.execute(
+                    "INSERT INTO tags (name, name_key, colour, parent_id) VALUES (?, ?, ?, ?)",
+                    (chunk, chunk.casefold(), colour if i == len(chunks) - 1 else None, parent_id),
+                )
+                row = self._child_row(conn, parent_id, chunk)
+            tag_id = row["id"]
+            parent_id = tag_id
+        return tag_id
 
     def _would_cycle(self, conn, tag_id: int, parent_id: int) -> bool:
         """True, если parent_id — сам tag_id или его потомок.
@@ -251,11 +403,12 @@ class SQLiteRepository(AbstractRepository, Logger):
 
     def remove_tag(self, file_id: int, tag: str) -> bool:
         with self._connect() as conn:
+            tag_id = self._tag_id(conn, tag)
+            if tag_id is None:
+                return False
             cur = conn.execute(
-                """DELETE FROM file_tags
-                   WHERE file_id = ?
-                     AND tag_id = (SELECT id FROM tags WHERE name_key = ?)""",
-                (file_id, tag.casefold()),
+                "DELETE FROM file_tags WHERE file_id = ? AND tag_id = ?",
+                (file_id, tag_id),
             )
             conn.commit()
             return cur.rowcount > 0
@@ -266,25 +419,31 @@ class SQLiteRepository(AbstractRepository, Logger):
             for name in dict.fromkeys(tags):  # без дублей, с сохранением порядка
                 tag_id = self._ensure_tag(conn, name)
                 conn.execute(
-                    "INSERT INTO file_tags (file_id, tag_id) VALUES (?, ?)",
+                    "INSERT OR IGNORE INTO file_tags (file_id, tag_id) VALUES (?, ?)",
                     (file_id, tag_id),
                 )
             conn.commit()
             return True
 
     def rename_tag(self, old: str, new: str) -> bool:
-        """Переименование = ОДНА строка. Если new существует — слияние."""
+        """Переименование = ОДНА строка. Если брат с таким именем есть — слияние."""
         with self._connect() as conn:
-            src = conn.execute(
-                "SELECT id FROM tags WHERE name_key = ?", (old.casefold(),)
-            ).fetchone()
-            if not src:
+            src = self._tag_row(conn, old)
+            if src is None:
                 return False
-            dst = conn.execute(
-                "SELECT id FROM tags WHERE name_key = ?", (new.casefold(),)
-            ).fetchone()
 
-            if dst and dst["id"] != src["id"]:
+            chunks = tagpaths.parts(new)
+            if not chunks:
+                return False
+            new_name = chunks[-1]
+
+            dst = self._child_row(conn, src["parent_id"], new_name)
+            if dst is not None and dst["id"] != src["id"]:
+                # дети переезжают к родителю src, ссылки уходят на dst
+                conn.execute(
+                    "UPDATE tags SET parent_id = ? WHERE parent_id = ?",
+                    (src["parent_id"], src["id"]),
+                )
                 conn.execute(
                     """INSERT OR IGNORE INTO file_tags (file_id, tag_id)
                        SELECT file_id, ? FROM file_tags WHERE tag_id = ?""",
@@ -295,57 +454,58 @@ class SQLiteRepository(AbstractRepository, Logger):
             else:
                 conn.execute(
                     "UPDATE tags SET name = ?, name_key = ? WHERE id = ?",
-                    (new, new.casefold(), src["id"]),
+                    (new_name, new_name.casefold(), src["id"]),
                 )
             conn.commit()
             return True
 
     # ---------- теги: создание и иерархия ----------
+
     def create_tag(self, name: str, colour: Optional[str] = None) -> bool:
+        """Создать тег по пути, достроив недостающих родителей.
+
+        Путь строгий: create_tag("a") создаст корневой «a», даже если где-то
+        есть вложенный тёзка. False — если тег по этому пути уже есть.
+        """
         with self._connect() as conn:
-            if self._tag_id(conn, name) is not None:
+            if self._tag_strict(conn, name) is not None:
                 return False
-            conn.execute(
-                "INSERT INTO tags (name, name_key, colour) VALUES (?, ?, ?)",
-                (name, name.casefold(), colour),
-            )
+            self._ensure_tag(conn, name, colour, reuse_any=False)
             conn.commit()
             return True
 
     def delete_tag(self, name: str) -> bool:
         """Удаляет тег: дети поднимаются на уровень его родителя, ссылки уходят каскадом."""
         with self._connect() as conn:
-            tag_id = self._tag_id(conn, name)
-            if tag_id is None:
+            row = self._tag_row(conn, name)
+            if row is None:
                 return False
-            row = conn.execute(
-                "SELECT parent_id FROM tags WHERE id = ?", (tag_id,)
-            ).fetchone()
             conn.execute(
                 "UPDATE tags SET parent_id = ? WHERE parent_id = ?",
-                (row["parent_id"], tag_id),
+                (row["parent_id"], row["id"]),
             )
-            conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+            conn.execute("DELETE FROM tags WHERE id = ?", (row["id"],))
             conn.commit()
             return True
 
     def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
         with self._connect() as conn:
-            tag_id = self._tag_id(conn, tag)
-            if tag_id is None:
+            row = self._tag_row(conn, tag)
+            if row is None:
                 return False
 
             if parent is None:
                 parent_id = None
             else:
-                parent_id = self._tag_id(conn, parent)
-                if parent_id is None:
+                prow = self._tag_row(conn, parent)
+                if prow is None:
                     return False
-                if self._would_cycle(conn, tag_id, parent_id):
+                parent_id = prow["id"]
+                if self._would_cycle(conn, row["id"], parent_id):
                     return False          # был бы цикл
 
             conn.execute(
-                "UPDATE tags SET parent_id = ? WHERE id = ?", (parent_id, tag_id)
+                "UPDATE tags SET parent_id = ? WHERE id = ?", (parent_id, row["id"])
             )
             conn.commit()
             return True

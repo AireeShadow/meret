@@ -48,8 +48,15 @@ def path_of(tag: Tag, by_id: Dict[int, Tag]) -> str:
 
 
 def name_map(tags: Iterable[Tag]) -> Dict[str, Tag]:
-    """{имя_в_нижнем_регистре: Tag}."""
-    return {t.name.casefold(): t for t in tags}
+    """{имя_в_нижнем_регистре: Tag}.
+
+    Тёзки в разных ветках теперь законны, поэтому выбор детерминирован:
+    сначала корневой, потом минимальный id. Для уникальных имён — как раньше.
+    """
+    result: Dict[str, Tag] = {}
+    for tag in sorted(tags, key=lambda t: (t.parent_id is not None, t.id or 0)):
+        result.setdefault(tag.name.casefold(), tag)
+    return result
 
 
 def path_map(tags: Iterable[Tag]) -> Dict[str, Tag]:
@@ -60,9 +67,15 @@ def path_map(tags: Iterable[Tag]) -> Dict[str, Tag]:
 
 
 def name_to_path(tags: Iterable[Tag]) -> Dict[str, str]:
-    """{имя_в_нижнем_регистре: полный путь} — для отображения."""
-    return {t.name.casefold(): p for p, t in path_map(tags).items()}
+    """{имя_в_нижнем_регистре: полный путь} — для отображения.
 
+    При тёзках берём самый короткий путь: он стабильнее и читабельнее.
+    """
+    result: Dict[str, str] = {}
+    items = sorted(path_map(tags).items(), key=lambda kv: (kv[0].count(SEP), kv[0]))
+    for path, tag in items:
+        result.setdefault(tag.name.casefold(), path)
+    return result
 
 def resolve(path: str, tags: Iterable[Tag]) -> Optional[Tag]:
     """Тег по полному пути ИЛИ по имени. Регистр не важен. None — если нет.
@@ -73,6 +86,17 @@ def resolve(path: str, tags: Iterable[Tag]) -> Optional[Tag]:
     tags = list(tags)
     key = normalize(path).casefold()
     return path_map(tags).get(key) or name_map(tags).get(key)
+
+def resolve_all(path: str, tags: Iterable[Tag]) -> List[Tag]:
+    """Все теги, подходящие под путь ИЛИ имя. Тёзки — все."""
+    tags = list(tags)
+    by_id = {t.id: t for t in tags}
+    key = normalize(path).casefold()
+    hits = [
+        t for t in tags
+        if t.name.casefold() == key or path_of(t, by_id).casefold() == key
+    ]
+    return sorted(hits, key=lambda t: (t.parent_id is not None, t.id or 0))
 
 
 def missing_ancestors(path: str, tags: Iterable[Tag]) -> List[str]:

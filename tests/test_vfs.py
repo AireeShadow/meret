@@ -172,6 +172,6 @@ def test_tag_index_matches_tagpaths(tree, mock_repo):
 
 
 def test_resolve_tag_uses_sanitized_name(tree, mock_repo):
-    """Ключ индекса — sanitize(name), поэтому слэш в имени тега не ломает путь."""
-    mock_repo.create_tag("a/b")
+    """Ключ индекса — sanitize(name), поэтому «:» в имени не ломает путь."""
+    mock_repo.create_tag("a:b")
     assert tree.stat("/a∕b").is_dir

@@ -58,3 +58,22 @@ def test_resolve_falls_back_to_name(tags):
 
 def test_name_map(tags):
     assert tagpaths.name_map(tags)["студия"].name == "студия"
+
+def _tag(id: int, name: str, parent_id=None) -> Tag:
+    return Tag(id=id, name=name, parent_id=parent_id)
+
+
+def test_resolve_prefers_root_for_twins():
+    tags = [_tag(1, "жанр"), _tag(2, "детектив", 1), _tag(3, "детектив")]
+    assert tagpaths.resolve("детектив", tags).id == 3
+    assert tagpaths.resolve("жанр/детектив", tags).id == 2
+
+
+def test_resolve_all_returns_twins():
+    tags = [_tag(1, "жанр"), _tag(2, "детектив", 1), _tag(3, "детектив")]
+    assert {t.id for t in tagpaths.resolve_all("детектив", tags)} == {2, 3}
+
+
+def test_name_to_path_prefers_shallowest():
+    tags = [_tag(1, "жанр"), _tag(2, "детектив", 1), _tag(3, "детектив")]
+    assert tagpaths.name_to_path(tags)["детектив"] == "детектив"

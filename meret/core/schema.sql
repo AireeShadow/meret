@@ -19,6 +19,9 @@ CREATE INDEX IF NOT EXISTS idx_files_rating ON files(rating);
 -- Теги. parent_id даёт иерархию → "папки" из шага 3.
 -- name_key = name.casefold(): COLLATE NOCASE в SQLite сворачивает только ASCII,
 -- а теги у нас кириллицей. Поиск и уникальность — всегда по name_key.
+-- Уникальность — среди БРАТЬЕВ: (COALESCE(parent_id, 0), name_key), поэтому
+-- «жанр/детектив» и «студия/детектив» живут одновременно. Индекс создаётся
+-- в _migrate_tags — он зависит от name_key, которой в старой БД может не быть.
 CREATE TABLE IF NOT EXISTS tags (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL,
@@ -27,7 +30,6 @@ CREATE TABLE IF NOT EXISTS tags (
     parent_id   INTEGER REFERENCES tags(id) ON DELETE SET NULL,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tags_name_key ON tags(name_key);
 CREATE INDEX IF NOT EXISTS idx_tags_parent ON tags(parent_id);
 
 -- Связь многие-ко-многим.
