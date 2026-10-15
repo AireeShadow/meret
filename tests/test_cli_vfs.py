@@ -62,22 +62,19 @@ def test_ls_missing_path(db):
 
 def test_ls_empty_tag(db):
     repo = SQLiteRepository(str(db / "meret.db"))
-    f = repo.save_file(
-        FileEntry(filename="x.png", filepath="/x.png", type=FileType.IMAGE)
-    )
+    f = repo.save_file(FileEntry(filename="x.png", filepath="/x.png", type=FileType.IMAGE))
     repo.add_tag(f, "unused")
-    repo.remove_tag(f, "unused")      # ← the tag lives on, but has no files
+    repo.remove_tag(f, "unused")  # ← the tag lives on, but has no files
 
     r = runner.invoke(app, ["ls", "/unused", "--db", str(db)])
     assert r.exit_code == 0
     assert "(empty)" in r.output
 
+
 def test_ls_tag_with_file(db):
     """And this one is a tag that does have a file."""
     repo = SQLiteRepository(str(db / "meret.db"))
-    f = repo.save_file(
-        FileEntry(filename="x.png", filepath="/x.png", type=FileType.IMAGE)
-    )
+    f = repo.save_file(FileEntry(filename="x.png", filepath="/x.png", type=FileType.IMAGE))
     repo.add_tag(f, "used")
 
     r = runner.invoke(app, ["ls", "/used", "--db", str(db)])
@@ -85,9 +82,7 @@ def test_ls_tag_with_file(db):
 
 
 def test_open_path_only(db):
-    r = runner.invoke(
-        app, ["open", "/travel/seaside/beach.png", "--path", "--db", str(db)]
-    )
+    r = runner.invoke(app, ["open", "/travel/seaside/beach.png", "--path", "--db", str(db)])
     assert r.exit_code == 0
     assert "beach.png" in r.output
 

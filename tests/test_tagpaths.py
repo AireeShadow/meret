@@ -22,7 +22,10 @@ def test_normalize():
 
 def test_path_map(tags):
     assert set(tagpaths.path_map(tags)) == {
-        "genre", "genre/mystery", "genre/mystery/noir", "studio"
+        "genre",
+        "genre/mystery",
+        "genre/mystery/noir",
+        "studio",
     }
 
 
@@ -35,7 +38,9 @@ def test_missing_ancestors(tags):
     assert tagpaths.missing_ancestors("genre/mystery/noir", tags) == []
     assert tagpaths.missing_ancestors("genre/thriller", tags) == ["genre/thriller"]
     assert tagpaths.missing_ancestors("section/sub/leaf", tags) == [
-        "section", "section/sub", "section/sub/leaf"
+        "section",
+        "section/sub",
+        "section/sub/leaf",
     ]
 
 
@@ -47,7 +52,8 @@ def test_subtree_names(tags):
 def test_path_of_survives_cycle():
     broken = [Tag(id=1, name="a", parent_id=2), Tag(id=2, name="b", parent_id=1)]
     by_id = {t.id: t for t in broken}
-    assert tagpaths.path_of(broken[0], by_id) == "b/a"     # no infinite loop
+    assert tagpaths.path_of(broken[0], by_id) == "b/a"  # no infinite loop
+
 
 def test_resolve_falls_back_to_name(tags):
     # "noir" lives at genre/mystery/noir — found by name too
@@ -58,6 +64,7 @@ def test_resolve_falls_back_to_name(tags):
 
 def test_name_map(tags):
     assert tagpaths.name_map(tags)["studio"].name == "studio"
+
 
 def _tag(id: int, name: str, parent_id=None) -> Tag:
     return Tag(id=id, name=name, parent_id=parent_id)

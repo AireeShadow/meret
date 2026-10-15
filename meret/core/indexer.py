@@ -138,9 +138,7 @@ class Indexer(Logger):
             if progress_callback:
                 progress_callback(PHASE_INDEX, done, total)
 
-        return self.repo.save_files(
-            entries, chunk_size=self.chunk_size, on_progress=on_chunk
-        )
+        return self.repo.save_files(entries, chunk_size=self.chunk_size, on_progress=on_chunk)
 
     # ---------- orchestration ----------
 
@@ -166,8 +164,11 @@ class Indexer(Logger):
 
         if dry_run:
             return {
-                "indexed": 0, "updated": 0, "errors": 0,
-                "found": len(entries), "skipped": skipped,
+                "indexed": 0,
+                "updated": 0,
+                "errors": 0,
+                "found": len(entries),
+                "skipped": skipped,
                 "interrupted": self.interrupted,
             }
 

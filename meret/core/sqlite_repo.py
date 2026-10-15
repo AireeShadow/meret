@@ -23,7 +23,7 @@ def _iter_statements(script: str):
     """
     buf: list[str] = []
     quote: Optional[str] = None
-    depth = 0                      # BEGIN...END nesting depth
+    depth = 0  # BEGIN...END nesting depth
     i, n = 0, len(script)
 
     while i < n:
@@ -46,7 +46,7 @@ def _iter_statements(script: str):
         if quote is not None:
             buf.append(ch)
             if ch == quote:
-                if i + 1 < n and script[i + 1] == quote:   # '' is an escaped quote
+                if i + 1 < n and script[i + 1] == quote:  # '' is an escaped quote
                     buf.append(script[i + 1])
                     i += 2
                     continue
@@ -103,14 +103,13 @@ class SQLiteRepository(AbstractRepository, Logger):
         self.db_path = str(db_path)
         self.fts_enabled = True
         self._init_tables()
-        
 
     # ---------- connection ----------
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")   # fewer locks
+        conn.execute("PRAGMA journal_mode = WAL")  # fewer locks
         conn.execute("PRAGMA synchronous = NORMAL")  # no fsync on every commit
         return conn
 
@@ -121,7 +120,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                 try:
                     conn.execute(stmt)
                 except sqlite3.OperationalError as e:
-                    if "fts5" in stmt.lower():          # build without FTS5 — don't crash
+                    if "fts5" in stmt.lower():  # build without FTS5 — don't crash
                         self.fts_enabled = False
                         self.logger.warning(f"FTS5 unavailable: {e}")
                     else:
@@ -146,7 +145,6 @@ class SQLiteRepository(AbstractRepository, Logger):
                 f"schema was only partially created, missing tables: {', '.join(missing)}. "
                 "Looks like a statement in schema.sql lost its ';'"
             )
-        
 
     def _migrate_tags(self, conn) -> None:
         """Brings an old tags table up to the current schema.
@@ -258,13 +256,14 @@ class SQLiteRepository(AbstractRepository, Logger):
             known = {row[0] for row in conn.execute("SELECT filepath FROM files")}
 
             for start in range(0, total, chunk_size):
-                part = files[start:start + chunk_size]
+                part = files[start : start + chunk_size]
                 rows = []
                 for entry in part:
                     try:
                         meta = (
                             json.dumps(entry.metadata, ensure_ascii=False)
-                            if entry.metadata else None
+                            if entry.metadata
+                            else None
                         )
                     except (TypeError, ValueError) as e:
                         stats["errors"] += 1
@@ -387,9 +386,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             if cur == tag_id:
                 return True
             seen.add(cur)
-            row = conn.execute(
-                "SELECT parent_id FROM tags WHERE id = ?", (cur,)
-            ).fetchone()
+            row = conn.execute("SELECT parent_id FROM tags WHERE id = ?", (cur,)).fetchone()
             cur = row["parent_id"] if row else None
         return False
 
@@ -504,11 +501,9 @@ class SQLiteRepository(AbstractRepository, Logger):
                     return False
                 parent_id = prow["id"]
                 if self._would_cycle(conn, row["id"], parent_id):
-                    return False          # it would be a cycle
+                    return False  # it would be a cycle
 
-            conn.execute(
-                "UPDATE tags SET parent_id = ? WHERE id = ?", (parent_id, row["id"])
-            )
+            conn.execute("UPDATE tags SET parent_id = ? WHERE id = ?", (parent_id, row["id"]))
             conn.commit()
             return True
 

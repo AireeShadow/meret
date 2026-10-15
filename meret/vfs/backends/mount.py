@@ -80,7 +80,7 @@ def _watch_stdin(is_done, on_quit) -> None:
         while not is_done():
             line = sys.stdin.readline()
             if line == "":
-                return          # stdin is closed — quietly exit the thread
+                return  # stdin is closed — quietly exit the thread
             on_quit()
             return
     except Exception:  # noqa: BLE001
@@ -88,6 +88,7 @@ def _watch_stdin(is_done, on_quit) -> None:
 
 
 # ---------- Linux / macOS ----------
+
 
 def _mount_fuse(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
     from fuse import FUSE, LoggingMixIn, Operations
@@ -126,7 +127,7 @@ def _mount_fuse(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             return self._next_fh - 1
 
         def read(self, path, size, offset, fh):
-            return self._buffers[fh][offset:offset + size]
+            return self._buffers[fh][offset : offset + size]
 
         def release(self, path, fh):
             self._buffers.pop(fh, None)
@@ -139,6 +140,7 @@ def _mount_fuse(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
 
 # ---------- Windows ----------
+
 
 def _norm_windows_path(name: str) -> str:
     """WinFsp passes '\\beach\\file.png' — normalize to '/beach/file.png'."""
@@ -209,7 +211,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             except Exception:  # noqa: BLE001
                 return NTSTATUS.STATUS_UNEXPECTED_IO_ERROR
             return NTSTATUS.STATUS_SUCCESS
-        
+
         def get_volume_info(self):
             return {
                 "total_size": 1 << 40,
@@ -236,7 +238,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 "is_dir": node.is_dir,
                 "size": node.size,
                 "path": vpath,
-                "data": None,   # lazy content cache
+                "data": None,  # lazy content cache
             }
 
         def open(self, file_name, create_options, granted_access):
@@ -267,7 +269,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
         def close(self, file_context):
             if isinstance(file_context, dict):
-                file_context["data"] = None    # release the content cache
+                file_context["data"] = None  # release the content cache
             return None
 
         def cleanup(self, file_context, file_name, flags):
@@ -279,9 +281,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
         def _info(self, node):
             return {
-                "file_attributes": (
-                    FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY if node.is_dir else 0
-                ),
+                "file_attributes": (FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY if node.is_dir else 0),
                 "allocation_size": 0,
                 "file_size": 0 if node.is_dir else node.size,
                 "creation_time": 0,
@@ -319,7 +319,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
             for i, entry in enumerate(entries):
                 if entry["file_name"] == marker:
-                    return entries[i + 1:]
+                    return entries[i + 1 :]
             return []
 
         def read(self, file_context, offset, length):
@@ -331,7 +331,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 file_context["data"] = data
             if offset >= len(data):
                 raise NTStatusEndOfFile()
-            return data[offset:offset + length]
+            return data[offset : offset + length]
 
     fs = FileSystem(
         mountpoint,
@@ -340,7 +340,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         sectors_per_allocation_unit=1,
         file_info_timeout=1000,
         case_sensitive_search=1,
-        case_preserved_names=1,      # mandatory — otherwise Cyrillic names get mangled
+        case_preserved_names=1,  # mandatory — otherwise Cyrillic names get mangled
         unicode_on_disk=1,
         post_cleanup_when_modified_only=1,
         file_system_name=mountpoint,
@@ -378,8 +378,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         def _watchdog() -> None:
             if not stopped.wait(STOP_GRACE_SECONDS):
                 print(
-                    f"\nmeret: FS did not stop within {STOP_GRACE_SECONDS:g} s — "
-                    "forcing exit",
+                    f"\nmeret: FS did not stop within {STOP_GRACE_SECONDS:g} s — forcing exit",
                     file=sys.stderr,
                 )
             _flush_streams()
@@ -394,8 +393,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             os._exit(0)
 
         print(
-            f"\nmeret: {reason} — stopping the FS "
-            "(Ctrl+C or Enter again to exit immediately)",
+            f"\nmeret: {reason} — stopping the FS (Ctrl+C or Enter again to exit immediately)",
             flush=True,
         )
         shutdown.set()
@@ -437,16 +435,14 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             time.sleep(POLL_INTERVAL)
 
         if not stopped.wait(STOP_GRACE_SECONDS):
-            print(
-                f"meret: FS did not stop within {STOP_GRACE_SECONDS:g} s — "
-                "forcing exit"
-            )
+            print(f"meret: FS did not stop within {STOP_GRACE_SECONDS:g} s — forcing exit")
     finally:
         _flush_streams()
         os._exit(0)
 
 
 # ---------- dispatcher ----------
+
 
 def mount(tree: VirtualTree, mountpoint: str | Path, foreground: bool = True) -> None:
     """Mount the virtual FS (read-only)."""

@@ -12,6 +12,7 @@ from meret.vfs.errors import IsADirectory, NotFound
 _FORBIDDEN = '/\\:*?"<>|'
 _SAFE_SUB = "∕"  # U+2215 DIVISION SLASH
 
+
 @dataclass(frozen=True)
 class Node:
     name: str
@@ -54,9 +55,7 @@ class VirtualTree:
 
     # ---------- tag index ----------
 
-    def _tag_index(
-        self, tags: Optional[List[Tag]] = None
-    ) -> Dict[Tuple[Optional[int], str], Tag]:
+    def _tag_index(self, tags: Optional[List[Tag]] = None) -> Dict[Tuple[Optional[int], str], Tag]:
         """{(parent_id, lowercase_name): tag} — for fast lookup.
 
         The index is built by tagpaths — one implementation for the whole project.
@@ -67,16 +66,12 @@ class VirtualTree:
             tags = self.repo.get_all_tags()
         return tagpaths.index_by_parent(tags, key=lambda t: sanitize(t.name).casefold())
 
-    def _children_of(
-        self, parent_id: Optional[int], tags: Optional[List[Tag]] = None
-    ) -> List[Tag]:
+    def _children_of(self, parent_id: Optional[int], tags: Optional[List[Tag]] = None) -> List[Tag]:
         if tags is None:
             tags = self.repo.get_all_tags()
         return [t for t in tags if t.parent_id == parent_id]
 
-    def _resolve_tag(
-        self, vpath: str, tags: Optional[List[Tag]] = None
-    ) -> Optional[Tag]:
+    def _resolve_tag(self, vpath: str, tags: Optional[List[Tag]] = None) -> Optional[Tag]:
         """Finds a tag by path. None for the root. NotFound if missing."""
         parts = self._parts(vpath)
         if not parts:
@@ -222,4 +217,3 @@ class VirtualTree:
             yield node
             if node.is_dir:
                 yield from self.walk(node.vpath)
-

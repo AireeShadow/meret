@@ -77,6 +77,7 @@ def name_to_path(tags: Iterable[Tag]) -> Dict[str, str]:
         result.setdefault(tag.name.casefold(), path)
     return result
 
+
 def resolve(path: str, tags: Iterable[Tag]) -> Optional[Tag]:
     """Tag by full path OR by name. Case-insensitive. None if not found.
 
@@ -87,15 +88,13 @@ def resolve(path: str, tags: Iterable[Tag]) -> Optional[Tag]:
     key = normalize(path).casefold()
     return path_map(tags).get(key) or name_map(tags).get(key)
 
+
 def resolve_all(path: str, tags: Iterable[Tag]) -> List[Tag]:
     """All tags matching the path OR the name. All namesakes included."""
     tags = list(tags)
     by_id = {t.id: t for t in tags}
     key = normalize(path).casefold()
-    hits = [
-        t for t in tags
-        if t.name.casefold() == key or path_of(t, by_id).casefold() == key
-    ]
+    hits = [t for t in tags if t.name.casefold() == key or path_of(t, by_id).casefold() == key]
     return sorted(hits, key=lambda t: (t.parent_id is not None, t.id or 0))
 
 
@@ -109,6 +108,7 @@ def missing_ancestors(path: str, tags: Iterable[Tag]) -> List[str]:
         if candidate.casefold() not in known:
             result.append(candidate)
     return result
+
 
 def subtree_ids(path: str, tags: Iterable[Tag]) -> List[int]:
     """Ids of the tag (by path/name) and all of its descendants."""
@@ -126,6 +126,7 @@ def subtree_ids(path: str, tags: Iterable[Tag]) -> List[int]:
                 ids.add(t.id)
                 changed = True
     return sorted(ids)
+
 
 def subtree_names(path: str, tags: Iterable[Tag]) -> List[str]:
     """Names of the tag (by path/name) and all its descendants (for subtree search)."""

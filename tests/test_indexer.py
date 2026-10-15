@@ -8,6 +8,7 @@ from meret.core.indexer import PHASE_COLLECT, PHASE_EXTRACT, Indexer
 
 # ---------- collect phase ----------
 
+
 def test_collect_only_supported(tmp_path, make_png, mock_repo):
     make_png("a")
     make_png("b")
@@ -38,6 +39,7 @@ def test_collect_missing_library(mock_repo, tmp_path):
 
 # ---------- extract phase ----------
 
+
 def test_extract_metadata(tmp_path, make_png, mock_repo):
     make_png("a", size=(32, 24))
 
@@ -62,6 +64,7 @@ def test_video_via_registry(tmp_path, mock_repo, monkeypatch):
 
 
 # ---------- orchestration ----------
+
 
 def test_dry_run_writes_nothing(tmp_path, make_png, mock_repo):
     make_png("a")
@@ -96,6 +99,7 @@ def test_run_single_file(tmp_path, make_png, mock_repo):
 
 # ---------- progress ----------
 
+
 def test_progress_callback_reports_both_phases(tmp_path, make_png, mock_repo):
     for _ in range(3):
         make_png("a")
@@ -108,7 +112,7 @@ def test_progress_callback_reports_both_phases(tmp_path, make_png, mock_repo):
     phases = [p for p, _, _ in seen]
     assert PHASE_COLLECT in phases
     assert PHASE_EXTRACT in phases
-    assert seen[-1][1:] == (3, 3)      # both phases run to completion
+    assert seen[-1][1:] == (3, 3)  # both phases run to completion
 
 
 def test_progress_callback_single_file(tmp_path, make_png, mock_repo):
@@ -123,8 +127,10 @@ def test_progress_callback_single_file(tmp_path, make_png, mock_repo):
 
 # ---------- misc ----------
 
+
 def test_interrupted_defaults_false(mock_repo, tmp_path):
     assert Indexer(mock_repo, tmp_path).interrupted is False
+
 
 def test_skip_existing_skips_indexed(tmp_path, make_png, mock_repo):
     make_png("a")
@@ -139,7 +145,7 @@ def test_skip_existing_skips_indexed(tmp_path, make_png, mock_repo):
     assert stats["skipped"] == 2
     assert stats["indexed"] == 0
     assert mock_repo.get_stats()["total_files"] == 2
-    assert PHASE_EXTRACT not in seen          # nothing to extract
+    assert PHASE_EXTRACT not in seen  # nothing to extract
 
 
 def test_skip_existing_indexes_only_new(tmp_path, make_png, mock_repo):

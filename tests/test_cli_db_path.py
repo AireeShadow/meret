@@ -1,4 +1,5 @@
 """DB path: no database is an error; only init creates one."""
+
 import pytest
 from typer.testing import CliRunner
 

@@ -1,4 +1,5 @@
 """fsspec adapter. Imported separately — requires fsspec."""
+
 import io
 
 import fsspec
@@ -19,15 +20,13 @@ class MeretFileSystem(AbstractFileSystem):
         if not detail:
             return [n.name for n in nodes]
         return [
-            {"name": n.vpath, "size": n.size,
-             "type": "directory" if n.is_dir else "file"}
+            {"name": n.vpath, "size": n.size, "type": "directory" if n.is_dir else "file"}
             for n in nodes
         ]
 
     def info(self, path, **kw):
         n = self._tree.stat(path)
-        return {"name": n.vpath, "size": n.size,
-                "type": "directory" if n.is_dir else "file"}
+        return {"name": n.vpath, "size": n.size, "type": "directory" if n.is_dir else "file"}
 
     def isdir(self, path):
         return self._tree.isdir(path)

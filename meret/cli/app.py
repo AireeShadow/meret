@@ -22,6 +22,7 @@ DB_OPTION = typer.Option(None, "--db", "-d", help="Database directory or path to
 
 # ----- database -----
 
+
 @app.command()
 def init(
     path: Optional[Path] = typer.Argument(
@@ -53,6 +54,7 @@ def where(db_path: Optional[Path] = DB_OPTION):
 
 # ----- scan -----
 
+
 @app.command()
 def scan(
     library: Path = typer.Argument(..., help="What to scan"),
@@ -68,9 +70,7 @@ def scan(
         console.print(f"[red]No such path: {library}[/red]")
         raise typer.Exit(1)
 
-    indexer = Indexer(
-        get_repo(db_path), library, workers=workers, skip_existing=skip_existing
-    )
+    indexer = Indexer(get_repo(db_path), library, workers=workers, skip_existing=skip_existing)
 
     with Progress(
         TextColumn("[cyan]{task.description}"),
@@ -94,9 +94,7 @@ def scan(
         console.print("[yellow]⚠ Interrupted by user[/yellow]")
 
     if dry_run:
-        console.print(
-            f"[cyan]New files: {stats['found']}, skipped: {stats['skipped']}[/cyan]"
-        )
+        console.print(f"[cyan]New files: {stats['found']}, skipped: {stats['skipped']}[/cyan]")
     else:
         console.print(
             f"[green]✓ New: {stats['indexed']}, "
@@ -108,13 +106,12 @@ def scan(
 
 # ----- search -----
 
+
 @app.command()
 def search(
     query: str = typer.Argument("", help="Text in the file name"),
     db_path: Optional[Path] = DB_OPTION,
-    tags: Optional[List[str]] = typer.Option(
-        None, "--tag", "-g", help="Tag path: genre/mystery"
-    ),
+    tags: Optional[List[str]] = typer.Option(None, "--tag", "-g", help="Tag path: genre/mystery"),
     match_all: bool = typer.Option(False, "--all", help="Files with ALL the tags"),
     file_type: Optional[str] = typer.Option(None, "--type", "-t"),
 ):
@@ -124,9 +121,7 @@ def search(
     if tags:
         all_tags = repo.get_all_tags()
         groups = [tagpaths.subtree_ids(path, all_tags) for path in tags]
-        results = repo.search_by_tag_ids(
-            groups, match_all=match_all, file_type=file_type
-        )
+        results = repo.search_by_tag_ids(groups, match_all=match_all, file_type=file_type)
     else:
         results = repo.search_by_name(query) if query else []
 
@@ -135,7 +130,12 @@ def search(
         return
 
     table = Table(title=f"Found: {len(results)}")
-    for col, style in (("File", "cyan"), ("Type", "green"), ("Rating", "yellow"), ("Tags", "magenta")):
+    for col, style in (
+        ("File", "cyan"),
+        ("Type", "green"),
+        ("Rating", "yellow"),
+        ("Tags", "magenta"),
+    ):
         table.add_column(col, style=style)
 
     for f in results[:50]:
@@ -145,6 +145,7 @@ def search(
 
 
 # ----- tags -----
+
 
 def _print_tree(repo: AbstractRepository) -> None:
     def build(nodes, node):
@@ -157,12 +158,14 @@ def _print_tree(repo: AbstractRepository) -> None:
     console.print(root)
 
 
-def _ensure_path(repo: AbstractRepository, path: str, colour: Optional[str] = None) -> Optional[Tag]:
+def _ensure_path(
+    repo: AbstractRepository, path: str, colour: Optional[str] = None
+) -> Optional[Tag]:
     """Tag by path; missing parents are created. None for an empty path."""
     path = tagpaths.normalize(path)
     if not path:
         return None
-    repo.create_tag(path, colour)          # the repository builds the parents itself
+    repo.create_tag(path, colour)  # the repository builds the parents itself
     return tagpaths.resolve(path, repo.get_all_tags())
 
 
@@ -193,9 +196,7 @@ def tag(
     done: List[str] = []
     for label in labels:
         found = (
-            tagpaths.resolve(label, repo.get_all_tags())
-            if remove
-            else _ensure_path(repo, label)
+            tagpaths.resolve(label, repo.get_all_tags()) if remove else _ensure_path(repo, label)
         )
         if found is None:
             console.print(f"[yellow]No such path: {label}[/yellow]")
@@ -209,9 +210,7 @@ def tag(
 
     updated = repo.get_file_by_id(entry.id)
     console.print(f"[green]✓ {'Removed' if remove else 'Added'}: {', '.join(done)}[/green]")
-    console.print(
-        f"[dim]Tags: {', '.join(_path_of(repo, n) for n in updated.labels) or '—'}[/dim]"
-    )
+    console.print(f"[dim]Tags: {', '.join(_path_of(repo, n) for n in updated.labels) or '—'}[/dim]")
 
 
 @app.command("tag-new")
@@ -318,6 +317,7 @@ def tag_prune(db_path: Optional[Path] = DB_OPTION):
 
 
 # ----- misc -----
+
 
 @app.command()
 def stats(db_path: Optional[Path] = DB_OPTION):
