@@ -6,7 +6,7 @@ repository handles storage. Only traversal and coordination logic lives here.
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, Generator, List, Optional
+from typing import Dict, Generator, List, Tuple, Optional
 
 from meret.core.extractors import ExtractorRegistry
 from meret.core.logger import Logger
@@ -80,7 +80,14 @@ class Indexer(Logger):
         return found
 
     # ---------- processing ----------
-
+    @staticmethod
+    def _fingerprint(path: Path) -> Optional[Tuple[int, float]]:
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        return int(st.st_size), float(st.st_mtime)
+    
     def _process_file(self, file_path: Path) -> Optional[FileEntry]:
         """Extraction only — no DB access (important for threads)."""
         file_type = self.registry.get_file_type(file_path)
@@ -154,11 +161,11 @@ class Indexer(Logger):
 
         skipped = 0
         if self.skip_existing and files:
-            known = self.repo.known_paths()
+            known = self.repo.known_fingerprints()
             before = len(files)
-            files = [f for f in files if str(f) not in known]
+            files = [f for f in files if known.get(str(f)) != self._fingerprint(f)]
             skipped = before - len(files)
-            self.logger.info(f"Skipped {skipped}/{before} already indexed files")
+            self.logger.info(f"Skipped {skipped}/{before} unchanged files")
 
         entries = self.extract(files, progress_callback=progress_callback)
 

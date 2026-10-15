@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, Set, Optional
+from typing import Callable, Dict, List, Set, Tuple, Optional
 
 from meret.core.models import FileEntry, Tag, TagNode
 
@@ -108,4 +108,11 @@ class AbstractRepository(ABC):
 
         One query for the whole scan, so incremental mode doesn't issue a
         SELECT per file (otherwise it's the same story we had with writes).
+        """
+    @abstractmethod
+    def known_fingerprints(self) -> Dict[str, Tuple[int, float]]:
+        """{filepath: (size, mtime)} for every indexed file.
+
+        Lets the incremental scan re-index files that changed on disk while
+        skipping the untouched ones. One query, like known_paths.
         """

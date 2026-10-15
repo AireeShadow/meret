@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS files (
     rating      INTEGER DEFAULT 0,
     type        TEXT DEFAULT 'unknown',
     metadata    TEXT,
+    size_bytes  INTEGER DEFAULT 0,   -- fingerprint for the incremental scan
+    mtime       REAL DEFAULT 0,      -- fingerprint for the incremental scan
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

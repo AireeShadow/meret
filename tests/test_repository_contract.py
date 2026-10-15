@@ -284,3 +284,16 @@ def test_search_by_tag_ids_distinguishes_namesakes(repo):
     genre = tagpaths.resolve("genre/mystery", repo.get_all_tags())
 
     assert [f.filename for f in repo.search_by_tag_ids([[genre.id]])] == ["a.png"]
+
+def test_known_fingerprints_tracks_size_and_mtime(repo):
+    assert repo.known_fingerprints() == {}
+
+    repo.save_file(
+        FileEntry(
+            filename="a.png",
+            filepath="/x/a.png",
+            type=FileType.IMAGE,
+            metadata={"size_bytes": 1234, "modified_at": 1700000000.0},
+        )
+    )
+    assert repo.known_fingerprints() == {"/x/a.png": (1234, 1700000000.0)}

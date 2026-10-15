@@ -314,3 +314,11 @@ class MockRepository(AbstractRepository):
 
     def known_paths(self) -> Set[str]:
         return {entry.filepath for entry in self._files.values()}
+
+    @staticmethod
+    def _fingerprint(entry: FileEntry) -> Tuple[int, float]:
+        meta = entry.metadata or {}
+        return int(meta.get("size_bytes") or 0), float(meta.get("modified_at") or 0.0)
+
+    def known_fingerprints(self) -> Dict[str, Tuple[int, float]]:
+        return {e.filepath: self._fingerprint(e) for e in self._files.values()}
