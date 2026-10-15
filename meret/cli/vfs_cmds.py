@@ -1,4 +1,4 @@
-"""CLI-команды виртуальной ФС: ls / open / stat."""
+"""CLI commands for the virtual FS: ls / open / stat."""
 import os
 import platform
 import subprocess
@@ -17,7 +17,7 @@ console = Console()
 
 
 def _human(size: int) -> str:
-    """Человекочитаемый размер."""
+    """Human-readable size."""
     value = float(size)
     for unit in ("B", "KB", "MB", "GB"):
         if value < 1024 or unit == "GB":
@@ -27,7 +27,7 @@ def _human(size: int) -> str:
 
 
 def _open_external(path: Path) -> None:
-    """Открывает файл системным приложением."""
+    """Opens a file with the system's default application."""
     system = platform.system()
     if system == "Windows":
         os.startfile(path)  # type: ignore[attr-defined]
@@ -43,20 +43,20 @@ def _get_tree(db_path: Path) -> VirtualTree:
 
 @app.command("ls")
 def ls(
-    vpath: str = typer.Argument("/", help="Виртуальный путь, напр. /путешествия"),
-    db_path: Path = typer.Option(Path("."), "--db", "-d", help="Каталог с meret.db"),
-    long: bool = typer.Option(False, "--long", "-l", help="Показать размеры"),
+    vpath: str = typer.Argument("/", help="Virtual path, e.g. /travel"),
+    db_path: Path = typer.Option(Path("."), "--db", "-d", help="Directory containing meret.db"),
+    long: bool = typer.Option(False, "--long", "-l", help="Show sizes"),
 ):
-    """Показать содержимое виртуального каталога (теги = папки)."""
+    """List the contents of a virtual directory (tags = folders)."""
     tree = _get_tree(db_path)
     try:
         nodes = tree.listdir(vpath)
     except NotFound:
-        console.print(f"[red]Нет такого пути: {vpath}[/red]")
+        console.print(f"[red]No such path: {vpath}[/red]")
         raise typer.Exit(1)
 
     if not nodes:
-        console.print("[dim]пусто[/dim]")
+        console.print("[dim](empty)[/dim]")
         return
 
     dirs = [n for n in nodes if n.is_dir]
@@ -70,33 +70,33 @@ def ls(
         else:
             console.print(node.name)
 
-    console.print(f"\n[dim]{len(dirs)} папок, {len(files)} файлов[/dim]")
+    console.print(f"\n[dim]{len(dirs)} folders, {len(files)} files[/dim]")
 
 
 @app.command("open")
 def open_file(
-    vpath: str = typer.Argument(..., help="Путь к файлу"),
+    vpath: str = typer.Argument(..., help="Path to the file"),
     db_path: Path = typer.Option(Path("."), "--db", "-d"),
-    path_only: bool = typer.Option(False, "--path", "-p", help="Только вывести путь"),
+    path_only: bool = typer.Option(False, "--path", "-p", help="Only print the path"),
 ):
-    """Открыть файл системным приложением."""
+    """Open a file with the system's default application."""
     tree = _get_tree(db_path)
 
     try:
         real = tree.real_path(vpath)
     except NotFound:
-        console.print(f"[red]Файл не найден: {vpath}[/red]")
+        console.print(f"[red]File not found: {vpath}[/red]")
         raise typer.Exit(1)
     except IsADirectory:
-        console.print(f"[yellow]Это каталог (тег): {vpath}[/yellow]")
+        console.print(f"[yellow]This is a directory (tag): {vpath}[/yellow]")
         raise typer.Exit(1)
 
     if not real.exists():
-        console.print(f"[yellow]В базе есть, а на диске нет: {real}[/yellow]")
+        console.print(f"[yellow]In the database but missing on disk: {real}[/yellow]")
         raise typer.Exit(1)
 
     if path_only:
-        console.print(str(real), soft_wrap=True)   # ← не переносить
+        console.print(str(real), soft_wrap=True)   # ← don't wrap
         return
 
     _open_external(real)
@@ -105,47 +105,47 @@ def open_file(
 
 @app.command("stat")
 def stat_cmd(
-    vpath: str = typer.Argument(..., help="Виртуальный путь"),
+    vpath: str = typer.Argument(..., help="Virtual path"),
     db_path: Path = typer.Option(Path("."), "--db", "-d"),
 ):
-    """Информация об узле виртуальной ФС."""
+    """Info about a virtual FS node."""
     tree = _get_tree(db_path)
     try:
         node = tree.stat(vpath)
     except NotFound:
-        console.print(f"[red]Нет такого пути: {vpath}[/red]")
+        console.print(f"[red]No such path: {vpath}[/red]")
         raise typer.Exit(1)
 
     table = Table(show_header=False, box=None)
-    table.add_row("путь", node.vpath)
-    table.add_row("тип", "[blue]каталог (тег)[/blue]" if node.is_dir else "файл")
+    table.add_row("path", node.vpath)
+    table.add_row("type", "[blue]directory (tag)[/blue]" if node.is_dir else "file")
     if node.size:
-        table.add_row("размер", _human(node.size))
+        table.add_row("size", _human(node.size))
     if node.source_path:
-        table.add_row("на диске", node.source_path)
+        table.add_row("on disk", node.source_path)
     console.print(table)
 
 @app.command("mount")
 def mount_cmd(
-    mountpoint: Path = typer.Argument(..., help="Куда монтировать, напр. M:"),
+    mountpoint: Path = typer.Argument(..., help="Where to mount, e.g. M:"),
     db_path: Path = typer.Option(Path("."), "--db", "-d"),
 ):
-    """Смонтировать теги как диск/каталог (только чтение)."""
+    """Mount tags as a drive/directory (read-only)."""
     from meret.vfs.backends.mount import mount as _mount
 
-    console.print(f"[cyan]Монтирую в {mountpoint}... Ctrl+C или Enter для выхода[/cyan]")
+    console.print(f"[cyan]Mounting at {mountpoint}... Ctrl+C or Enter to exit[/cyan]")
     try:
         _mount(_get_tree(db_path), mountpoint)
     except KeyboardInterrupt:
-        console.print("\n[green]Отмонтировано[/green]")
+        console.print("\n[green]Unmounted[/green]")
     except ImportError as e:
-        console.print(f"[red]Нет драйвера: {e}[/red]")
+        console.print(f"[red]No driver: {e}[/red]")
         console.print("[dim]Linux/macOS: pip install fusepy[/dim]")
         console.print("[dim]Windows: WinFsp + pip install winfspy[/dim]")
         raise typer.Exit(1)
 
 def _pids_for_mountpoint(mountpoint: str) -> list[int]:
-    """Находит процессы монтирования по точке монтирования."""
+    """Finds mount processes by mount point."""
     needle = mountpoint.rstrip("\\/")
     if platform.system() == "Windows":
         script = (
@@ -166,20 +166,20 @@ def _pids_for_mountpoint(mountpoint: str) -> list[int]:
 
 @app.command("umount")
 def umount_cmd(
-    mountpoint: str = typer.Argument(..., help="Точка монтирования, напр. M: или K:\\tags"),
+    mountpoint: str = typer.Argument(..., help="Mount point, e.g. M: or K:\\tags"),
 ):
-    """Отмонтировать: найти процесс монтирования и завершить его."""
+    """Unmount: find the mount process and terminate it."""
     pids = [pid for pid in _pids_for_mountpoint(mountpoint) if pid != os.getpid()]
 
     if not pids:
-        console.print(f"[yellow]Ничего не смонтировано в {mountpoint}[/yellow]")
+        console.print(f"[yellow]Nothing is mounted at {mountpoint}[/yellow]")
         raise typer.Exit(1)
 
     for pid in pids:
         try:
-            os.kill(pid, signal.SIGTERM)      # на Windows это TerminateProcess
-            console.print(f"[green]завершил PID {pid}[/green]")
+            os.kill(pid, signal.SIGTERM)      # on Windows this is TerminateProcess
+            console.print(f"[green]terminated PID {pid}[/green]")
         except OSError as exc:
             console.print(f"[red]PID {pid}: {exc}[/red]")
 
-    console.print("[dim]Если Проводник показывает точку — нажми F5[/dim]")
+    console.print("[dim]If Explorer still shows the mount point, press F5[/dim]")

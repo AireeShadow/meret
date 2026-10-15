@@ -5,9 +5,9 @@ from meret.core.models import FileEntry, Tag, TagNode
 
 
 class AbstractRepository(ABC):
-    """Контракт хранилища. Реализации: SQLite, Postgres, Mock."""
+    """Storage contract. Implementations: SQLite, Postgres, Mock."""
 
-    # --- файлы ---
+    # --- files ---
     @abstractmethod
     def get_file_by_id(self, file_id: int) -> Optional[FileEntry]: ...
 
@@ -24,16 +24,16 @@ class AbstractRepository(ABC):
         chunk_size: int = 1000,
         on_progress: Optional[Callable[[int, int], None]] = None,
     ) -> Dict[str, int]:
-        """Пакетная запись: одна транзакция на chunk_size файлов.
+        """Batch write: one transaction per chunk_size files.
 
-        Возвращает {"indexed": n, "updated": m, "errors": k}.
-        on_progress(done, total) — вызывается после каждого чанка.
+        Returns {"indexed": n, "updated": m, "errors": k}.
+        on_progress(done, total) is called after each chunk.
         """
 
     @abstractmethod
     def delete_file(self, file_id: int) -> bool: ...
 
-    # --- теги ---
+    # --- tags ---
     @abstractmethod
     def add_tag(self, file_id: int, tag: str, colour: Optional[str] = None) -> int: ...
 
@@ -48,10 +48,10 @@ class AbstractRepository(ABC):
 
     @abstractmethod
     def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
-        """Перевесить тег под другого родителя (parent=None → в корень).
+        """Move a tag under another parent (parent=None → to the root).
 
-        False — если тег или родитель не найдены, либо получился бы цикл
-        (тег под своим же потомком или сам под собой).
+        False if the tag or the parent isn't found, or if it would create a cycle
+        (a tag under its own descendant, or under itself).
         """
 
     @abstractmethod
@@ -72,7 +72,7 @@ class AbstractRepository(ABC):
     @abstractmethod
     def delete_tag(self, name: str) -> bool: ...
 
-    # --- поиск ---
+    # --- search ---
     @abstractmethod
     def search_by_tags(
         self,
@@ -90,8 +90,8 @@ class AbstractRepository(ABC):
 
     @abstractmethod
     def known_paths(self) -> Set[str]:
-        """Все пути, уже известные базе.
+        """All paths already known to the database.
 
-        Один запрос на весь скан — чтобы инкрементальный режим не делал
-        SELECT на каждый файл (иначе та же история, что была с записью).
+        One query for the whole scan, so incremental mode doesn't issue a
+        SELECT per file (otherwise it's the same story we had with writes).
         """

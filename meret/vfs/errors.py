@@ -1,17 +1,17 @@
-"""Ошибки виртуальной ФС."""
+"""Virtual FS errors."""
 
 
 class VfsError(Exception):
-    """Базовая ошибка виртуальной ФС."""
+    """Base virtual FS error."""
 
 
 class NotFound(VfsError):
-    """Узел не найден."""
+    """Node not found."""
 
 
 class NotADirectory(VfsError):
-    """Ожидался каталог, а это файл."""
+    """Expected a directory, got a file."""
 
 
 class IsADirectory(VfsError):
-    """Ожидался файл, а это каталог."""
+    """Expected a file, got a directory."""

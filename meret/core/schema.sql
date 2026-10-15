@@ -2,7 +2,7 @@
 
 PRAGMA foreign_keys = ON;
 
--- Файлы. Метаданные — JSON-блоб (их не ищем), теги — отдельно.
+-- Files. Metadata is a JSON blob (we do not search it), tags live separately.
 CREATE TABLE IF NOT EXISTS files (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     filename    TEXT NOT NULL,
@@ -16,12 +16,12 @@ CREATE TABLE IF NOT EXISTS files (
 CREATE INDEX IF NOT EXISTS idx_files_type ON files(type);
 CREATE INDEX IF NOT EXISTS idx_files_rating ON files(rating);
 
--- Теги. parent_id даёт иерархию → "папки" из шага 3.
--- name_key = name.casefold(): COLLATE NOCASE в SQLite сворачивает только ASCII,
--- а теги у нас кириллицей. Поиск и уникальность — всегда по name_key.
--- Уникальность — среди БРАТЬЕВ: (COALESCE(parent_id, 0), name_key), поэтому
--- «жанр/детектив» и «студия/детектив» живут одновременно. Индекс создаётся
--- в _migrate_tags — он зависит от name_key, которой в старой БД может не быть.
+-- Tags. parent_id provides the hierarchy → the "folders" from step 3.
+-- name_key = name.casefold(): COLLATE NOCASE in SQLite only folds ASCII,
+-- and tag names are often Cyrillic. Lookups and uniqueness always use name_key.
+-- Uniqueness is among SIBLINGS: (COALESCE(parent_id, 0), name_key), so
+-- "genre/mystery" and "studio/mystery" can coexist. The index is created
+-- in _migrate_tags because it depends on name_key, which an old DB may lack.
 CREATE TABLE IF NOT EXISTS tags (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS tags (
 );
 CREATE INDEX IF NOT EXISTS idx_tags_parent ON tags(parent_id);
 
--- Связь многие-ко-многим.
+-- Many-to-many link.
 CREATE TABLE IF NOT EXISTS file_tags (
     file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
     tag_id  INTEGER NOT NULL REFERENCES tags(id)  ON DELETE CASCADE,
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS file_tags (
 );
 CREATE INDEX IF NOT EXISTS idx_file_tags_tag ON file_tags(tag_id);
 
--- Полнотекстовый поиск по именам (внешний контент = таблица files).
+-- Full-text search over names (external content = the files table).
 CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
     filename, filepath,
     content='files', content_rowid='id'

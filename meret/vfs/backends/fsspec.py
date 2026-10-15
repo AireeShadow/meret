@@ -1,4 +1,4 @@
-"""Адаптер fsspec. Импортируется отдельно — требует fsspec."""
+"""fsspec adapter. Imported separately — requires fsspec."""
 import io
 
 import fsspec
@@ -43,5 +43,5 @@ class MeretFileSystem(AbstractFileSystem):
 
 
 def register() -> None:
-    """Регистрирует протокол 'meret' в fsspec."""
+    """Registers the 'meret' protocol with fsspec."""
     fsspec.register_implementation("meret", MeretFileSystem)

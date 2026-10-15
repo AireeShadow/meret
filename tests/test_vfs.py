@@ -1,4 +1,4 @@
-"""Тесты виртуальной ФС: теги как папки."""
+"""Virtual FS tests: tags as folders."""
 
 import pytest
 
@@ -13,7 +13,7 @@ def tree(mock_repo):
 
 @pytest.fixture
 def populated(mock_repo, tmp_path):
-    """Дерево: путешествия/пляж + два одноимённых файла с тегом 'пляж'."""
+    """Tree: travel/seaside + two same-named files tagged 'seaside'."""
     real = tmp_path / "beach.png"
     real.write_bytes(b"PNGDATA")
 
@@ -33,42 +33,42 @@ def populated(mock_repo, tmp_path):
             metadata={"size_bytes": 7},
         )
     )
-    mock_repo.add_tag(f1, "путешествия")
-    mock_repo.add_tag(f1, "пляж")
-    mock_repo.add_tag(f2, "пляж")
-    mock_repo.set_tag_parent("пляж", "путешествия")
+    mock_repo.add_tag(f1, "travel")
+    mock_repo.add_tag(f1, "seaside")
+    mock_repo.add_tag(f2, "seaside")
+    mock_repo.set_tag_parent("seaside", "travel")
     return VirtualTree(mock_repo), real
 
 
-# ---------- структура ----------
+# ---------- structure ----------
 
 def test_root_lists_root_tags(tree, mock_repo):
     f = mock_repo.save_file(
         FileEntry(filename="a.png", filepath="/a.png", type=FileType.IMAGE)
     )
-    mock_repo.add_tag(f, "путешествия")
+    mock_repo.add_tag(f, "travel")
 
     nodes = tree.listdir("/")
-    assert [n.name for n in nodes] == ["путешествия"]
+    assert [n.name for n in nodes] == ["travel"]
     assert nodes[0].is_dir
 
 
 def test_nested_listing_shows_subtag(populated):
     vfs, _ = populated
-    names = {n.name for n in vfs.listdir("/путешествия")}
-    assert "пляж" in names
+    names = {n.name for n in vfs.listdir("/travel")}
+    assert "seaside" in names
 
 
 def test_files_under_leaf_tag(populated):
     vfs, _ = populated
-    nodes = vfs.listdir("/путешествия/пляж")
+    nodes = vfs.listdir("/travel/seaside")
     assert len(nodes) == 2
     assert all(not n.is_dir for n in nodes)
 
 
 def test_collision_deduped(populated):
     vfs, _ = populated
-    names = [n.name for n in vfs.listdir("/путешествия/пляж")]
+    names = [n.name for n in vfs.listdir("/travel/seaside")]
     assert len(set(names)) == 2
 
 
@@ -80,9 +80,9 @@ def test_root_is_empty_without_tags(tree):
 
 def test_stat_dir_and_file(populated):
     vfs, _ = populated
-    assert vfs.stat("/путешествия").is_dir
+    assert vfs.stat("/travel").is_dir
 
-    node = vfs.stat("/путешествия/пляж/beach.png")
+    node = vfs.stat("/travel/seaside/beach.png")
     assert not node.is_dir
     assert node.size == 7
 
@@ -95,43 +95,43 @@ def test_isdir(tree, mock_repo):
     f = mock_repo.save_file(
         FileEntry(filename="a.png", filepath="/a.png", type=FileType.IMAGE)
     )
-    mock_repo.add_tag(f, "тег")
-    assert tree.isdir("/тег") is True
-    assert tree.isdir("/нет") is False
+    mock_repo.add_tag(f, "tag")
+    assert tree.isdir("/tag") is True
+    assert tree.isdir("/missing") is False
 
 
-# ---------- чтение ----------
+# ---------- reading ----------
 
 def test_read_bytes(populated):
     vfs, _ = populated
-    assert vfs.read("/путешествия/пляж/beach.png") == b"PNGDATA"
+    assert vfs.read("/travel/seaside/beach.png") == b"PNGDATA"
 
 
 def test_real_path(populated):
     vfs, real = populated
-    assert vfs.real_path("/путешествия/пляж/beach.png") == real
+    assert vfs.real_path("/travel/seaside/beach.png") == real
 
 
 def test_read_directory_raises(populated):
     vfs, _ = populated
     with pytest.raises(IsADirectory):
-        vfs.read("/путешествия")
+        vfs.read("/travel")
 
 
-# ---------- ошибки ----------
+# ---------- errors ----------
 
 def test_not_found(tree):
     with pytest.raises(NotFound):
-        tree.stat("/нет/такого")
+        tree.stat("/no/such")
 
 
 def test_exists(tree, mock_repo):
     f = mock_repo.save_file(
         FileEntry(filename="a.png", filepath="/a.png", type=FileType.IMAGE)
     )
-    mock_repo.add_tag(f, "тег")
-    assert tree.exists("/тег") is True
-    assert tree.exists("/нет") is False
+    mock_repo.add_tag(f, "tag")
+    assert tree.exists("/tag") is True
+    assert tree.exists("/missing") is False
 
 
 def test_deep_missing_path(tree):
@@ -139,17 +139,17 @@ def test_deep_missing_path(tree):
         tree.listdir("/a/b/c")
 
 
-# ---------- утилиты ----------
+# ---------- utilities ----------
 
 def test_walk_visits_everything(populated):
     vfs, _ = populated
     paths = [n.vpath for n in vfs.walk("/")]
-    assert "/путешествия" in paths
-    assert "/путешествия/пляж" in paths
+    assert "/travel" in paths
+    assert "/travel/seaside" in paths
 
 
 def test_normalize_paths(tree):
-    assert tree.normalize("путешествия//пляж/") == "/путешествия/пляж"
+    assert tree.normalize("travel//seaside/") == "/travel/seaside"
     assert tree.normalize("/") == "/"
 
 
@@ -158,12 +158,12 @@ def test_sanitize_forbidden_chars():
     assert sanitize("  ") == "_"
 
 def test_tag_index_matches_tagpaths(tree, mock_repo):
-    """Индекс VFS — ровно то, что строит tagpaths (а не своя копия логики)."""
+    """The VFS index is exactly what tagpaths builds (not its own copy of the logic)."""
     from meret.core import tagpaths
 
-    mock_repo.create_tag("жанр")
-    mock_repo.create_tag("детектив")
-    mock_repo.set_tag_parent("детектив", "жанр")
+    mock_repo.create_tag("genre")
+    mock_repo.create_tag("mystery")
+    mock_repo.set_tag_parent("mystery", "genre")
 
     tags = mock_repo.get_all_tags()
     expected = tagpaths.index_by_parent(tags, key=lambda t: sanitize(t.name).casefold())
@@ -172,6 +172,6 @@ def test_tag_index_matches_tagpaths(tree, mock_repo):
 
 
 def test_resolve_tag_uses_sanitized_name(tree, mock_repo):
-    """Ключ индекса — sanitize(name), поэтому «:» в имени не ломает путь."""
+    """The index key is sanitize(name), so a ":" in the name doesn't break the path."""
     mock_repo.create_tag("a:b")
     assert tree.stat("/a∕b").is_dir

@@ -1,13 +1,13 @@
 # meret 🐍
 
-Тегированная медиатека: теги вместо папок, виртуальная иерархия, GUI.
+Tagged media library: tags instead of folders, virtual hierarchy, GUI.
 
-## Установка
+## Installation
 pip install -e ".[dev]"
 
-## Быстрый старт
+## Quick start
 meret init ~/Media
 meret scan ~/Media --db ~/Media
-meret tag ~/Media/photo.jpg отпуск пляж
-meret search --tag отпуск
+meret tag ~/Media/photo.jpg vacation beach
+meret search --tag vacation
 meret tree

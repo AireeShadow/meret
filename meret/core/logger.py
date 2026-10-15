@@ -7,7 +7,7 @@ class Logger:
         self.logger = logging.getLogger("meret")
         self.logger.setLevel(getattr(logging, level.upper(), logging.DEBUG))
 
-        if not self.logger.handlers:          # ← вот этой строки не хватает
+        if not self.logger.handlers:          # ← guard against duplicate handlers
             formatter = logging.Formatter(
                 "[%(asctime)s] %(levelname)s "
                 "[%(name)s.%(funcName)s:%(lineno)d] %(message)s"

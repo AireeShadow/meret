@@ -1,12 +1,12 @@
 """
 Metadata extractors for different media types.
 
-Каждый экстрактор умеет:
-1. Определить, подходит ли он для файла (can_extract)
-2. Извлечь метаданные (extract)
+Each extractor can:
+1. Tell whether it handles a given file (can_extract)
+2. Extract metadata (extract)
 
-Новые форматы добавляются просто: наследуйся от MetadataExtractor
-и зарегистрируй его в ExtractorRegistry.
+Adding new formats is easy: subclass MetadataExtractor
+and register it in ExtractorRegistry.
 """
 
 import json
@@ -20,18 +20,18 @@ from meret.core.logger import Logger
 
 
 class ExtractionError(Exception):
-    """Ошибка извлечения метаданных"""
+    """Metadata extraction error"""
     pass
 
 
 class MetadataExtractor(ABC):
     """
-    Базовый класс для всех экстракторов метаданных.
+    Base class for all metadata extractors.
     
-    Наследники должны реализовать:
-    - supported_extensions: набор расширений (например, {'.jpg', '.png'})
-    - file_type: тип файла из enum FileType
-    - extract(): логику извлечения
+    Subclasses must implement:
+    - supported_extensions: a set of extensions (e.g. {'.jpg', '.png'})
+    - file_type: the file type from the FileType enum
+    - extract(): the extraction logic
     """
     
     supported_extensions: set[str] = set()
@@ -41,21 +41,21 @@ class MetadataExtractor(ABC):
         self.logger = Logger().logger
     
     def can_extract(self, file_path: Path) -> bool:
-        """Проверяет, умеет ли экстрактор работать с этим файлом"""
+        """Checks whether the extractor can handle this file"""
         return file_path.suffix.lower() in self.supported_extensions
     
     @abstractmethod
     def extract(self, file_path: Path) -> Dict[str, Any]:
         """
-        Извлекает метаданные из файла.
+        Extracts metadata from a file.
         
         Returns:
-            Словарь с метаданными. При ошибке — dict с ключом 'error'.
+            A dict of metadata. On error, a dict with an 'error' key.
         """
         ...
 
     def _base_metadata(self, file_path: Path) -> Dict[str, Any]:
-        """Базовая инфа о файле, общая для всех типов"""
+        """Basic file info shared by all types"""
         try:
             stat = file_path.stat()
             return {
@@ -69,7 +69,7 @@ class MetadataExtractor(ABC):
 
 
 class ImageExtractor(MetadataExtractor):
-    """Извлекает метаданные изображений: размеры, формат, EXIF"""
+    """Extracts image metadata: dimensions, format, EXIF"""
     
     supported_extensions = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp", ".heic"}
     file_type = FileType.IMAGE
@@ -88,7 +88,7 @@ class ImageExtractor(MetadataExtractor):
                     "format": img.format,
                 })
                 
-                # EXIF — только если он есть
+                # EXIF — only if present
                 exif = img.getexif()
                 if exif:
                     metadata["exif"] = self._parse_exif(exif, ExifTags)
@@ -101,11 +101,11 @@ class ImageExtractor(MetadataExtractor):
     
     @staticmethod
     def _parse_exif(exif_data, exif_tags) -> Dict[str, Any]:
-        """Парсит EXIF в читаемый вид"""
+        """Parses EXIF into a readable form"""
         parsed = {}
         for tag_id, value in exif_data.items():
             tag_name = exif_tags.TAGS.get(tag_id, str(tag_id))
-            # bytes не сериализуются в JSON — конвертируем
+            # bytes aren't JSON-serializable — convert them
             if isinstance(value, bytes):
                 value = value.decode("utf-8", errors="replace")
             else:
@@ -115,7 +115,7 @@ class ImageExtractor(MetadataExtractor):
 
 
 class VideoExtractor(MetadataExtractor):
-    """Извлекает метаданные видео: длительность, разрешение, кодеки"""
+    """Extracts video metadata: duration, resolution, codecs"""
     
     supported_extensions = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".wmv", ".m4v"}
     file_type = FileType.VIDEO
@@ -134,7 +134,7 @@ class VideoExtractor(MetadataExtractor):
                 "streams": self._parse_streams(probe_data.get("streams", [])),
             })
             
-            # Берём разрешение из первого видеопотока
+            # Take the resolution from the first video stream
             for stream in metadata["streams"]:
                 if stream.get("codec_type") == "video":
                     metadata["width"] = stream.get("width")
@@ -149,7 +149,7 @@ class VideoExtractor(MetadataExtractor):
     
     @staticmethod
     def _probe(file_path: Path) -> Dict[str, Any]:
-        """Запускает ffprobe и возвращает JSON"""
+        """Runs ffprobe and returns JSON"""
         result = subprocess.run(
             ["ffprobe", "-v", "quiet", "-print_format", "json",
              "-show_format", "-show_streams", str(file_path)],
@@ -164,7 +164,7 @@ class VideoExtractor(MetadataExtractor):
     
     @staticmethod
     def _parse_streams(streams: List[dict]) -> List[Dict[str, Any]]:
-        """Оставляет только полезные поля стримов"""
+        """Keeps only the useful stream fields"""
         keep = {"codec_type", "codec_name", "width", "height",
                 "duration", "sample_rate", "channels", "bit_rate"}
         return [
@@ -174,7 +174,7 @@ class VideoExtractor(MetadataExtractor):
 
 
 class AudioExtractor(MetadataExtractor):
-    """Извлекает метаданные аудио: длительность, битрейт, теги"""
+    """Extracts audio metadata: duration, bitrate, tags"""
     
     supported_extensions = {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma", ".opus"}
     file_type = FileType.AUDIO
@@ -192,12 +192,12 @@ class AudioExtractor(MetadataExtractor):
                 "codec": fmt.get("format_name"),
             })
             
-            # ID3-теги ffprobe кладёт в format.tags
+            # ffprobe puts ID3 tags into format.tags
             tags = fmt.get("tags", {})
             if tags:
                 metadata["tags"] = tags
             
-            # Аудио-специфика из первого стрима
+            # Audio specifics from the first stream
             for stream in probe_data.get("streams", []):
                 if stream.get("codec_type") == "audio":
                     metadata.update({
@@ -229,9 +229,9 @@ class AudioExtractor(MetadataExtractor):
 
 class ExtractorRegistry:
     """
-    Реестр экстракторов. Сам подбирает нужный по расширению.
+    Extractor registry. Picks the right one by extension.
     
-    Использование:
+    Usage:
         registry = ExtractorRegistry()
         metadata = registry.extract(Path("video.mp4"))
     """
@@ -245,26 +245,26 @@ class ExtractorRegistry:
         self.logger = Logger().logger
     
     def register(self, extractor: MetadataExtractor) -> None:
-        """Добавить новый экстрактор (например, для PDF или архивов)"""
+        """Add a new extractor (e.g. for PDFs or archives)"""
         self._extractors.append(extractor)
         self.logger.info(f"Registered extractor: {type(extractor).__name__}")
     
     def get_extractor(self, file_path: Path) -> Optional[MetadataExtractor]:
-        """Возвращает подходящий экстрактор или None"""
+        """Returns a matching extractor or None"""
         for extractor in self._extractors:
             if extractor.can_extract(file_path):
                 return extractor
         return None
     
     def get_file_type(self, file_path: Path) -> FileType:
-        """Определяет тип файла через реестр"""
+        """Determines the file type via the registry"""
         extractor = self.get_extractor(file_path)
         return extractor.file_type if extractor else FileType.UNKNOWN
     
     def extract(self, file_path: Path) -> Optional[Dict[str, Any]]:
         """
-        Извлекает метаданные, автоматически подобрав экстрактор.
-        Возвращает None, если подходящего экстрактора нет.
+        Extracts metadata, automatically picking an extractor.
+        Returns None if there is no matching extractor.
         """
         extractor = self.get_extractor(file_path)
         if not extractor:
@@ -275,7 +275,7 @@ class ExtractorRegistry:
     
     @property
     def supported_types(self) -> set[str]:
-        """Все поддерживаемые расширения (для CLI-справки)"""
+        """All supported extensions (for CLI help)"""
         exts = set()
         for extractor in self._extractors:
             exts.update(extractor.supported_extensions)

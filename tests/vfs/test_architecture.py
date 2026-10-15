@@ -17,20 +17,20 @@ def _imports(py: Path) -> set[str]:
 
 
 def test_core_is_independent():
-    """core не знает ни про vfs, ни про cli."""
+    """core knows nothing about vfs or cli."""
     for py in (MERET / "core").rglob("*.py"):
         bad = {m for m in _imports(py) if m.startswith(("meret.vfs", "meret.cli"))}
-        assert not bad, f"{py.name} тянет {bad}"
+        assert not bad, f"{py.name} imports {bad}"
 
 
 def test_vfs_tree_has_no_third_party():
-    """Чистое ядро ВФС не зависит от fsspec/fuse/PIL."""
+    """The pure VFS core doesn't depend on fsspec/fuse/PIL."""
     mods = _imports(MERET / "vfs" / "tree.py")
     forbidden = {"fsspec", "fuse", "winfspy", "PIL"}
-    assert not (mods & forbidden), f"tree.py тянет {mods & forbidden}"
+    assert not (mods & forbidden), f"tree.py imports {mods & forbidden}"
 
 
 def test_vfs_init_does_not_import_backends():
-    """import meret.vfs не должен требовать fsspec."""
+    """import meret.vfs must not require fsspec."""
     mods = _imports(MERET / "vfs" / "__init__.py")
     assert not any(m.startswith("meret.vfs.backends") for m in mods)

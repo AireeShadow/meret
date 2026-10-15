@@ -1,6 +1,6 @@
-"""In-memory реализация AbstractRepository для тестов.
+"""In-memory AbstractRepository implementation for tests.
 
-Живёт в тестах, но при желании легко переезжает в meret/core/.
+Lives in tests, but can easily move to meret/core/ if needed.
 """
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -10,7 +10,7 @@ from meret.core.repository import AbstractRepository
 
 
 class MockRepository(AbstractRepository):
-    """Репозиторий в памяти. Повторяет семантику SQLite-версии."""
+    """In-memory repository. Mirrors the semantics of the SQLite version."""
 
     def __init__(self) -> None:
         self._files: Dict[int, FileEntry] = {}
@@ -56,7 +56,7 @@ class MockRepository(AbstractRepository):
     def _ensure_tag(self, ref: str, colour: Optional[str] = None, reuse_any: bool = True) -> int:
         chunks = tagpaths.parts(ref)
         if not chunks:
-            raise ValueError(f"пустой путь тега: {ref!r}")
+            raise ValueError(f"empty tag path: {ref!r}")
 
         if reuse_any and len(chunks) == 1:
             existing = self._tag_by(chunks[0])
@@ -135,7 +135,7 @@ class MockRepository(AbstractRepository):
         self._links = {(f, t) for (f, t) in self._links if f != file_id}
         return True
 
-    # ---------- tags: связи с файлами ----------
+    # ---------- tags: file links ----------
     def add_tag(self, file_id: int, tag: str, colour: Optional[str] = None) -> int:
         tag_id = self._ensure_tag(tag, colour)
         self._links.add((file_id, tag_id))
@@ -177,12 +177,12 @@ class MockRepository(AbstractRepository):
             src.name = new_name
         return True
 
-    # ---------- tags: создание и иерархия ----------
+    # ---------- tags: creation and hierarchy ----------
     def _would_cycle(self, tag_id: int, parent_id: int) -> bool:
-        """True, если parent_id — сам tag_id или его потомок.
+        """True if parent_id is tag_id itself or one of its descendants.
 
-        Идём вверх ОТ РОДИТЕЛЯ и ищем тег: наткнулись — родитель внутри
-        поддерева тега, перевешивание даст петлю.
+        Walk up FROM THE PARENT looking for the tag: if we hit it, the parent is inside
+        the tag's subtree and reparenting would create a loop.
         """
         seen: Set[int] = set()
         cur: Optional[int] = parent_id
@@ -224,7 +224,7 @@ class MockRepository(AbstractRepository):
         node.parent_id = parent_tag.id
         return True
 
-    # ---------- tags: чтение ----------
+    # ---------- tags: reading ----------
     def get_all_tags(self) -> List[Tag]:
         return sorted(
             (t.model_copy() for t in self._tags.values()),

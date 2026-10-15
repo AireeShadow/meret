@@ -1,24 +1,24 @@
-"""Монтирование виртуальной ФС. Только чтение.
+"""Mounting the virtual FS. Read-only.
 
-Linux/macOS — libfuse через fusepy.
-Windows     — WinFsp через winfspy.
+Linux/macOS — libfuse via fusepy.
+Windows     — WinFsp via winfspy.
 
-Контракт winfspy (важно!)
--------------------------
-``ll_open`` / ``ll_create`` делают ``ffi.new_handle(cooked_file_context)`` —
-значит, что вернул из ``open``/``create``, то и станет контекстом файла.
-Никакой распаковки кортежа нет: возвращаем САМ объект контекста.
+winfspy contract (important!)
+-----------------------------
+``ll_open`` / ``ll_create`` do ``ffi.new_handle(cooked_file_context)`` —
+so whatever ``open``/``create`` returns becomes the file context.
+There is no tuple unpacking: return the context object ITSELF.
 
-Остановка монтирования (Windows)
---------------------------------
-``FileSystem.stop()`` вызывает ``FspFileSystemStopDispatcher``, который ждёт
-завершения всех выданных драйвером IRP. Пока Проводник держит окно с буквой
-диска, IRP приходят непрерывно, и stop() может висеть бесконечно. Поэтому:
+Stopping the mount (Windows)
+----------------------------
+``FileSystem.stop()`` calls ``FspFileSystemStopDispatcher``, which waits for
+all IRPs issued by the driver to complete. While Explorer keeps a window open
+on the drive letter, IRPs keep arriving and stop() can hang forever. So:
 
-1. перед stop() снимаем точку монтирования (``FspFileSystemRemoveMountPoint``);
-2. stop() выполняется в отдельном потоке, главный ждёт его с таймаутом;
-3. страховочный watchdog-поток делает ``os._exit(0)`` безусловно;
-4. повторный Ctrl+C (или Enter) — выход немедленно.
+1. before stop() we remove the mount point (``FspFileSystemRemoveMountPoint``);
+2. stop() runs in a separate thread; the main thread waits for it with a timeout;
+3. a safety watchdog thread calls ``os._exit(0)`` unconditionally;
+4. a second Ctrl+C (or Enter) exits immediately.
 """
 
 import errno
@@ -37,24 +37,24 @@ import logging
 
 _DEBUG = bool(os.environ.get("MERET_DEBUG"))
 
-# Сколько ждём корректной остановки, прежде чем выйти принудительно.
+# How long to wait for a clean stop before forcing an exit.
 STOP_GRACE_SECONDS = 5.0
 
-# Период опроса флага остановки в главном потоке.
+# Polling interval for the stop flag in the main thread.
 POLL_INTERVAL = 0.2
 
 
 def _flush_streams() -> None:
-    """os._exit() не сбрасывает буферы — делаем это руками."""
+    """os._exit() doesn't flush buffers — do it manually."""
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
-        except Exception:  # noqa: BLE001 — поток мог быть уже закрыт
+        except Exception:  # noqa: BLE001 — the stream may already be closed
             pass
 
 
 def _install_signal_handlers(handler) -> None:
-    """Ctrl+C и Ctrl+Break → один обработчик."""
+    """Ctrl+C and Ctrl+Break → a single handler."""
     names = ["SIGINT"]
     if platform.system() == "Windows":
         names.append("SIGBREAK")
@@ -66,21 +66,21 @@ def _install_signal_handlers(handler) -> None:
         try:
             signal.signal(sig, handler)
         except ValueError:
-            # mount() позвали не из главного потока — сигналы не наши
+            # mount() was called from a non-main thread — signals aren't ours
             pass
 
 
 def _watch_stdin(is_done, on_quit) -> None:
-    """Enter в терминале = выход.
+    """Enter in the terminal = exit.
 
-    Страховка на случай, когда Ctrl+C перехватывает консоль
-    (QuickEdit в conhost, выделение текста в Windows Terminal).
+    A fallback for when the console swallows Ctrl+C
+    (QuickEdit in conhost, text selection in Windows Terminal).
     """
     try:
         while not is_done():
             line = sys.stdin.readline()
             if line == "":
-                return          # stdin закрыт — молча выходим из потока
+                return          # stdin is closed — quietly exit the thread
             on_quit()
             return
     except Exception:  # noqa: BLE001
@@ -141,7 +141,7 @@ def _mount_fuse(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 # ---------- Windows ----------
 
 def _norm_windows_path(name: str) -> str:
-    """WinFsp отдаёт '\\пляж\\file.png' — приводим к '/пляж/file.png'."""
+    """WinFsp passes '\\beach\\file.png' — normalize to '/beach/file.png'."""
     name = name.replace("\\", "/")
     return name if name.startswith("/") else "/" + name
 
@@ -165,7 +165,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
     _SD = SecurityDescriptor.from_string("O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)")
 
     class MeretOperations(BaseFileSystemOperations):
-        # ---------- отладка (MERET_DEBUG=1) ----------
+        # ---------- debugging (MERET_DEBUG=1) ----------
 
         def _log(self, msg: str) -> None:
             if _DEBUG:
@@ -186,19 +186,19 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             return status
 
         def ll_close(self, file_context):
-            """Свой ll_close вместо winfspy-евского.
+            """Our own ll_close instead of winfspy's.
 
-            winfspy делает `del self._opened_objs[file_context]` — это
-            единственная ссылка на cdata-хендл, и он освобождается. А WinFsp
-            умеет позвать Close повторно (и из разных потоков) → from_handle
-            читает освобождённую память → Py_FatalError. Плюс сам `del`
-            гоняется с параллельным Close → KeyError.
+            winfspy does `del self._opened_objs[file_context]` — that is the
+            only reference to the cdata handle, so it gets freed. But WinFsp
+            may call Close again (and from different threads) → from_handle
+            reads freed memory → Py_FatalError. On top of that, the `del` itself
+            races with a concurrent Close → KeyError.
 
-            Поэтому записи не удаляем: `_opened_objs` = реестр всех выданных
-            хендлов, и они живут до конца процесса.
+            So we never remove entries: `_opened_objs` is a registry of every handle
+            ever issued, and they live until the process exits.
             """
             if file_context not in self._opened_objs:
-                # указатель нам не знаком — пусть решает winfspy
+                # a pointer we don't know — let winfspy decide
                 return super().ll_close(file_context)
 
             self._log(f"ll_close  <- ptr={self._addr(file_context):#x}")
@@ -226,17 +226,17 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             return attrs, _SD.handle, _SD.size
 
         def get_security(self, file_context):
-            # Без этой реализации winfspy кидает NotImplementedError на QuerySecurity.
+            # Without this implementation winfspy raises NotImplementedError on QuerySecurity.
             return _SD.handle, _SD.size
 
         def _context(self, vpath: str) -> dict:
-            """Контекст открытого хендла. Возвращаем ЕГО, а не кортеж."""
+            """Context of an open handle. Return IT, not a tuple."""
             node = tree.stat(vpath)
             return {
                 "is_dir": node.is_dir,
                 "size": node.size,
                 "path": vpath,
-                "data": None,   # ленивый кэш содержимого
+                "data": None,   # lazy content cache
             }
 
         def open(self, file_name, create_options, granted_access):
@@ -255,9 +255,9 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             security_descriptor,
             allocation_size,
         ):
-            """WinFsp зовёт create даже для существующих файлов.
+            """WinFsp calls create even for existing files.
 
-            Файл есть — отдаём контекст. Нет — создать не можем, мы read-only.
+            If the file exists, return its context. If not, we can't create it: we're read-only.
             """
             vpath = _norm_windows_path(file_name)
             try:
@@ -267,11 +267,11 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
         def close(self, file_context):
             if isinstance(file_context, dict):
-                file_context["data"] = None    # отпускаем кэш содержимого
+                file_context["data"] = None    # release the content cache
             return None
 
         def cleanup(self, file_context, file_name, flags):
-            # Вызывается при закрытии хендла. Мы read-only — ничего не делаем.
+            # Called when a handle is closed. We're read-only — nothing to do.
             return None
 
         def flush(self, file_context):
@@ -305,7 +305,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             path = file_context["path"]
             entries = []
 
-            # "." и ".." только для не-корня
+            # "." and ".." only for non-root directories
             if path != "/":
                 entries.append({"file_name": ".", **self._info(tree.stat(path))})
                 parent = path.rsplit("/", 1)[0] or "/"
@@ -325,8 +325,8 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         def read(self, file_context, offset, length):
             data = file_context["data"]
             if data is None:
-                # tree.read() читает файл целиком; Проводник читает по 64 КБ,
-                # поэтому кэшируем на время жизни хендла.
+                # tree.read() reads the whole file; Explorer reads in 64 KB chunks,
+                # so we cache it for the lifetime of the handle.
                 data = tree.read(file_context["path"])
                 file_context["data"] = data
             if offset >= len(data):
@@ -340,7 +340,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         sectors_per_allocation_unit=1,
         file_info_timeout=1000,
         case_sensitive_search=1,
-        case_preserved_names=1,      # обязательно — иначе кириллица поедет
+        case_preserved_names=1,      # mandatory — otherwise Cyrillic names get mangled
         unicode_on_disk=1,
         post_cleanup_when_modified_only=1,
         file_system_name=mountpoint,
@@ -350,10 +350,10 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
     stopped = threading.Event()
 
     def _detach_mount_point() -> None:
-        """Снять букву диска ДО остановки диспетчера.
+        """Remove the drive letter BEFORE stopping the dispatcher.
 
-        Проводник теряет том и перестаёт присылать новые IRP — тогда
-        StopDispatcher успевает дождаться уже начатых вместо вечного ожидания.
+        Explorer loses the volume and stops sending new IRPs — then
+        StopDispatcher can wait for the in-flight ones instead of waiting forever.
         """
         ptr = getattr(fs, "_file_system_ptr", None)
         if ptr is None:
@@ -361,25 +361,25 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         try:
             lib.FspFileSystemRemoveMountPoint(ptr[0])
         except Exception as exc:  # noqa: BLE001
-            print(f"meret: не удалось снять точку монтирования: {exc!r}", file=sys.stderr)
+            print(f"meret: failed to remove the mount point: {exc!r}", file=sys.stderr)
 
     def _stop() -> None:
         _detach_mount_point()
         try:
             fs.stop()
         except Exception as exc:  # noqa: BLE001
-            print(f"meret: ошибка при остановке ФС: {exc!r}", file=sys.stderr)
+            print(f"meret: error while stopping the FS: {exc!r}", file=sys.stderr)
         finally:
             stopped.set()
 
     def _start_watchdog() -> None:
-        """Гарантированный выход: даже если главный поток залип — умрём."""
+        """Guaranteed exit: even if the main thread is stuck, we die."""
 
         def _watchdog() -> None:
             if not stopped.wait(STOP_GRACE_SECONDS):
                 print(
-                    f"\nmeret: ФС не остановилась за {STOP_GRACE_SECONDS:g} с — "
-                    "выхожу принудительно",
+                    f"\nmeret: FS did not stop within {STOP_GRACE_SECONDS:g} s — "
+                    "forcing exit",
                     file=sys.stderr,
                 )
             _flush_streams()
@@ -389,13 +389,13 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
     def _request_shutdown(reason: str) -> None:
         if shutdown.is_set():
-            print(f"\nmeret: {reason} — выхожу принудительно")
+            print(f"\nmeret: {reason} — forcing exit")
             _flush_streams()
             os._exit(0)
 
         print(
-            f"\nmeret: {reason} — останавливаю ФС "
-            "(Ctrl+C или Enter ещё раз — выйти сразу)",
+            f"\nmeret: {reason} — stopping the FS "
+            "(Ctrl+C or Enter again to exit immediately)",
             flush=True,
         )
         shutdown.set()
@@ -405,7 +405,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
     try:
         fs.start()
     except KeyboardInterrupt:
-        # Сигнал прилетел во время старта — наших хендлеров там ещё нет.
+        # A signal arrived during startup — our handlers aren't installed yet.
         _flush_streams()
         try:
             fs.stop()
@@ -413,7 +413,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             pass
         os._exit(0)
     except BaseException:
-        # Старт упал: диспетчер мог успеть запуститься — прибираем за собой.
+        # Startup failed: the dispatcher may already be running — clean up after ourselves.
         _flush_streams()
         try:
             fs.stop()
@@ -421,13 +421,13 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             pass
         raise
 
-    _install_signal_handlers(lambda signum, frame: _request_shutdown("сигнал получен"))
+    _install_signal_handlers(lambda signum, frame: _request_shutdown("signal received"))
 
-    # Enter в терминале — второй, независимый от сигналов способ выхода.
+    # Enter in the terminal is a second exit path, independent of signals.
     if sys.stdin is not None and sys.stdin.isatty():
         threading.Thread(
             target=_watch_stdin,
-            args=(shutdown.is_set, lambda: _request_shutdown("Enter нажат")),
+            args=(shutdown.is_set, lambda: _request_shutdown("Enter pressed")),
             name="meret-stdin",
             daemon=True,
         ).start()
@@ -438,18 +438,18 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
         if not stopped.wait(STOP_GRACE_SECONDS):
             print(
-                f"meret: ФС не остановилась за {STOP_GRACE_SECONDS:g} с — "
-                "выхожу принудительно"
+                f"meret: FS did not stop within {STOP_GRACE_SECONDS:g} s — "
+                "forcing exit"
             )
     finally:
         _flush_streams()
         os._exit(0)
 
 
-# ---------- диспетчер ----------
+# ---------- dispatcher ----------
 
 def mount(tree: VirtualTree, mountpoint: str | Path, foreground: bool = True) -> None:
-    """Смонтировать виртуальную ФС (только чтение)."""
+    """Mount the virtual FS (read-only)."""
     mountpoint = str(mountpoint)
     if platform.system() == "Windows":
         _mount_winfsp(tree, mountpoint, foreground)

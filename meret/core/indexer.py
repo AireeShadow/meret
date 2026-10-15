@@ -1,7 +1,7 @@
-"""File indexer — оркестратор сканирования.
+"""File indexer — the scan orchestrator.
 
-Сам ничего не знает про форматы: за метаданные отвечают экстракторы,
-за хранение — репозиторий. Тут только логика обхода и координации.
+It knows nothing about formats: extractors handle metadata and the
+repository handles storage. Only traversal and coordination logic lives here.
 """
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,7 +19,7 @@ PHASE_INDEX = "index"
 
 
 class Indexer(Logger):
-    """Обходит директорию, извлекает метаданные и пишет в репозиторий."""
+    """Walks a directory, extracts metadata and writes it to the repository."""
 
     def __init__(
         self,
@@ -38,7 +38,7 @@ class Indexer(Logger):
         self.registry = ExtractorRegistry()
         self.interrupted = False
 
-    # ---------- обход ----------
+    # ---------- traversal ----------
 
     def _iter_files(self, single_file: Optional[Path] = None) -> Generator[Path, None, None]:
         if single_file is not None:
@@ -54,7 +54,7 @@ class Indexer(Logger):
         single_file: Optional[Path] = None,
         progress_callback=None,
     ) -> List[Path]:
-        """ЭТАП 1: собрать список поддерживаемых файлов. Быстро, без метаданных."""
+        """STAGE 1: collect the list of supported files. Fast, no metadata."""
         found: List[Path] = []
 
         if single_file is not None:
@@ -66,7 +66,7 @@ class Indexer(Logger):
                     progress_callback(PHASE_COLLECT, done, len(candidates))
             return found
 
-        # rglob ленивый — сначала соберём всё, чтобы знать total
+        # rglob is lazy — collect everything first so we know the total
         all_files = list(self._iter_files())
         total = len(all_files)
 
@@ -79,10 +79,10 @@ class Indexer(Logger):
         self.logger.info(f"Collected {len(found)}/{total} supported files")
         return found
 
-    # ---------- обработка ----------
+    # ---------- processing ----------
 
     def _process_file(self, file_path: Path) -> Optional[FileEntry]:
-        """Только извлечение — БД не трогаем (важно для потоков)."""
+        """Extraction only — no DB access (important for threads)."""
         file_type = self.registry.get_file_type(file_path)
         if file_type is FileType.UNKNOWN:
             return None
@@ -98,7 +98,7 @@ class Indexer(Logger):
         files: List[Path],
         progress_callback=None,
     ) -> List[FileEntry]:
-        """ЭТАП 2: извлечь метаданные параллельно."""
+        """STAGE 2: extract metadata in parallel."""
         entries: List[FileEntry] = []
         if not files:
             return entries
@@ -118,7 +118,7 @@ class Indexer(Logger):
                     progress_callback(PHASE_EXTRACT, done, len(files))
         except KeyboardInterrupt:
             self.interrupted = True
-            self.logger.warning("Извлечение прервано пользователем")
+            self.logger.warning("Extraction interrupted by user")
             for future in futures:
                 future.cancel()
             pool.shutdown(wait=False, cancel_futures=True)
@@ -127,10 +127,10 @@ class Indexer(Logger):
 
         return entries
 
-    # ---------- запись ----------
+    # ---------- writing ----------
 
     def index(self, entries: List[FileEntry], progress_callback=None) -> Dict[str, int]:
-        """ЭТАП 3: записать в БД пачками. Одна транзакция на chunk_size файлов."""
+        """STAGE 3: write to the DB in batches. One transaction per chunk_size files."""
         if not entries:
             return {"indexed": 0, "updated": 0, "errors": 0}
 
@@ -142,7 +142,7 @@ class Indexer(Logger):
             entries, chunk_size=self.chunk_size, on_progress=on_chunk
         )
 
-    # ---------- оркестрация ----------
+    # ---------- orchestration ----------
 
     def run(
         self,
