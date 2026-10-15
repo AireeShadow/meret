@@ -86,22 +86,24 @@ def _iter_statements(script: str):
 
 
 class SQLiteRepository(AbstractRepository, Logger):
+    _SAVE_FILE_SQL = """
+                INSERT INTO files (filepath, filename, rating, type, metadata)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(filepath) DO UPDATE SET
+                    filename = excluded.filename,
+                    rating = excluded.rating,
+                    type = excluded.type,
+                    metadata = excluded.metadata,
+                    updated_at = CURRENT_TIMESTAMP
+            """
+    _EXPECTED_TABLES = ("files", "tags", "file_tags")
+
     def __init__(self, db_path: str):
         Logger.__init__(self)
         self.db_path = str(db_path)
         self.fts_enabled = True
         self._init_tables()
-        self._SAVE_FILE_SQL = """
-            INSERT INTO files (filepath, filename, rating, type, metadata)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(filepath) DO UPDATE SET
-                filename = excluded.filename,
-                rating = excluded.rating,
-                type = excluded.type,
-                metadata = excluded.metadata,
-                updated_at = CURRENT_TIMESTAMP
-        """
-        self._EXPECTED_TABLES = ("files", "tags", "file_tags")
+        
 
     # ---------- соединение ----------
     def _connect(self) -> sqlite3.Connection:
