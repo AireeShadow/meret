@@ -2,6 +2,7 @@
 
 Lives in tests, but can easily move to meret/core/ if needed.
 """
+
 from typing import Dict, List, Optional, Set, Tuple
 
 from meret.core import tagpaths
@@ -165,7 +166,7 @@ class MockRepository(AbstractRepository):
 
         dst = self._child(src.parent_id, new_name)
         if dst and dst.id != src.id:
-            for (f, t) in list(self._links):
+            for f, t in list(self._links):
                 if t == src.id:
                     self._links.add((f, dst.id))
             self._links = {(f, t) for (f, t) in self._links if t != src.id}
@@ -256,10 +257,7 @@ class MockRepository(AbstractRepository):
 
     def prune_orphan_tags(self) -> int:
         parents = {t.parent_id for t in self._tags.values() if t.parent_id}
-        orphans = [
-            tid for tid in self._tags
-            if self._usage(tid) == 0 and tid not in parents
-        ]
+        orphans = [tid for tid in self._tags if self._usage(tid) == 0 and tid not in parents]
         for tid in orphans:
             del self._tags[tid]
         for tag in self._tags.values():
@@ -301,11 +299,7 @@ class MockRepository(AbstractRepository):
 
     def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]:
         q = query.casefold()
-        hits = [
-            self._clone(e)
-            for e in self._files.values()
-            if q in e.filename.casefold()
-        ]
+        hits = [self._clone(e) for e in self._files.values() if q in e.filename.casefold()]
         return hits[:limit]
 
     def get_stats(self) -> dict:

@@ -1,7 +1,7 @@
 # tests/vfs/backends/test_fsspec.py
 import pytest
 
-fsspec = pytest.importorskip("fsspec")   # no package: tests get skipped, the run doesn't fail
+fsspec = pytest.importorskip("fsspec")  # no package: tests get skipped, the run doesn't fail
 
 from meret.core.models import FileEntry, FileType
 from meret.vfs.backends.fsspec import MeretFileSystem, register
@@ -71,9 +71,7 @@ def test_protocol_registered(fs):
 def test_fsspec_open_url(mock_repo, tmp_path):
     real = tmp_path / "x.png"
     real.write_bytes(b"DATA")
-    f = mock_repo.save_file(
-        FileEntry(filename="x.png", filepath=str(real), type=FileType.IMAGE)
-    )
+    f = mock_repo.save_file(FileEntry(filename="x.png", filepath=str(real), type=FileType.IMAGE))
     mock_repo.add_tag(f, "tag")
 
     with fsspec.open("meret:///tag/x.png", "rb", repo=mock_repo) as fh:

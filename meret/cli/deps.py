@@ -3,6 +3,7 @@
 Rule: no silent creation. No database means a loud error with a hint.
 Only `meret init` creates one (create=True).
 """
+
 from __future__ import annotations
 
 import os
@@ -46,10 +47,11 @@ class DatabaseNotFound(click.ClickException):
         _console.print()
         _console.print("[bold]What to do:[/bold]")
         _console.print("  • create a database in the current directory: [green]meret init[/green]")
-        _console.print("  • pass the path explicitly: [green]meret scan --db /path/to/meret.db ...[/green]")
         _console.print(
-            f"  • or set the environment variable: "
-            f"[green]{ENV_DB_PATH}=/path/to/meret.db[/green]"
+            "  • pass the path explicitly: [green]meret scan --db /path/to/meret.db ...[/green]"
+        )
+        _console.print(
+            f"  • or set the environment variable: [green]{ENV_DB_PATH}=/path/to/meret.db[/green]"
         )
         _console.print()
 

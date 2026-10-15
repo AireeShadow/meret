@@ -21,34 +21,35 @@ from meret.core.logger import Logger
 
 class ExtractionError(Exception):
     """Metadata extraction error"""
+
     pass
 
 
 class MetadataExtractor(ABC):
     """
     Base class for all metadata extractors.
-    
+
     Subclasses must implement:
     - supported_extensions: a set of extensions (e.g. {'.jpg', '.png'})
     - file_type: the file type from the FileType enum
     - extract(): the extraction logic
     """
-    
+
     supported_extensions: set[str] = set()
     file_type: FileType = FileType.UNKNOWN
-    
+
     def __init__(self):
         self.logger = Logger().logger
-    
+
     def can_extract(self, file_path: Path) -> bool:
         """Checks whether the extractor can handle this file"""
         return file_path.suffix.lower() in self.supported_extensions
-    
+
     @abstractmethod
     def extract(self, file_path: Path) -> Dict[str, Any]:
         """
         Extracts metadata from a file.
-        
+
         Returns:
             A dict of metadata. On error, a dict with an 'error' key.
         """
@@ -70,35 +71,37 @@ class MetadataExtractor(ABC):
 
 class ImageExtractor(MetadataExtractor):
     """Extracts image metadata: dimensions, format, EXIF"""
-    
+
     supported_extensions = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp", ".heic"}
     file_type = FileType.IMAGE
-    
+
     def extract(self, file_path: Path) -> Dict[str, Any]:
         from PIL import Image, ExifTags
-        
+
         metadata = self._base_metadata(file_path)
-        
+
         try:
             with Image.open(file_path) as img:
-                metadata.update({
-                    "width": img.width,
-                    "height": img.height,
-                    "mode": img.mode,
-                    "format": img.format,
-                })
-                
+                metadata.update(
+                    {
+                        "width": img.width,
+                        "height": img.height,
+                        "mode": img.mode,
+                        "format": img.format,
+                    }
+                )
+
                 # EXIF — only if present
                 exif = img.getexif()
                 if exif:
                     metadata["exif"] = self._parse_exif(exif, ExifTags)
-                
+
         except Exception as e:
             self.logger.warning(f"Image extraction failed for {file_path}: {e}")
             metadata["error"] = str(e)
-        
+
         return metadata
-    
+
     @staticmethod
     def _parse_exif(exif_data, exif_tags) -> Dict[str, Any]:
         """Parses EXIF into a readable form"""
@@ -116,126 +119,153 @@ class ImageExtractor(MetadataExtractor):
 
 class VideoExtractor(MetadataExtractor):
     """Extracts video metadata: duration, resolution, codecs"""
-    
+
     supported_extensions = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".wmv", ".m4v"}
     file_type = FileType.VIDEO
-    
+
     def extract(self, file_path: Path) -> Dict[str, Any]:
         metadata = self._base_metadata(file_path)
-        
+
         try:
             probe_data = self._probe(file_path)
             fmt = probe_data.get("format", {})
-            
-            metadata.update({
-                "duration": float(fmt.get("duration", 0) or 0),
-                "bitrate": int(fmt.get("bit_rate", 0) or 0),
-                "container": fmt.get("format_name"),
-                "streams": self._parse_streams(probe_data.get("streams", [])),
-            })
-            
+
+            metadata.update(
+                {
+                    "duration": float(fmt.get("duration", 0) or 0),
+                    "bitrate": int(fmt.get("bit_rate", 0) or 0),
+                    "container": fmt.get("format_name"),
+                    "streams": self._parse_streams(probe_data.get("streams", [])),
+                }
+            )
+
             # Take the resolution from the first video stream
             for stream in metadata["streams"]:
                 if stream.get("codec_type") == "video":
                     metadata["width"] = stream.get("width")
                     metadata["height"] = stream.get("height")
                     break
-                
+
         except Exception as e:
             self.logger.warning(f"Video extraction failed for {file_path}: {e}")
             metadata["error"] = str(e)
-        
+
         return metadata
-    
+
     @staticmethod
     def _probe(file_path: Path) -> Dict[str, Any]:
         """Runs ffprobe and returns JSON"""
         result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-print_format", "json",
-             "-show_format", "-show_streams", str(file_path)],
+            [
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                str(file_path),
+            ],
             capture_output=True,
             text=True,
-            encoding="utf-8",       
-            errors="replace",       
+            encoding="utf-8",
+            errors="replace",
             check=True,
             timeout=30,
         )
         return json.loads(result.stdout)
-    
+
     @staticmethod
     def _parse_streams(streams: List[dict]) -> List[Dict[str, Any]]:
         """Keeps only the useful stream fields"""
-        keep = {"codec_type", "codec_name", "width", "height",
-                "duration", "sample_rate", "channels", "bit_rate"}
-        return [
-            {k: v for k, v in s.items() if k in keep}
-            for s in streams
-        ]
+        keep = {
+            "codec_type",
+            "codec_name",
+            "width",
+            "height",
+            "duration",
+            "sample_rate",
+            "channels",
+            "bit_rate",
+        }
+        return [{k: v for k, v in s.items() if k in keep} for s in streams]
 
 
 class AudioExtractor(MetadataExtractor):
     """Extracts audio metadata: duration, bitrate, tags"""
-    
+
     supported_extensions = {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma", ".opus"}
     file_type = FileType.AUDIO
-    
+
     def extract(self, file_path: Path) -> Dict[str, Any]:
         metadata = self._base_metadata(file_path)
-        
+
         try:
             probe_data = self._probe(file_path)
             fmt = probe_data.get("format", {})
-            
-            metadata.update({
-                "duration": float(fmt.get("duration", 0) or 0),
-                "bitrate": int(fmt.get("bit_rate", 0) or 0),
-                "codec": fmt.get("format_name"),
-            })
-            
+
+            metadata.update(
+                {
+                    "duration": float(fmt.get("duration", 0) or 0),
+                    "bitrate": int(fmt.get("bit_rate", 0) or 0),
+                    "codec": fmt.get("format_name"),
+                }
+            )
+
             # ffprobe puts ID3 tags into format.tags
             tags = fmt.get("tags", {})
             if tags:
                 metadata["tags"] = tags
-            
+
             # Audio specifics from the first stream
             for stream in probe_data.get("streams", []):
                 if stream.get("codec_type") == "audio":
-                    metadata.update({
-                        "sample_rate": stream.get("sample_rate"),
-                        "channels": stream.get("channels"),
-                    })
+                    metadata.update(
+                        {
+                            "sample_rate": stream.get("sample_rate"),
+                            "channels": stream.get("channels"),
+                        }
+                    )
                     break
-                
+
         except Exception as e:
             self.logger.warning(f"Audio extraction failed for {file_path}: {e}")
             metadata["error"] = str(e)
-        
+
         return metadata
-    
+
     @staticmethod
     def _probe(file_path: Path) -> Dict[str, Any]:
         result = subprocess.run(
-                    ["ffprobe", "-v", "quiet", "-print_format", "json",
-                     "-show_format", "-show_streams", str(file_path)],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",       
-                    errors="replace",       
-                    check=True,
-                    timeout=30,
-                )
+            [
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                str(file_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+            timeout=30,
+        )
         return json.loads(result.stdout)
 
 
 class ExtractorRegistry:
     """
     Extractor registry. Picks the right one by extension.
-    
+
     Usage:
         registry = ExtractorRegistry()
         metadata = registry.extract(Path("video.mp4"))
     """
-    
+
     def __init__(self, extractors: Optional[List[MetadataExtractor]] = None):
         self._extractors: List[MetadataExtractor] = extractors or [
             ImageExtractor(),
@@ -243,24 +273,24 @@ class ExtractorRegistry:
             AudioExtractor(),
         ]
         self.logger = Logger().logger
-    
+
     def register(self, extractor: MetadataExtractor) -> None:
         """Add a new extractor (e.g. for PDFs or archives)"""
         self._extractors.append(extractor)
         self.logger.info(f"Registered extractor: {type(extractor).__name__}")
-    
+
     def get_extractor(self, file_path: Path) -> Optional[MetadataExtractor]:
         """Returns a matching extractor or None"""
         for extractor in self._extractors:
             if extractor.can_extract(file_path):
                 return extractor
         return None
-    
+
     def get_file_type(self, file_path: Path) -> FileType:
         """Determines the file type via the registry"""
         extractor = self.get_extractor(file_path)
         return extractor.file_type if extractor else FileType.UNKNOWN
-    
+
     def extract(self, file_path: Path) -> Optional[Dict[str, Any]]:
         """
         Extracts metadata, automatically picking an extractor.
@@ -270,9 +300,9 @@ class ExtractorRegistry:
         if not extractor:
             self.logger.debug(f"No extractor for {file_path}")
             return None
-        
+
         return extractor.extract(file_path)
-    
+
     @property
     def supported_types(self) -> set[str]:
         """All supported extensions (for CLI help)"""

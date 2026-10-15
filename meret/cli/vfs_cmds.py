@@ -1,4 +1,5 @@
 """CLI commands for the virtual FS: ls / open / stat."""
+
 import os
 import platform
 import subprocess
@@ -96,7 +97,7 @@ def open_file(
         raise typer.Exit(1)
 
     if path_only:
-        console.print(str(real), soft_wrap=True)   # ← don't wrap
+        console.print(str(real), soft_wrap=True)  # ← don't wrap
         return
 
     _open_external(real)
@@ -125,6 +126,7 @@ def stat_cmd(
         table.add_row("on disk", node.source_path)
     console.print(table)
 
+
 @app.command("mount")
 def mount_cmd(
     mountpoint: Path = typer.Argument(..., help="Where to mount, e.g. M:"),
@@ -144,6 +146,7 @@ def mount_cmd(
         console.print("[dim]Windows: WinFsp + pip install winfspy[/dim]")
         raise typer.Exit(1)
 
+
 def _pids_for_mountpoint(mountpoint: str) -> list[int]:
     """Finds mount processes by mount point."""
     needle = mountpoint.rstrip("\\/")
@@ -158,9 +161,7 @@ def _pids_for_mountpoint(mountpoint: str) -> list[int]:
     else:
         cmd = ["pgrep", "-f", f"meret mount.*{needle}"]
 
-    out = subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
+    out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return [int(tok) for tok in out.stdout.split() if tok.strip().isdigit()]
 
 
@@ -177,7 +178,7 @@ def umount_cmd(
 
     for pid in pids:
         try:
-            os.kill(pid, signal.SIGTERM)      # on Windows this is TerminateProcess
+            os.kill(pid, signal.SIGTERM)  # on Windows this is TerminateProcess
             console.print(f"[green]terminated PID {pid}[/green]")
         except OSError as exc:
             console.print(f"[red]PID {pid}: {exc}[/red]")

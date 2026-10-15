@@ -42,10 +42,9 @@ def populated(mock_repo, tmp_path):
 
 # ---------- structure ----------
 
+
 def test_root_lists_root_tags(tree, mock_repo):
-    f = mock_repo.save_file(
-        FileEntry(filename="a.png", filepath="/a.png", type=FileType.IMAGE)
-    )
+    f = mock_repo.save_file(FileEntry(filename="a.png", filepath="/a.png", type=FileType.IMAGE))
     mock_repo.add_tag(f, "travel")
 
     nodes = tree.listdir("/")
@@ -78,6 +77,7 @@ def test_root_is_empty_without_tags(tree):
 
 # ---------- stat ----------
 
+
 def test_stat_dir_and_file(populated):
     vfs, _ = populated
     assert vfs.stat("/travel").is_dir
@@ -92,15 +92,14 @@ def test_root_stat(tree):
 
 
 def test_isdir(tree, mock_repo):
-    f = mock_repo.save_file(
-        FileEntry(filename="a.png", filepath="/a.png", type=FileType.IMAGE)
-    )
+    f = mock_repo.save_file(FileEntry(filename="a.png", filepath="/a.png", type=FileType.IMAGE))
     mock_repo.add_tag(f, "tag")
     assert tree.isdir("/tag") is True
     assert tree.isdir("/missing") is False
 
 
 # ---------- reading ----------
+
 
 def test_read_bytes(populated):
     vfs, _ = populated
@@ -120,15 +119,14 @@ def test_read_directory_raises(populated):
 
 # ---------- errors ----------
 
+
 def test_not_found(tree):
     with pytest.raises(NotFound):
         tree.stat("/no/such")
 
 
 def test_exists(tree, mock_repo):
-    f = mock_repo.save_file(
-        FileEntry(filename="a.png", filepath="/a.png", type=FileType.IMAGE)
-    )
+    f = mock_repo.save_file(FileEntry(filename="a.png", filepath="/a.png", type=FileType.IMAGE))
     mock_repo.add_tag(f, "tag")
     assert tree.exists("/tag") is True
     assert tree.exists("/missing") is False
@@ -140,6 +138,7 @@ def test_deep_missing_path(tree):
 
 
 # ---------- utilities ----------
+
 
 def test_walk_visits_everything(populated):
     vfs, _ = populated
@@ -156,6 +155,7 @@ def test_normalize_paths(tree):
 def test_sanitize_forbidden_chars():
     assert sanitize("a/b") == "a∕b"
     assert sanitize("  ") == "_"
+
 
 def test_tag_index_matches_tagpaths(tree, mock_repo):
     """The VFS index is exactly what tagpaths builds (not its own copy of the logic)."""

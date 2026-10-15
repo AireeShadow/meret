@@ -95,7 +95,7 @@ class AbstractRepository(ABC):
         Unlike search_by_tags (which matches by name), this tells namesakes
         like genre/mystery and studio/mystery apart.
         """
-        
+
     @abstractmethod
     def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]: ...
 

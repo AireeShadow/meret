@@ -24,6 +24,7 @@ def test_foreign_keys_cascade(sqlite_repo):
     # the link must be removed by cascade, leaving the tag orphaned
     assert sqlite_repo.get_tag_usage()[0].usage_count == 0
 
+
 def _first_word(stmt: str) -> str:
     for line in stmt.splitlines():
         line = line.strip()
@@ -44,7 +45,5 @@ def test_schema_splits_into_separate_statements():
 
 def test_schema_creates_all_tables(sqlite_repo):
     conn = sqlite_repo._connect()
-    names = {r[0] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table'"
-    )}
+    names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     assert {"files", "tags", "file_tags"} <= names

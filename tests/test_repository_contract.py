@@ -108,7 +108,9 @@ def test_search_by_tags_all(repo):
     f2 = repo.save_file(FileEntry(filename="b.png", filepath="/x/b.png", type=FileType.IMAGE))
     repo.set_file_tags(f1, ["vacation", "beach"])
     repo.set_file_tags(f2, ["vacation"])
-    assert [f.filename for f in repo.search_by_tags(["vacation", "beach"], match_all=True)] == ["a.png"]
+    assert [f.filename for f in repo.search_by_tags(["vacation", "beach"], match_all=True)] == [
+        "a.png"
+    ]
 
 
 def test_search_by_tags_empty_returns_all(repo):
@@ -160,10 +162,11 @@ def test_stats(repo):
     assert stats["total_files"] == 2
     assert stats["by_type"] == {"image": 1, "video": 1}
 
+
 def test_create_tag(repo):
     assert repo.create_tag("genre") is True
-    assert repo.create_tag("genre") is False        # already exists
-    assert repo.create_tag("GENRE") is False        # and case doesn't matter
+    assert repo.create_tag("genre") is False  # already exists
+    assert repo.create_tag("GENRE") is False  # and case doesn't matter
     assert [t.name for t in repo.get_all_tags()] == ["genre"]
 
 
@@ -180,8 +183,8 @@ def test_set_tag_parent_cycle_is_rejected(repo):
         repo.create_tag(name)
     assert repo.set_tag_parent("b", "a") is True
     assert repo.set_tag_parent("c", "b") is True
-    assert repo.set_tag_parent("a", "c") is False   # a under its own descendant
-    assert repo.set_tag_parent("a", "a") is False   # a under itself
+    assert repo.set_tag_parent("a", "c") is False  # a under its own descendant
+    assert repo.set_tag_parent("a", "a") is False  # a under itself
     assert [n.name for n in repo.get_tag_tree()] == ["a"]
     assert [n.name for n in repo.get_tag_tree()[0].children] == ["b"]
 
@@ -205,7 +208,7 @@ def test_delete_tag_keeps_children(repo):
 
 def test_prune_keeps_parent_of_children(repo):
     fid = repo.save_file(FileEntry(filename="a.png", filepath="/x/a.png", type=FileType.IMAGE))
-    repo.create_tag("genre")            # no files, but has a child
+    repo.create_tag("genre")  # no files, but has a child
     repo.create_tag("mystery")
     repo.set_tag_parent("mystery", "genre")
     repo.add_tag(fid, "unwanted")
@@ -214,6 +217,7 @@ def test_prune_keeps_parent_of_children(repo):
     # "unwanted" and the empty leaf "mystery" go away; "genre" survives as a parent
     assert repo.prune_orphan_tags() == 2
     assert [t.name for t in repo.get_all_tags()] == ["genre"]
+
 
 def _paths(repo) -> set[str]:
     by_id = {t.id: t for t in repo.get_all_tags()}
@@ -230,7 +234,7 @@ def test_same_name_under_different_parents(repo):
 
 def test_create_tag_is_strict_path(repo):
     repo.create_tag("genre/mystery")
-    assert repo.create_tag("mystery") is True     # a root namesake lives elsewhere
+    assert repo.create_tag("mystery") is True  # a root namesake lives elsewhere
     assert repo.create_tag("genre/mystery") is False
     assert _paths(repo) == {"genre", "genre/mystery", "mystery"}
 
@@ -238,7 +242,7 @@ def test_create_tag_is_strict_path(repo):
 def test_add_tag_reuses_twin_by_name(repo):
     fid = repo.save_file(FileEntry(filename="a.png", filepath="/x/a.png", type=FileType.IMAGE))
     repo.create_tag("genre/mystery")
-    repo.add_tag(fid, "mystery")                  # don't spawn a second namesake
+    repo.add_tag(fid, "mystery")  # don't spawn a second namesake
     assert _paths(repo) == {"genre", "genre/mystery"}
     assert repo.get_file_by_id(fid).labels == ["mystery"]
 
@@ -266,6 +270,7 @@ def test_set_tag_parent_by_path(repo):
 def test_set_tag_parent_path_is_strict(repo):
     repo.create_tag("genre")
     assert repo.set_tag_parent("genre/missing", "genre") is False
+
 
 def test_search_by_tag_ids_distinguishes_namesakes(repo):
     f1 = repo.save_file(FileEntry(filename="a.png", filepath="/x/a.png", type=FileType.IMAGE))
