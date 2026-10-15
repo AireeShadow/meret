@@ -1,5 +1,6 @@
 import pytest
 
+from meret.core import tagpaths
 from meret.core.models import FileEntry, FileType
 
 
@@ -205,3 +206,55 @@ def test_prune_keeps_parent_of_children(repo):
     # уходят «лишний» и пустой лист «детектив»; «жанр» выживает как родитель
     assert repo.prune_orphan_tags() == 2
     assert [t.name for t in repo.get_all_tags()] == ["жанр"]
+
+def _paths(repo) -> set[str]:
+    by_id = {t.id: t for t in repo.get_all_tags()}
+    return {tagpaths.path_of(t, by_id) for t in repo.get_all_tags()}
+
+
+def test_same_name_under_different_parents(repo):
+    assert repo.create_tag("жанр") is True
+    assert repo.create_tag("студия") is True
+    assert repo.create_tag("жанр/детектив") is True
+    assert repo.create_tag("студия/детектив") is True
+    assert _paths(repo) == {"жанр", "жанр/детектив", "студия", "студия/детектив"}
+
+
+def test_create_tag_is_strict_path(repo):
+    repo.create_tag("жанр/детектив")
+    assert repo.create_tag("детектив") is True     # корневой тёзка — другое место
+    assert repo.create_tag("жанр/детектив") is False
+    assert _paths(repo) == {"жанр", "жанр/детектив", "детектив"}
+
+
+def test_add_tag_reuses_twin_by_name(repo):
+    fid = repo.save_file(FileEntry(filename="a.png", filepath="/x/a.png", type=FileType.IMAGE))
+    repo.create_tag("жанр/детектив")
+    repo.add_tag(fid, "детектив")                  # второго тёзку не плодим
+    assert _paths(repo) == {"жанр", "жанр/детектив"}
+    assert repo.get_file_by_id(fid).labels == ["детектив"]
+
+
+def test_add_tag_by_path_creates_parents(repo):
+    fid = repo.save_file(FileEntry(filename="a.png", filepath="/x/a.png", type=FileType.IMAGE))
+    repo.add_tag(fid, "жанр/детектив")
+    assert _paths(repo) == {"жанр", "жанр/детектив"}
+
+
+def test_delete_tag_by_path_keeps_children(repo):
+    repo.create_tag("жанр/детектив")
+    assert repo.delete_tag("жанр/детектив") is True
+    assert _paths(repo) == {"жанр"}
+
+
+def test_set_tag_parent_by_path(repo):
+    repo.create_tag("жанр")
+    repo.create_tag("студия")
+    repo.create_tag("жанр/детектив")
+    assert repo.set_tag_parent("жанр/детектив", "студия") is True
+    assert _paths(repo) == {"жанр", "студия", "студия/детектив"}
+
+
+def test_set_tag_parent_path_is_strict(repo):
+    repo.create_tag("жанр")
+    assert repo.set_tag_parent("жанр/нет", "жанр") is False

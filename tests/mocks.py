@@ -4,6 +4,7 @@
 """
 from typing import Dict, List, Optional, Set, Tuple
 
+from meret.core import tagpaths
 from meret.core.models import FileEntry, FileType, Tag, TagNode
 from meret.core.repository import AbstractRepository
 
@@ -19,20 +20,65 @@ class MockRepository(AbstractRepository):
         self._next_tag_id = 1
 
     # ---------- helpers ----------
-    def _find_tag(self, name: str) -> Optional[Tag]:
+    def _child(self, parent_id: Optional[int], chunk: str) -> Optional[Tag]:
+        key = chunk.casefold()
         for tag in self._tags.values():
-            if tag.name.casefold() == name.casefold():
+            if tag.parent_id == parent_id and tag.name.casefold() == key:
                 return tag
         return None
 
-    def _ensure_tag(self, name: str, colour: Optional[str] = None) -> int:
-        tag = self._find_tag(name)
-        if tag:
-            return tag.id
-        tag = Tag(id=self._next_tag_id, name=name, colour=colour)
-        self._tags[tag.id] = tag
-        self._next_tag_id += 1
-        return tag.id
+    def _tag_strict(self, ref: str) -> Optional[Tag]:
+        chunks = tagpaths.parts(ref)
+        if not chunks:
+            return None
+        tag = None
+        parent_id: Optional[int] = None
+        for chunk in chunks:
+            tag = self._child(parent_id, chunk)
+            if tag is None:
+                return None
+            parent_id = tag.id
+        return tag
+
+    def _tag_by(self, ref: str) -> Optional[Tag]:
+        chunks = tagpaths.parts(ref)
+        if not chunks:
+            return None
+
+        tag = self._tag_strict(ref)
+        if tag is not None or len(chunks) > 1:
+            return tag
+
+        matches = [t for t in self._tags.values() if t.name.casefold() == chunks[0].casefold()]
+        matches.sort(key=lambda t: (t.parent_id is not None, t.id or 0))
+        return matches[0] if matches else None
+
+    def _ensure_tag(self, ref: str, colour: Optional[str] = None, reuse_any: bool = True) -> int:
+        chunks = tagpaths.parts(ref)
+        if not chunks:
+            raise ValueError(f"пустой путь тега: {ref!r}")
+
+        if reuse_any and len(chunks) == 1:
+            existing = self._tag_by(chunks[0])
+            if existing:
+                return existing.id
+
+        parent_id: Optional[int] = None
+        tag_id: Optional[int] = None
+        for i, chunk in enumerate(chunks):
+            tag = self._child(parent_id, chunk)
+            if tag is None:
+                tag = Tag(
+                    id=self._next_tag_id,
+                    name=chunk,
+                    colour=colour if i == len(chunks) - 1 else None,
+                    parent_id=parent_id,
+                )
+                self._tags[tag.id] = tag
+                self._next_tag_id += 1
+            tag_id = tag.id
+            parent_id = tag_id
+        return tag_id
 
     def _tag_names(self, file_id: int) -> List[str]:
         names = [self._tags[t].name for (f, t) in self._links if f == file_id]
@@ -96,10 +142,10 @@ class MockRepository(AbstractRepository):
         return tag_id
 
     def remove_tag(self, file_id: int, tag: str) -> bool:
-        tag = self._find_tag(tag)
-        if not tag or (file_id, tag.id) not in self._links:
+        found = self._tag_by(tag)
+        if not found or (file_id, found.id) not in self._links:
             return False
-        self._links.discard((file_id, tag.id))
+        self._links.discard((file_id, found.id))
         return True
 
     def set_file_tags(self, file_id: int, tags: List[str]) -> bool:
@@ -109,18 +155,26 @@ class MockRepository(AbstractRepository):
         return True
 
     def rename_tag(self, old: str, new: str) -> bool:
-        src = self._find_tag(old)
+        src = self._tag_by(old)
         if not src:
             return False
-        dst = self._find_tag(new)
+        chunks = tagpaths.parts(new)
+        if not chunks:
+            return False
+        new_name = chunks[-1]
+
+        dst = self._child(src.parent_id, new_name)
         if dst and dst.id != src.id:
             for (f, t) in list(self._links):
                 if t == src.id:
                     self._links.add((f, dst.id))
             self._links = {(f, t) for (f, t) in self._links if t != src.id}
+            for other in self._tags.values():
+                if other.parent_id == src.id:
+                    other.parent_id = src.parent_id
             del self._tags[src.id]
         else:
-            src.name = new
+            src.name = new_name
         return True
 
     # ---------- tags: создание и иерархия ----------
@@ -141,15 +195,13 @@ class MockRepository(AbstractRepository):
         return False
 
     def create_tag(self, name: str, colour: Optional[str] = None) -> bool:
-        if self._find_tag(name):
+        if self._tag_strict(name) is not None:
             return False
-        tag = Tag(id=self._next_tag_id, name=name, colour=colour)
-        self._tags[tag.id] = tag
-        self._next_tag_id += 1
+        self._ensure_tag(name, colour, reuse_any=False)
         return True
 
     def delete_tag(self, name: str) -> bool:
-        tag = self._find_tag(name)
+        tag = self._tag_by(name)
         if not tag:
             return False
         for other in self._tags.values():
@@ -160,13 +212,13 @@ class MockRepository(AbstractRepository):
         return True
 
     def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
-        node = self._find_tag(tag)
+        node = self._tag_by(tag)
         if not node:
             return False
         if parent is None:
             node.parent_id = None
             return True
-        parent_tag = self._find_tag(parent)
+        parent_tag = self._tag_by(parent)
         if not parent_tag or self._would_cycle(node.id, parent_tag.id):
             return False
         node.parent_id = parent_tag.id
