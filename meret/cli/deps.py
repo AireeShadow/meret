@@ -110,9 +110,6 @@ def get_repo(db_path: Optional[Path] = None, create: bool = False):
     resolved = resolve_db_path(db_path)
     
     if not resolved.exists() and not create:
-        raise typer.BadParameter(
-            f"Database not found: {resolved}\n"
-            "Run 'meret init' first or use --db to specify path."
-        )
+        raise DatabaseNotFound(resolved) 
     
     return SQLiteRepository(str(resolved))

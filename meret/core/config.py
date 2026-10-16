@@ -31,7 +31,7 @@ class PathsConfig(BaseModel):
 
 class ScanConfig(BaseModel):
     """Scanner settings."""
-    workers: int = Field(default=8, ge=1, le=64)
+    workers: int = Field(default=8, ge=1)
     chunk_size: int = Field(default=1000, ge=1)
     skip_existing: bool = Field(default=True)
     
@@ -205,6 +205,8 @@ class ConfigManager:
         # Navigate and set
         target = data
         for part in parts[:-1]:
+            if part not in target:
+                raise AttributeError(f"Config has no attribute '{part}'")
             target = target[part]
         
         # Type conversion
