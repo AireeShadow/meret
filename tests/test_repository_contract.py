@@ -297,3 +297,35 @@ def test_known_fingerprints_tracks_size_and_mtime(repo):
         )
     )
     assert repo.known_fingerprints() == {"/x/a.png": (1234, 1700000000.0)}
+
+
+# ---------- change tracking ----------
+
+
+def test_data_version_moves_on_every_kind_of_write(repo):
+    """The VFS cache relies on it: any write must change the version."""
+    fid = repo.save_file(FileEntry(filename="a.png", filepath="/x/a.png", type=FileType.IMAGE))
+    writes = [
+        lambda: repo.add_tag(fid, "trip"),
+        lambda: repo.create_tag("genre/mystery"),
+        lambda: repo.set_tag_parent("trip", "genre"),
+        lambda: repo.rename_tag("trip", "voyage"),
+        lambda: repo.remove_tag(fid, "voyage"),
+        lambda: repo.delete_tag("voyage"),
+        lambda: repo.save_file(
+            FileEntry(filename="b.png", filepath="/x/b.png", type=FileType.IMAGE)
+        ),
+        lambda: repo.delete_file(fid),
+    ]
+    for write in writes:
+        before = repo.data_version()
+        write()
+        assert repo.data_version() != before
+
+
+def test_data_version_stable_without_writes(repo):
+    repo.save_file(FileEntry(filename="a.png", filepath="/x/a.png", type=FileType.IMAGE))
+    first = repo.data_version()
+    repo.get_all_tags()
+    repo.search_by_name("a")
+    assert repo.data_version() == first

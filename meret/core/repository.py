@@ -116,3 +116,12 @@ class AbstractRepository(ABC):
         Lets the incremental scan re-index files that changed on disk while
         skipping the untouched ones. One query, like known_paths.
         """
+
+    # --- change tracking ---
+    def data_version(self) -> Optional[int]:
+        """A number that changes whenever the stored data changes.
+
+        Readers that cache (the virtual FS) compare it to know when to refresh.
+        None means the implementation can't tell — callers fall back to a TTL.
+        """
+        return None

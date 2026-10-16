@@ -76,3 +76,23 @@ def test_fsspec_open_url(mock_repo, tmp_path):
 
     with fsspec.open("meret:///tag/x.png", "rb", repo=mock_repo) as fh:
         assert fh.read() == b"DATA"
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "expected"),
+    [(0, 3, b"PNG"), (3, None, b"DATA"), (-4, None, b"DATA"), (2, 5, b"GDA"), (5, 2, b"")],
+)
+def test_cat_file_range(fs, start, end, expected):
+    assert fs.cat_file("/seaside/beach.png", start=start, end=end) == expected
+
+
+def test_open_streams_real_file(fs):
+    with fs.open("/seaside/beach.png", "rb") as fh:
+        assert fh.read(3) == b"PNG"
+        fh.seek(5)
+        assert fh.read() == b"TA"
+
+
+def test_open_for_writing_is_refused(fs):
+    with pytest.raises(PermissionError):
+        fs.open("/seaside/beach.png", "wb")

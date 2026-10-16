@@ -1,7 +1,5 @@
 """fsspec adapter. Imported separately — requires fsspec."""
 
-import io
-
 import fsspec
 from fsspec.spec import AbstractFileSystem
 
@@ -35,10 +33,17 @@ class MeretFileSystem(AbstractFileSystem):
         return self._tree.exists(path)
 
     def cat_file(self, path, start=None, end=None, **kw):
-        return self._tree.read(path)[start:end]
+        if start is None and end is None:
+            return self._tree.read(path)
+        # only the requested range; negative bounds count from the end, as in slices
+        with self._tree.open_source(path) as src:
+            begin, stop, _ = slice(start, end).indices(src.size)
+            return src.pread(begin, stop - begin)
 
     def _open(self, path, mode="rb", **kw):
-        return io.BytesIO(self._tree.read(path))
+        if mode != "rb":
+            raise PermissionError(f"meret VFS is read-only: {path} ({mode})")
+        return open(self._tree.real_path(path), "rb")  # a real file: streams, seeks
 
 
 def register() -> None:
