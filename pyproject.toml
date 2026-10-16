@@ -21,6 +21,7 @@ dev = ["pytest>=7.0", "black", "ruff", "mypy"]
 vfs-fsspec = ["fsspec"]
 vfs-fuse   = ["fusepy"]
 vfs-win    = ["winfspy"]
+config     = ["tomli>=2.0.0; python_version<'3.11'", "tomli-w>=1.0.0"]
 
 [project.scripts]
 meret = "meret.cli.app:app"
