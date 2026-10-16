@@ -51,10 +51,15 @@ def ls(
     long: bool = typer.Option(False, "--long", "-l", help="Show sizes"),
 ):
     """List the contents of a virtual directory (tags = folders)."""
-    tree = _get_tree(db_path or Path("."))
+    try:
+        tree = _get_tree(db_path or Path("."))
+    except DatabaseNotFound:
+        console.print(f"[red]Database not found[/red]")
+        raise typer.Exit(1)
+    
     try:
         nodes = tree.listdir(vpath)
-    except DatabaseNotFound:
+    except NotFound:
         console.print(f"[red]No such path: {vpath}[/red]")
         raise typer.Exit(1)
 
