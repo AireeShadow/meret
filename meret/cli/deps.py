@@ -4,17 +4,18 @@ Rule: no silent creation. No database means a loud error with a hint.
 Only `meret init` creates one (create=True).
 """
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
 from typing import Optional
+
+import typer
 
 import click
 from rich.console import Console
 
 from meret.core.repository import AbstractRepository
 from meret.core.sqlite_repo import SQLiteRepository
+from meret.core.config import get_config
 
 DB_NAME = "meret.db"
 ENV_DB_PATH = "MERET_DB"
@@ -60,30 +61,58 @@ class DatabaseNotFound(click.ClickException):
         return
 
 
-def resolve_db_path(db_path: Optional[Path] = None) -> Path:
-    """Priority: --db → MERET_DB → ./meret.db.
-
-    A path without a .db suffix is treated as a directory to put meret.db in.
+def resolve_db_path(path: Optional[Path] = None) -> Path:
     """
-    raw = db_path if db_path is not None else os.environ.get(ENV_DB_PATH)
-    if raw is None:
-        return (Path.cwd() / DB_NAME).resolve()
-
-    path = Path(raw).expanduser()
-    if path.suffix.lower() == ".db":
-        return path.resolve()
-    return (path / DB_NAME).resolve()
-
-
-def get_repo(db_path: Optional[Path] = None, create: bool = False) -> AbstractRepository:
-    """Repository. create=False: no database → DatabaseNotFound."""
-    path = resolve_db_path(db_path)
-
-    if path.exists():
+    Resolve database path from CLI arg or config.
+    
+    Priority:
+    1. Explicit path argument
+    2. Config paths.default_db
+    3. Current directory / .meret.db
+    """
+    if path is not None:
+        # If path is a directory, append default filename
         if path.is_dir():
-            raise click.ClickException(f"database path is a directory: {path}")
-    elif not create:
-        raise DatabaseNotFound(path)
+            return path / "meret.db"
+        return path.expanduser().resolve()
+    
+    # Try config
+    config = get_config()
+    db_path = config.get("paths.default_db")
+    
+    if db_path:
+        return Path(db_path).expanduser().resolve()
+    
+    # Default: current dir
+    return Path.cwd() / "meret.db"
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return SQLiteRepository(str(path))
+
+def resolve_library_path(path: Optional[Path] = None) -> Optional[Path]:
+    """
+    Resolve library path from CLI arg or config.
+    """
+    if path is not None:
+        return path.expanduser().resolve()
+    
+    config = get_config()
+    lib_path = config.get("paths.default_library")
+    
+    if lib_path:
+        return Path(lib_path).expanduser().resolve()
+    
+    return None
+
+
+def get_repo(db_path: Optional[Path] = None, create: bool = False):
+    """
+    Get repository instance with resolved path.
+    """
+    resolved = resolve_db_path(db_path)
+    
+    if not resolved.exists() and not create:
+        raise typer.BadParameter(
+            f"Database not found: {resolved}\n"
+            "Run 'meret init' first or use --db to specify path."
+        )
+    
+    return SQLiteRepository(str(resolved))

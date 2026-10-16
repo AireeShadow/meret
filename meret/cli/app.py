@@ -11,6 +11,7 @@ from meret.core import tagpaths
 from meret.core.indexer import PHASE_COLLECT, PHASE_EXTRACT, PHASE_INDEX, Indexer
 from meret.core.models import Tag
 from meret.core.repository import AbstractRepository
+from meret.core.config import get_config, CONFIG_FILENAME
 
 from meret.cli.deps import get_repo, resolve_db_path
 
@@ -328,8 +329,87 @@ def stats(db_path: Optional[Path] = DB_OPTION):
     for t, c in s["by_type"].items():
         console.print(f"  {t}: {c}")
 
+# ----- config -----
+config_app = typer.Typer(help="Configuration management", no_args_is_help=True)
+app.add_typer(config_app, name="config")
+
+
+@config_app.command("show")
+def config_show():
+    """Display current configuration."""
+    from rich.syntax import Syntax
+    
+    cfg = get_config()
+    # Dump as TOML-like format
+    import json
+    content = json.dumps(cfg.config.model_dump(), indent=2, ensure_ascii=False)
+    
+    console.print(f"[cyan]Config file:[/cyan] {cfg.config_path}")
+    console.print()
+    syntax = Syntax(content, "json", theme="monokai", line_numbers=False)
+    console.print(syntax)
+
+
+@config_app.command("get")
+def config_get(key: str = typer.Argument(..., help="Config key (e.g., scan.workers)")):
+    """Get a configuration value."""
+    cfg = get_config()
+    value = cfg.get(key)
+    
+    if value is None:
+        console.print(f"[yellow]Key '{key}' not found or is None[/yellow]")
+        raise typer.Exit(1)
+    
+    console.print(f"[cyan]{key}[/cyan] = [green]{value}[/green]")
+
+
+@config_app.command("set")
+def config_set(
+    key: str = typer.Argument(..., help="Config key (e.g., scan.workers)"),
+    value: str = typer.Argument(..., help="Value to set"),
+):
+    """Set a configuration value."""
+    cfg = get_config()
+    
+    try:
+        cfg.set(key, value)
+        console.print(f"[green]✓ Set {key} = {value}[/green]")
+    except Exception as e:
+        console.print(f"[red]Failed to set {key}: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@config_app.command("edit")
+def config_edit():
+    """Open config file in default editor."""
+    cfg = get_config()
+    cfg.edit()
+    console.print(f"[green]✓ Opened {cfg.config_path}[/green]")
+
+
+@config_app.command("reset")
+def config_reset(
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation")
+):
+    """Reset configuration to defaults."""
+    if not force:
+        confirm = typer.confirm("Reset all settings to defaults?")
+        if not confirm:
+            raise typer.Abort()
+    
+    cfg = get_config()
+    cfg.reset()
+    console.print("[green]✓ Configuration reset to defaults[/green]")
+
+
+@config_app.command("path")
+def config_path():
+    """Show configuration file path."""
+    cfg = get_config()
+    exists = "[green](exists)[/green]" if cfg.config_path.exists() else "[yellow](will be created)[/yellow]"
+    console.print(f"{cfg.config_path} {exists}")
 
 if __name__ == "__main__":
     app()
 
-from meret.cli import vfs_cmds  # noqa: E402,F401  — registers ls/open/stat
+#from meret.cli import vfs_cmds  # noqa: E402,F401  — registers ls/open/stat

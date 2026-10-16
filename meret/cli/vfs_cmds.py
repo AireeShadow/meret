@@ -6,12 +6,14 @@ import subprocess
 import signal
 from pathlib import Path
 
+from typing import Optional
+
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from meret.cli.app import app
-from meret.cli.deps import get_repo
+from meret.cli.deps import get_repo, DatabaseNotFound
 from meret.vfs import IsADirectory, NotFound, VirtualTree
 
 console = Console()
@@ -45,14 +47,14 @@ def _get_tree(db_path: Path) -> VirtualTree:
 @app.command("ls")
 def ls(
     vpath: str = typer.Argument("/", help="Virtual path, e.g. /travel"),
-    db_path: Path = typer.Option(Path("."), "--db", "-d", help="Directory containing meret.db"),
+    db_path: Optional[Path] = typer.Option(None, "--db", "-d", help="Directory containing meret.db"),
     long: bool = typer.Option(False, "--long", "-l", help="Show sizes"),
 ):
     """List the contents of a virtual directory (tags = folders)."""
-    tree = _get_tree(db_path)
+    tree = _get_tree(db_path or Path("."))
     try:
         nodes = tree.listdir(vpath)
-    except NotFound:
+    except DatabaseNotFound:
         console.print(f"[red]No such path: {vpath}[/red]")
         raise typer.Exit(1)
 
@@ -184,3 +186,4 @@ def umount_cmd(
             console.print(f"[red]PID {pid}: {exc}[/red]")
 
     console.print("[dim]If Explorer still shows the mount point, press F5[/dim]")
+
