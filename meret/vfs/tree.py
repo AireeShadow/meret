@@ -1,6 +1,9 @@
+import os
 import posixpath
+import threading
+import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -11,6 +14,11 @@ from meret.vfs.errors import IsADirectory, NotFound
 
 _FORBIDDEN = '/\\:*?"<>|'
 _SAFE_SUB = "∕"  # U+2215 DIVISION SLASH
+
+#: How long a snapshot lives when the repository can't report data_version().
+DEFAULT_TTL = 1.0
+
+_TagIndex = Dict[Tuple[Optional[int], str], Tag]
 
 
 @dataclass(frozen=True)
@@ -33,11 +41,75 @@ def sanitize(name: str) -> str:
     return name or "_"
 
 
-class VirtualTree:
-    """Maps the tag hierarchy onto virtual paths. Read-only."""
+class SourceFile:
+    """The real file behind a virtual one, open for positional reads.
 
-    def __init__(self, repo: AbstractRepository) -> None:
+    Backends serve one handle from several threads, so reads never share a file
+    position: os.pread where it exists (Linux/macOS), seek+read under a lock otherwise.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self._file = open(self.path, "rb")
+        self._lock = threading.Lock()
+
+    @property
+    def size(self) -> int:
+        return os.fstat(self._file.fileno()).st_size
+
+    def pread(self, offset: int, length: int) -> bytes:
+        """Up to `length` bytes from `offset`. b"" at or past the end."""
+        if length <= 0:
+            return b""
+        if hasattr(os, "pread"):
+            return os.pread(self._file.fileno(), length, offset)
+        with self._lock:
+            self._file.seek(offset)
+            return self._file.read(length)
+
+    def close(self) -> None:
+        """Idempotent: WinFsp may close the same handle twice."""
+        with self._lock:
+            self._file.close()
+
+    def __enter__(self) -> "SourceFile":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+
+@dataclass
+class _Listing:
+    nodes: List[Node]
+    by_name: Dict[str, Node]
+
+
+@dataclass
+class _Snapshot:
+    """Everything the tree knows at one data_version. Replaced whole, never patched."""
+
+    version: Optional[int]
+    taken_at: float
+    index: _TagIndex
+    children: Dict[Optional[int], List[Tag]]
+    listings: Dict[str, _Listing] = field(default_factory=dict)  # filled lazily
+
+
+class VirtualTree:
+    """Maps the tag hierarchy onto virtual paths. Read-only.
+
+    Backends call stat() for every entry of every listing, so the tree keeps a
+    snapshot: all tags plus each directory listing that was asked for. It is
+    rebuilt when repo.data_version() moves; repositories that can't report it
+    get a `ttl`-second snapshot instead.
+    """
+
+    def __init__(self, repo: AbstractRepository, ttl: float = DEFAULT_TTL) -> None:
         self.repo = repo
+        self.ttl = ttl
+        self._lock = threading.RLock()  # backends call in from many threads
+        self._snap: Optional[_Snapshot] = None
 
     # ---------- path parsing ----------
 
@@ -53,35 +125,61 @@ class VirtualTree:
         norm = cls.normalize(vpath)
         return [p for p in norm.split("/") if p]
 
+    # ---------- snapshot ----------
+
+    def invalidate(self) -> None:
+        """Drop the snapshot; the next call reads the repository again."""
+        with self._lock:
+            self._snap = None
+
+    def _repo_version(self) -> Optional[int]:
+        probe = getattr(self.repo, "data_version", None)
+        return probe() if probe else None
+
+    def _is_fresh(self, snap: _Snapshot, version: Optional[int]) -> bool:
+        if version is not None:
+            return snap.version == version
+        return time.monotonic() - snap.taken_at < self.ttl
+
+    def _snapshot(self) -> _Snapshot:
+        with self._lock:
+            # the version is read BEFORE the data: a write in between only
+            # costs one extra rebuild, it can't leave a stale snapshot behind
+            version = self._repo_version()
+            snap = self._snap
+            if snap is None or not self._is_fresh(snap, version):
+                tags = self.repo.get_all_tags()
+                children: Dict[Optional[int], List[Tag]] = {}
+                for t in tags:
+                    children.setdefault(t.parent_id, []).append(t)
+                snap = _Snapshot(
+                    version=version,
+                    taken_at=time.monotonic(),
+                    index=self._tag_index(tags),
+                    children=children,
+                )
+                self._snap = snap
+            return snap
+
     # ---------- tag index ----------
 
-    def _tag_index(self, tags: Optional[List[Tag]] = None) -> Dict[Tuple[Optional[int], str], Tag]:
+    def _tag_index(self, tags: Optional[List[Tag]] = None) -> _TagIndex:
         """{(parent_id, lowercase_name): tag} — for fast lookup.
 
         The index is built by tagpaths — one implementation for the whole project.
         The only difference is the key: VFS compares by sanitize(), not the raw name.
-        tags may be passed in ready-made to avoid an extra repository call.
+        Without `tags` it is the current snapshot's index.
         """
         if tags is None:
-            tags = self.repo.get_all_tags()
+            return self._snapshot().index
         return tagpaths.index_by_parent(tags, key=lambda t: sanitize(t.name).casefold())
 
-    def _children_of(self, parent_id: Optional[int], tags: Optional[List[Tag]] = None) -> List[Tag]:
-        if tags is None:
-            tags = self.repo.get_all_tags()
-        return [t for t in tags if t.parent_id == parent_id]
-
-    def _resolve_tag(self, vpath: str, tags: Optional[List[Tag]] = None) -> Optional[Tag]:
+    def _resolve_tag(self, vpath: str, snap: _Snapshot) -> Optional[Tag]:
         """Finds a tag by path. None for the root. NotFound if missing."""
-        parts = self._parts(vpath)
-        if not parts:
-            return None
-
-        index = self._tag_index(tags)
         parent_id: Optional[int] = None
         tag: Optional[Tag] = None
-        for part in parts:
-            tag = index.get((parent_id, part.casefold()))
+        for part in self._parts(vpath):
+            tag = snap.index.get((parent_id, part.casefold()))
             if tag is None:
                 raise NotFound(vpath)
             parent_id = tag.id
@@ -109,27 +207,36 @@ class VirtualTree:
         return result
 
     @staticmethod
-    def _file_size(entry: FileEntry) -> int:
-        """Size from metadata, otherwise from disk."""
-        size = (entry.metadata or {}).get("size_bytes")
-        if size:
-            return int(size)
+    def _file_stat(entry: FileEntry) -> Tuple[int, float]:
+        """(size, mtime) from metadata, otherwise from disk."""
+        meta = entry.metadata or {}
+        size, mtime = meta.get("size_bytes"), meta.get("modified_at")
+        if size and mtime:
+            return int(size), float(mtime)
         try:
-            return Path(entry.filepath).stat().st_size
+            st = Path(entry.filepath).stat()
         except OSError:
-            return 0
+            return int(size or 0), float(mtime or 0.0)
+        return int(size or st.st_size), float(mtime or st.st_mtime)
 
     # ---------- listing ----------
 
-    def listdir(self, vpath: str = "/") -> List[Node]:
-        """Returns the directory contents: subtags (folders) + files."""
-        vpath = self.normalize(vpath)
-        tags = self.repo.get_all_tags()
-        tag = self._resolve_tag(vpath, tags)
+    def _listing(self, vpath: str) -> _Listing:
+        """Directory contents from the snapshot, read from the repository once."""
+        with self._lock:
+            snap = self._snapshot()
+            listing = snap.listings.get(vpath)
+            if listing is None:
+                listing = self._build_listing(vpath, snap)
+                snap.listings[vpath] = listing
+            return listing
+
+    def _build_listing(self, vpath: str, snap: _Snapshot) -> _Listing:
+        tag = self._resolve_tag(vpath, snap)
 
         # subdirectories = child tags
         child_tags = sorted(
-            self._children_of(tag.id if tag else None, tags),
+            snap.children.get(tag.id if tag else None, []),
             key=lambda t: sanitize(t.name).casefold(),
         )
 
@@ -149,17 +256,27 @@ class VirtualTree:
             files = self.repo.search_by_tag_ids([[tag.id]])
             file_names = self._dedupe([f.filename for f in files])
             for name, f in zip(file_names, files):
+                size, mtime = self._file_stat(f)
                 nodes.append(
                     Node(
                         name=name,
                         vpath=posixpath.join(vpath, name),
                         is_dir=False,
-                        size=self._file_size(f),
+                        size=size,
+                        mtime=mtime,
                         file_id=f.id,
                         source_path=f.filepath,
                     )
                 )
-        return nodes
+
+        by_name: Dict[str, Node] = {}
+        for node in nodes:
+            by_name.setdefault(node.name, node)  # a folder wins over a same-named file
+        return _Listing(nodes, by_name)
+
+    def listdir(self, vpath: str = "/") -> List[Node]:
+        """Returns the directory contents: subtags (folders) + files."""
+        return list(self._listing(self.normalize(vpath)).nodes)
 
     # ---------- stat / read ----------
 
@@ -168,20 +285,18 @@ class VirtualTree:
         if vpath == "/":
             return Node(name="/", vpath="/", is_dir=True)
 
-        parent = posixpath.dirname(vpath) or "/"
-        name = posixpath.basename(vpath)
-
         try:
-            tag = self._resolve_tag(vpath)
+            tag = self._resolve_tag(vpath, self._snapshot())
             if tag is not None:
                 return Node(name=sanitize(tag.name), vpath=vpath, is_dir=True, tag_id=tag.id)
         except NotFound:
             pass
 
-        for node in self.listdir(parent):
-            if node.name == name:
-                return node
-        raise NotFound(vpath)
+        parent = posixpath.dirname(vpath) or "/"
+        node = self._listing(parent).by_name.get(posixpath.basename(vpath))
+        if node is None:
+            raise NotFound(vpath)
+        return node
 
     def exists(self, vpath: str) -> bool:
         try:
@@ -197,6 +312,7 @@ class VirtualTree:
             return False
 
     def read(self, vpath: str) -> bytes:
+        """The whole file in memory. Backends use open_source() instead."""
         node = self.stat(vpath)
         if node.is_dir:
             raise IsADirectory(vpath)
@@ -210,6 +326,22 @@ class VirtualTree:
         if node.is_dir or not node.source_path:
             raise IsADirectory(vpath)
         return Path(node.source_path)
+
+    def open_source(self, vpath: str) -> SourceFile:
+        """Opens the real file for ranged reads. The caller closes it.
+
+        NotFound also when the file is in the database but gone from disk.
+        """
+        path = self.real_path(vpath)
+        try:
+            return SourceFile(path)
+        except FileNotFoundError:
+            raise NotFound(vpath) from None
+
+    def read_range(self, vpath: str, offset: int, length: int) -> bytes:
+        """Up to `length` bytes from `offset` without reading the whole file."""
+        with self.open_source(vpath) as src:
+            return src.pread(offset, length)
 
     def walk(self, vpath: str = "/") -> Iterator[Node]:
         """Walks the whole tree."""

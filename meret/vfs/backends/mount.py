@@ -22,6 +22,7 @@ on the drive letter, IRPs keep arriving and stop() can hang forever. So:
 """
 
 import errno
+import itertools
 import os
 import platform
 import signal
@@ -31,7 +32,7 @@ import threading
 import time
 from pathlib import Path
 
-from meret.vfs import IsADirectory, NotFound, VirtualTree
+from meret.vfs import IsADirectory, NotFound, SourceFile, VirtualTree
 
 import logging
 
@@ -95,8 +96,10 @@ def _mount_fuse(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
     class MeretOperations(LoggingMixIn, Operations):
         def __init__(self) -> None:
-            self._buffers: dict[int, bytes] = {}
-            self._next_fh = 0
+            # fh -> the real file; libfuse calls in from several threads
+            self._files: dict[int, SourceFile] = {}
+            self._fh = itertools.count()
+            self._lock = threading.Lock()
 
         def getattr(self, path, fh=None):
             try:
@@ -118,22 +121,34 @@ def _mount_fuse(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
         def open(self, path, flags):
             try:
-                self._buffers[self._next_fh] = tree.read(path)
+                src = tree.open_source(path)
             except IsADirectory:
                 raise OSError(errno.EISDIR, "is a directory")
             except NotFound:
                 raise OSError(errno.ENOENT, "no such file")
-            self._next_fh += 1
-            return self._next_fh - 1
+            with self._lock:
+                fh = next(self._fh)
+                self._files[fh] = src
+            return fh
 
         def read(self, path, size, offset, fh):
-            return self._buffers[fh][offset : offset + size]
+            # only the requested range: a thumbnailer peeking at a 4 GB video
+            # must not pull the whole thing into memory
+            with self._lock:
+                src = self._files.get(fh)
+            if src is None:
+                raise OSError(errno.EBADF, "bad file handle")
+            return src.pread(offset, size)
 
         def release(self, path, fh):
-            self._buffers.pop(fh, None)
+            with self._lock:
+                src = self._files.pop(fh, None)
+            if src is not None:
+                src.close()
+            return 0
 
         def access(self, path, mode):
-            return True
+            return 0
 
     Path(mountpoint).mkdir(parents=True, exist_ok=True)
     FUSE(MeretOperations(), mountpoint, foreground=foreground, ro=True, nothreads=False)
@@ -146,6 +161,14 @@ def _norm_windows_path(name: str) -> str:
     """WinFsp passes '\\beach\\file.png' — normalize to '/beach/file.png'."""
     name = name.replace("\\", "/")
     return name if name.startswith("/") else "/" + name
+
+
+_FILETIME_EPOCH = 116444736000000000  # 1970-01-01 in 100 ns ticks since 1601
+
+
+def _filetime(mtime: float) -> int:
+    """Unix seconds → Windows FILETIME. 0 stays 0 (unknown)."""
+    return int(mtime * 10_000_000) + _FILETIME_EPOCH if mtime > 0 else 0
 
 
 def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
@@ -167,6 +190,12 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
     _SD = SecurityDescriptor.from_string("O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)")
 
     class MeretOperations(BaseFileSystemOperations):
+        def __init__(self) -> None:
+            super().__init__()
+            # guards the lazy open of file_context["source"]: several threads
+            # may read through one handle at once
+            self._source_lock = threading.Lock()
+
         # ---------- debugging (MERET_DEBUG=1) ----------
 
         def _log(self, msg: str) -> None:
@@ -238,8 +267,19 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 "is_dir": node.is_dir,
                 "size": node.size,
                 "path": vpath,
-                "data": None,  # lazy content cache
+                "source": None,  # the real file, opened on the first read
             }
+
+        def _source(self, file_context) -> SourceFile:
+            with self._source_lock:
+                src = file_context["source"]
+                if src is None:
+                    try:
+                        src = tree.open_source(file_context["path"])
+                    except NotFound:
+                        raise NTStatusObjectNameNotFound()
+                    file_context["source"] = src
+                return src
 
         def open(self, file_name, create_options, granted_access):
             vpath = _norm_windows_path(file_name)
@@ -269,7 +309,10 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
         def close(self, file_context):
             if isinstance(file_context, dict):
-                file_context["data"] = None  # release the content cache
+                with self._source_lock:
+                    src, file_context["source"] = file_context.get("source"), None
+                if src is not None:
+                    src.close()
             return None
 
         def cleanup(self, file_context, file_name, flags):
@@ -280,14 +323,15 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             return None
 
         def _info(self, node):
+            mtime = _filetime(node.mtime)
             return {
                 "file_attributes": (FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY if node.is_dir else 0),
                 "allocation_size": 0,
                 "file_size": 0 if node.is_dir else node.size,
-                "creation_time": 0,
-                "last_access_time": 0,
-                "last_write_time": 0,
-                "change_time": 0,
+                "creation_time": mtime,
+                "last_access_time": mtime,
+                "last_write_time": mtime,
+                "change_time": mtime,
                 "index_number": node.file_id or 0,
             }
 
@@ -323,15 +367,12 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             return []
 
         def read(self, file_context, offset, length):
-            data = file_context["data"]
-            if data is None:
-                # tree.read() reads the whole file; Explorer reads in 64 KB chunks,
-                # so we cache it for the lifetime of the handle.
-                data = tree.read(file_context["path"])
-                file_context["data"] = data
-            if offset >= len(data):
+            # Explorer reads in 64 KB chunks: keep the real file open for the
+            # lifetime of the handle and read only the requested range
+            src = self._source(file_context)
+            if offset >= src.size:
                 raise NTStatusEndOfFile()
-            return data[offset : offset + length]
+            return src.pread(offset, length)
 
     fs = FileSystem(
         mountpoint,

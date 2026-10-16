@@ -1,6 +1,7 @@
 import re
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional
 
@@ -104,6 +105,8 @@ class SQLiteRepository(AbstractRepository, Logger):
         Logger.__init__(self)
         self.db_path = str(db_path)
         self.fts_enabled = True
+        self._watch: Optional[sqlite3.Connection] = None  # for data_version()
+        self._watch_lock = threading.Lock()
         self._init_tables()
 
     #----------- helpers -------------
@@ -722,3 +725,17 @@ class SQLiteRepository(AbstractRepository, Logger):
                 row["filepath"]: (row["size_bytes"] or 0, row["mtime"] or 0.0)
                 for row in conn.execute("SELECT filepath, size_bytes, mtime FROM files")
             }
+
+    # ---------- change tracking ----------
+    def data_version(self) -> Optional[int]:
+        """PRAGMA data_version on a dedicated long-lived connection.
+
+        The pragma only moves for commits made by OTHER connections. That covers
+        everything: our own writes go through a fresh _connect() each time, and so
+        do other processes (`meret tag` while the drive is mounted).
+        The connection lives as long as the repository; reads from many threads.
+        """
+        with self._watch_lock:
+            if self._watch is None:
+                self._watch = sqlite3.connect(self.db_path, check_same_thread=False)
+            return self._watch.execute("PRAGMA data_version").fetchone()[0]

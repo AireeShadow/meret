@@ -3,11 +3,26 @@
 Lives in tests, but can easily move to meret/core/ if needed.
 """
 
+import functools
 from typing import Dict, List, Optional, Set, Tuple
 
 from meret.core import tagpaths
 from meret.core.models import FileEntry, FileType, Tag, TagNode
 from meret.core.repository import AbstractRepository
+
+
+
+def _mutates(method):
+    """Bumps data_version after a write — like a commit in SQLite."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._version += 1
+
+    return wrapper
 
 
 class MockRepository(AbstractRepository):
@@ -19,6 +34,7 @@ class MockRepository(AbstractRepository):
         self._links: Set[Tuple[int, int]] = set()
         self._next_file_id = 1
         self._next_tag_id = 1
+        self._version = 0
 
     # ---------- helpers ----------
     def _child(self, parent_id: Optional[int], chunk: str) -> Optional[Tag]:
@@ -104,6 +120,7 @@ class MockRepository(AbstractRepository):
                 return self._clone(entry)
         return None
 
+    @_mutates
     def save_file(self, file: FileEntry) -> int:
         for entry in self._files.values():
             if entry.filepath == file.filepath:
@@ -118,6 +135,7 @@ class MockRepository(AbstractRepository):
         self._files[file.id] = file.model_copy(deep=True)
         return file.id
 
+    @_mutates
     def save_files(self, files, chunk_size: int = 1000, on_progress=None) -> Dict[str, int]:
         stats = {"indexed": 0, "updated": 0, "errors": 0}
         total = len(files)
@@ -129,6 +147,7 @@ class MockRepository(AbstractRepository):
                 on_progress(i, total)
         return stats
 
+    @_mutates
     def delete_file(self, file_id: int) -> bool:
         if file_id not in self._files:
             return False
@@ -137,11 +156,13 @@ class MockRepository(AbstractRepository):
         return True
 
     # ---------- tags: file links ----------
+    @_mutates
     def add_tag(self, file_id: int, tag: str, colour: Optional[str] = None) -> int:
         tag_id = self._ensure_tag(tag, colour)
         self._links.add((file_id, tag_id))
         return tag_id
 
+    @_mutates
     def remove_tag(self, file_id: int, tag: str) -> bool:
         found = self._tag_by(tag)
         if not found or (file_id, found.id) not in self._links:
@@ -149,12 +170,14 @@ class MockRepository(AbstractRepository):
         self._links.discard((file_id, found.id))
         return True
 
+    @_mutates
     def set_file_tags(self, file_id: int, tags: List[str]) -> bool:
         self._links = {(f, t) for (f, t) in self._links if f != file_id}
         for name in dict.fromkeys(tags):
             self._links.add((file_id, self._ensure_tag(name)))
         return True
 
+    @_mutates
     def rename_tag(self, old: str, new: str) -> bool:
         src = self._tag_by(old)
         if not src:
@@ -195,12 +218,14 @@ class MockRepository(AbstractRepository):
             cur = tag.parent_id if tag else None
         return False
 
+    @_mutates
     def create_tag(self, name: str, colour: Optional[str] = None) -> bool:
         if self._tag_strict(name) is not None:
             return False
         self._ensure_tag(name, colour, reuse_any=False)
         return True
 
+    @_mutates
     def delete_tag(self, name: str) -> bool:
         tag = self._tag_by(name)
         if not tag:
@@ -212,6 +237,7 @@ class MockRepository(AbstractRepository):
         self._links = {(f, t) for (f, t) in self._links if t != tag.id}
         return True
 
+    @_mutates
     def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
         node = self._tag_by(tag)
         if not node:
@@ -255,6 +281,7 @@ class MockRepository(AbstractRepository):
                 parent.children.append(node)
         return roots
 
+    @_mutates
     def prune_orphan_tags(self) -> int:
         parents = {t.parent_id for t in self._tags.values() if t.parent_id}
         orphans = [tid for tid in self._tags if self._usage(tid) == 0 and tid not in parents]
@@ -322,3 +349,6 @@ class MockRepository(AbstractRepository):
 
     def known_fingerprints(self) -> Dict[str, Tuple[int, float]]:
         return {e.filepath: self._fingerprint(e) for e in self._files.values()}
+
+    def data_version(self) -> Optional[int]:
+        return self._version

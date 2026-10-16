@@ -1,3 +1,4 @@
+0.4.7 - vfs: cached tag tree and listings (refreshed on db changes), ranged file reads instead of whole-file loads, real file dates in mounts
 0.4.6 - fixes for config
 0.4.5 - various fixes
 0.4.4 - fix for new sql schema
