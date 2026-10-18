@@ -8,6 +8,9 @@ import ctypes
 from pathlib import Path
 from typing import Optional
 
+import logging
+logger = logging.getLogger(__name__)
+
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -31,8 +34,7 @@ from textual.widgets import (
 
 from meret.cli.deps import get_repo, resolve_db_path, DatabaseNotFound
 from meret.core.models import FileEntry, FileType
-from meret.vfs import VirtualTree, NotFound, VFSClient
-from meret.vfs.client import 
+from meret.vfs import VirtualTree, NotFound
 
 def get_drives_winapi():
     """Get drives using Windows API — instant."""
@@ -111,6 +113,7 @@ class VirtualFileTree(Tree):
         try:
             repo = get_repo(self.db_path)
             self.virtual_tree = VirtualTree(repo)
+            self.root.data = "/"  # <-- ДОБАВЬ ЭТО!
             self.root.expand()
             self._populate_node(self.root, "/")
         except DatabaseNotFound:
@@ -131,11 +134,18 @@ class VirtualFileTree(Tree):
             # Add directories
             for entry in entries:
                 if entry.is_dir:
-                    # IMPORTANT: Store vpath in data!
+                    # Проверка!
+                    if not entry.vpath:
+                        node.add_leaf(f"[red]Error: empty vpath for {entry.name}[/red]")
+                        continue
+                        
                     child = node.add(entry.name + "/", data=entry.vpath)
                     child.add("[dim]...[/dim]")
                 else:
-                    # Store vpath for files too
+                    if not entry.vpath:
+                        node.add_leaf(f"[red]Error: empty vpath for {entry.name}[/red]")
+                        continue
+                        
                     node.add_leaf(entry.name, data=entry.vpath)
                     
         except Exception as e:
@@ -145,25 +155,16 @@ class VirtualFileTree(Tree):
     def on_tree_node_expanded(self, event: Tree.NodeExpanded):
         """Lazy load children when node expanded."""
         node = event.node
+        logger.debug(f"Expanding node: label={node.label}, data={node.data}")
         
-        # Get vpath from node data or use node label
         vpath = node.data
         if not vpath:
-            # Try to construct from parent path + node name
-            parent = node.parent
-            if parent and parent.data:
-                parent_path = parent.data
-                node_name = str(node.label).rstrip('/')
-                vpath = f"{parent_path}/{node_name}".replace("//", "/")
-                # Store for future
-                node.data = vpath
-            else:
-                vpath = "/"  # Root
+            self.notify(f"Error: no vpath for node {node.label}", severity="error")
+            return
         
-        # Check if needs loading
         needs_load = (
             not node.children 
-            or (len(node.children) == 1 and "[dim]...[/dim]" in str(node.children[0].label))
+            or (len(node.children) == 1 and "..." in str(node.children[0].label))
         )
         
         if needs_load:
