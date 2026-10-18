@@ -6,12 +6,15 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import pytest_asyncio
 from PIL import Image
 
 from meret.core.config import ConfigManager
 from meret.core.models import FileEntry, FileType
 from meret.core.sqlite_repo import SQLiteRepository
 from tests.mocks import MockRepository
+
+pytest_plugins = ("pytest_asyncio",)
 
 
 @pytest.fixture(autouse=True)

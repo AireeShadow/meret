@@ -409,7 +409,20 @@ def config_path():
     exists = "[green](exists)[/green]" if cfg.config_path.exists() else "[yellow](will be created)[/yellow]"
     console.print(f"{cfg.config_path} {exists}")
 
+@app.command("tui")
+def tui(
+    db_path: Optional[Path] = DB_OPTION,
+):
+    """Launch interactive TUI."""
+    from meret.cli.tui import MeretApp
+    
+    try:
+        app = MeretApp(resolve_db_path(db_path))
+        app.run()
+    except Exception as e:
+        console.print(f"[red]TUI Error: {e}[/red]")
+        raise typer.Exit(1)
+
 if __name__ == "__main__":
     app()
 
-#from meret.cli import vfs_cmds  # noqa: E402,F401  — registers ls/open/stat
