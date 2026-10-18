@@ -366,23 +366,23 @@ class MeretApp(App):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding(":", "command_palette", "Command"),
+        Binding("i", "init_db", "Init DB"),
         Binding("o", "open_file", "Open"),
         Binding("s", "scan", "Scan"),
         Binding("t", "tag", "Tag"),
         Binding("r", "refresh", "Refresh"),
-        Binding("/", "search", "Search"),
         Binding("c", "config", "Config"),
-        Binding("i", "init_db", "Init DB"),
         Binding("d", "delete", "Delete tag"),
-        Binding("?", "help", "Help"),
         Binding("h", "go_home", "Home"),
         Binding("~", "go_home", "Home"),
         Binding("u", "go_up", "Up"),
         Binding("backspace", "go_up", "Up"),
-        Binding("v", "select_drive", "Select Drive"),  # Windows only
         Binding("S", "sort_files", "Sort"),
         Binding("m", "mount", "Mount"),
         Binding("U", "unmount", "unmount"),
+        Binding("D", "select_drive", "Select Drive"),  # Windows only
+        Binding("/", "search", "Search"),
+        Binding("?", "help", "Help"),
     ]
     
     def __init__(self, db_path: Optional[Path] = None):
@@ -592,6 +592,8 @@ class MeretApp(App):
                 self.fs_root = drive
                 self._refresh_fs_tree()
                 self.notify(f"Switched to {drive}")
+                if hasattr(self, 'real_tree'):
+                    self.real_tree.focus()
         
         self.push_screen(DriveSelector(), on_drive_selected)
 
@@ -613,6 +615,7 @@ class MeretApp(App):
         horizontal = self.query_one(Horizontal)
         horizontal.mount(new_tree, before=self.virt_tree)
         self.real_tree = new_tree
+        self.real_tree.focus()
     
     def action_help(self):
         """Show help."""
