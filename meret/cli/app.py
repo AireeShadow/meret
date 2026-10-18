@@ -1,3 +1,4 @@
+import os
 import typer
 from pathlib import Path
 from typing import List, Optional
@@ -422,6 +423,28 @@ def tui(
     except Exception as e:
         console.print(f"[red]TUI Error: {e}[/red]")
         raise typer.Exit(1)
+
+# meret/cli/app.py или отдельный файл
+
+@app.command()
+def open_file(
+    virtual_path: str = typer.Argument(..., help="Virtual path to open"),
+    db: Optional[Path] = typer.Option(None, "--db", help="Database path"),
+):
+    """Open file by virtual path."""
+    from meret.vfs import VirtualTree
+    
+    repo = get_repo(db)
+    tree = VirtualTree(repo)
+    
+    real_path = tree.real_path(virtual_path)
+    
+    if os.name == 'nt':
+        os.startfile(real_path)
+    else:
+        subprocess.run(["xdg-open", str(real_path)])
+    
+    typer.echo(f"Opened: {real_path}")
 
 if __name__ == "__main__":
     app()

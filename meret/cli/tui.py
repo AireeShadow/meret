@@ -367,7 +367,7 @@ class MeretApp(App):
         Binding("q", "quit", "Quit"),
         Binding(":", "command_palette", "Command"),
         Binding("i", "init_db", "Init DB"),
-        Binding("o", "open_file", "Open"),
+        Binding("enter", "open_file", "Open"),
         Binding("s", "scan", "Scan"),
         Binding("t", "tag", "Tag"),
         Binding("r", "refresh", "Refresh"),
@@ -436,10 +436,49 @@ class MeretApp(App):
         self.path_bar.update(f"DB: {self.db_path} | Selected: {sel}")
     
     def on_tree_node_selected(self, event: Tree.NodeSelected):
-        """Handle virtual file selection."""
+        """Handle virtual file selection - ALSO open on Enter."""
         if hasattr(event.node, 'data') and event.node.data:
+            self.selected_real = None
             self.selected_virtual = event.node.data
             self.preview.update_preview(Path(event.node.data), is_virtual=True)
+            
+            node_label = str(event.node.label)
+            if not event.node.allow_expand and not node_label.endswith("/"):
+                self.action_open_file()
+
+    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected):
+        """Handle real file selection."""
+        if event.path.name == '..' or (hasattr(self, '_up_selected') and self._up_selected):
+            self._up_selected = False
+            self.action_go_up()
+        return
+        self.selected_real = event.path
+        self.selected_virtual = None
+        self.preview.update_preview(event.path, is_virtual=False)
+        self._update_path_bar()
+        
+        self.action_open_file()
+
+    def action_select_or_open(self):
+        """Enter on file opens it, on dir expands it."""
+        if self.focused == self.real_tree:
+            if self.selected_real and self.selected_real.is_file():
+                self.action_open_file()
+            else:
+                self.real_tree.action_select_cursor()
+        elif self.focused == self.virt_tree:
+            if self.selected_virtual:
+                try:
+                    from meret.vfs import VirtualTree
+                    repo = get_repo(self.db_path)
+                    tree = VirtualTree(repo)
+                    node = tree.stat(self.selected_virtual)
+                    if node.is_dir:
+                        self.virt_tree.action_select_cursor()
+                    else:
+                        self.action_open_file()
+                except:
+                    pass
     
     def action_command_palette(self):
         """Open command palette."""
@@ -478,9 +517,24 @@ class MeretApp(App):
             else:
                 subprocess.run(["xdg-open", str(self.selected_real)])
             self.notify(f"Opened {self.selected_real.name}")
+            
         elif self.selected_virtual:
-            self.notify("Opening virtual file...")
-            subprocess.run(["meret", "open", self.selected_virtual, "--db", str(self.db_path)])
+            try:
+                from meret.vfs import VirtualTree
+                
+                repo = get_repo(self.db_path)
+                tree = VirtualTree(repo)
+                real_path = tree.real_path(self.selected_virtual)
+                
+                if os.name == 'nt':
+                    os.startfile(real_path)
+                else:
+                    subprocess.run(["xdg-open", str(real_path)])
+                    
+                self.notify(f"Opened {self.selected_virtual} → {real_path.name}")
+                
+            except Exception as e:
+                self.notify(f"Error opening: {e}", severity="error")
     
     def action_tag(self):
         """Tag selected file."""
@@ -745,6 +799,7 @@ class SortedDirectoryTree(DirectoryTree):
                 child.add("[dim]...[/dim]")
             else:
                 node.add_leaf(label, data=data)
+
     def _populate_node(self, node, content):
         """Override to add sorting."""
         try:
@@ -766,6 +821,13 @@ class SortedDirectoryTree(DirectoryTree):
             
             # Add with wrapper
             node.remove_children()
+
+            parent = node_path.parent
+            if parent != node_path and parent.exists():
+                parent_wrapper = DirEntryWrapper(parent)
+                up_node = node.add("..", data=parent_wrapper)
+                up_node.add("")
+
             for entry in entries:
                 wrapper = DirEntryWrapper(entry)
                 if entry.is_dir():
