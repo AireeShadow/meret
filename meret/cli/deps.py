@@ -27,38 +27,24 @@ DEFAULT_DB_NAME = DB_NAME
 _console = Console()
 
 
-class DatabaseNotFound(click.ClickException):
-    """Database not found.
-
-    The text is printed right in __init__ (to stdout), and show() is a no-op.
-    That way the message reaches the user both when click catches the
-    exception itself and when it propagates outward (as in tests via
-    CliRunner). There is no double output either way.
-    """
-
+class DatabaseNotFound(Exception):
+    """Database file not found."""
+    
     def __init__(self, path: Path):
         self.path = path
         super().__init__(f"database not found: {path}")
-        self._render()
-
+    
     def _render(self) -> None:
+        """Render error message - call explicitly when needed."""
         _console.print()
         _console.print("[bold red]✗ Database not found[/bold red]")
         _console.print(f"  looked here: [yellow]{self.path}[/yellow]")
         _console.print()
-        _console.print("[bold]What to do:[/bold]")
+        _console.print("[dim]What to do:[/dim]")
         _console.print("  • create a database in the current directory: [green]meret init[/green]")
-        _console.print(
-            "  • pass the path explicitly: [green]meret scan --db /path/to/meret.db ...[/green]"
-        )
-        _console.print(
-            f"  • or set the environment variable: [green]{ENV_DB_PATH}=/path/to/meret.db[/green]"
-        )
+        _console.print("  • pass the path explicitly: [green]meret scan --db /path/to/meret.db ...[/green]")
+        _console.print("  • or set the environment variable: [green]MERET_DB=/path/to/meret.db[/green]")
         _console.print()
-
-    def show(self, file=None) -> None:
-        """Already printed in __init__."""
-        return
 
 
 def resolve_db_path(path: Optional[Path] = None) -> Path:
@@ -103,13 +89,10 @@ def resolve_library_path(path: Optional[Path] = None) -> Optional[Path]:
     return None
 
 
-def get_repo(db_path: Optional[Path] = None, create: bool = False):
-    """
-    Get repository instance with resolved path.
-    """
+def get_repo(db_path: Path | str | None = None, create: bool = False) -> SQLiteRepository:
     resolved = resolve_db_path(db_path)
-    
     if not resolved.exists() and not create:
-        raise DatabaseNotFound(resolved) 
-    
+        exc = DatabaseNotFound(resolved)
+        exc._render() 
+        raise exc
     return SQLiteRepository(str(resolved))

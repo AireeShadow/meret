@@ -1,3 +1,4 @@
+0.5.2 - tui tests
 0.5.1 - fix for vfs rendering in tui
 0.5.0 - intermediate TUI
 0.4.7 - vfs: cached tag tree and listings (refreshed on db changes), ranged file reads instead of whole-file loads, real file dates in mounts

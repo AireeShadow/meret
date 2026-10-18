@@ -1,6 +1,7 @@
 """Interactive TUI for meret (like k9s)."""
 
 import os
+import asyncio
 import logging
 import subprocess
 import platform
@@ -106,17 +107,23 @@ class VirtualFileTree(Tree):
         super().__init__("/", id="virtual_tree")
         self.db_path = db_path
         self.border_title = "Virtual FS (Tags)"
+        self.root.data = "/"
+
+    def on_mount(self) -> None:
+        """Called when widget is mounted - safe to load data."""
         self._load_tree()
     
     def _load_tree(self):
         """Load virtual tree structure."""
+        
         try:
+            from meret.cli.deps import get_repo
             repo = get_repo(self.db_path)
             self.virtual_tree = VirtualTree(repo)
-            self.root.data = "/"  # <-- ДОБАВЬ ЭТО!
             self.root.expand()
             self._populate_node(self.root, "/")
-        except DatabaseNotFound:
+        except Exception:
+            self.root.remove_children()
             self.root.add_leaf("[dim]No database - run 'meret init'[/dim]")
     
     def _populate_node(self, node, vpath: str):
@@ -134,7 +141,6 @@ class VirtualFileTree(Tree):
             # Add directories
             for entry in entries:
                 if entry.is_dir:
-                    # Проверка!
                     if not entry.vpath:
                         node.add_leaf(f"[red]Error: empty vpath for {entry.name}[/red]")
                         continue
@@ -376,7 +382,7 @@ class MeretApp(App):
         Binding("v", "select_drive", "Select Drive"),  # Windows only
         Binding("S", "sort_files", "Sort"),
         Binding("m", "mount", "Mount"),
-        Binding("U", "unmount", "unmount")
+        Binding("U", "unmount", "unmount"),
     ]
     
     def __init__(self, db_path: Optional[Path] = None):
@@ -591,6 +597,8 @@ class MeretApp(App):
 
     def _refresh_fs_tree(self):
         """Refresh with sorting."""
+        if not hasattr(self, 'real_tree'):
+            return 
         # Remove old tree
         self.real_tree.remove()
         
@@ -693,9 +701,9 @@ class SortedDirectoryTree(DirectoryTree):
         self.reverse = reverse
         super().__init__(path, **kwargs)
     
-    def _on_tree_node_expanded(self, event):
+    async def _on_tree_node_expanded(self, event):
         """Sort after default expansion."""
-        super()._on_tree_node_expanded(event)
+        await super()._on_tree_node_expanded(event)
         self._sort_children(event.node)
     
     def _sort_node(self, node):

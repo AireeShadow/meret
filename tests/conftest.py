@@ -88,3 +88,14 @@ def isolated_config(monkeypatch, tmp_path: Path):
     
     # Cleanup
     config_module._config_instance = None
+
+@pytest.fixture(autouse=True)
+def suppress_textual_warnings():
+    """Suppress Textual internal warnings."""
+    import warnings
+    warnings.filterwarnings(
+        "ignore",
+        message="coroutine 'DirectoryTree.watch_path' was never awaited",
+        category=RuntimeWarning
+    )
+    yield

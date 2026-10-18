@@ -366,3 +366,18 @@ def test_source_file_close_is_idempotent(tmp_path):
     src = SourceFile(path)
     src.close()
     src.close()
+
+def test_node_vpath_format(tree, mock_repo):
+    """Node vpath must be absolute path starting with /."""
+    f = mock_repo.save_file(FileEntry(filename="a.png", filepath="/a.png", type=FileType.IMAGE))
+    mock_repo.add_tag(f, "travel")
+    
+    nodes = tree.listdir("/")
+    assert nodes[0].vpath == "/travel", f"Expected '/travel', got {nodes[0].vpath!r}"
+    
+    # Nested
+    mock_repo.create_tag("beach")
+    mock_repo.set_tag_parent("beach", "travel")
+    
+    travel_nodes = tree.listdir("/travel")
+    assert travel_nodes[0].vpath == "/travel/beach", f"Expected '/travel/beach', got {travel_nodes[0].vpath!r}"
