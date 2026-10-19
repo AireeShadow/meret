@@ -430,7 +430,14 @@ class MeretApp(App):
     
     def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected):
         """Handle real directory selection."""
+        # Check for '..' by label
+        if '..' in str(event.node.label) or '⬆️' in str(event.node.label):
+            self.action_go_up()
+            return
+        
+        # Regular directory
         self.selected_real = event.path
+        self.selected_virtual = None
         self.preview.update_preview(event.path, is_virtual=False)
         self._update_path_bar()
     
@@ -805,40 +812,53 @@ class SortedDirectoryTree(DirectoryTree):
                 node.add_leaf(label, data=data)
 
     def _populate_node(self, node, content):
-        """Override to add sorting."""
+        """Override to add sorting and '..' entry."""
         try:
             if node == self.root:
                 node_path = self.path
             else:
-                # Extract path from DirEntryWrapper
                 node_path = node.data.path if hasattr(node.data, 'path') else Path(node.data)
             
             entries = list(node_path.iterdir())
             
-            # Sort
-            if self.sort_by == "name":
-                entries.sort(key=lambda x: x.name.lower(), reverse=self.reverse)
-            elif self.sort_by == "size":
-                entries.sort(key=lambda x: x.stat().st_size if x.is_file() else 0, reverse=self.reverse)
-            elif self.sort_by == "date":
-                entries.sort(key=lambda x: x.stat().st_mtime, reverse=self.reverse)
+            # Create list with '..' at first position
+            all_entries = []
             
-            # Add with wrapper
-            node.remove_children()
-
+            # Add '..' if we can go up
             parent = node_path.parent
-            if parent != node_path and parent.exists():
+            if parent != node_path and str(parent) != str(node_path):
                 parent_wrapper = DirEntryWrapper(parent)
-                up_node = node.add("..", data=parent_wrapper)
-                up_node.add("")
-
+                all_entries.append(('..', parent_wrapper, True))
+            
+            # Add regular files and folders
             for entry in entries:
                 wrapper = DirEntryWrapper(entry)
-                if entry.is_dir():
-                    child = node.add(f"📁 {entry.name}", data=wrapper)
+                all_entries.append((entry.name, wrapper, entry.is_dir()))
+            
+            # Sort: first '..', then dirs, then files
+            def sort_key(item):
+                name, wrapper, is_dir = item
+                if name == '..':
+                    return (0, '')
+                elif is_dir:
+                    return (1, name.lower())
+                else:
+                    return (2, name.lower())
+            
+            all_entries.sort(key=sort_key, reverse=self.reverse)
+            
+            # Add to tree
+            node.remove_children()
+            
+            for name, wrapper, is_dir in all_entries:
+                if name == '..':
+                    up_node = node.add("⬆️ ..", data=wrapper)
+                    up_node.add("")
+                elif is_dir:
+                    child = node.add(f"📁 {name}", data=wrapper)
                     child.add("[dim]...[/dim]")
                 else:
-                    node.add_leaf(f"📄 {entry.name}", data=wrapper)
+                    node.add_leaf(f"📄 {name}", data=wrapper)
                     
         except PermissionError:
             node.add_leaf("[dim]Access denied[/dim]")
