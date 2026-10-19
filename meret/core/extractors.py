@@ -10,13 +10,55 @@ and register it in ExtractorRegistry.
 """
 
 import json
+import logging
 import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
 from meret.core.models import FileType
-from meret.core.logger import Logger
+
+
+logger = logging.getLogger(__name__)
+
+_ffprobe_missing_reported = False
+
+
+def _ffprobe(file_path: Path) -> Dict[str, Any]:
+    """Runs ffprobe and returns its JSON.
+
+    `-v error` (not quiet) so a failure carries ffprobe's own reason in stderr.
+    """
+    global _ffprobe_missing_reported
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                str(file_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        if not _ffprobe_missing_reported:  # once, not once per file
+            _ffprobe_missing_reported = True
+            logger.error("ffprobe not found on PATH: video/audio metadata is unavailable")
+        raise
+    except subprocess.CalledProcessError as e:
+        raise ExtractionError(
+            f"ffprobe exited with {e.returncode}: {(e.stderr or '').strip() or 'no details'}"
+        ) from e
+    return json.loads(result.stdout)
 
 
 class ExtractionError(Exception):
@@ -37,9 +79,6 @@ class MetadataExtractor(ABC):
 
     supported_extensions: set[str] = set()
     file_type: FileType = FileType.UNKNOWN
-
-    def __init__(self):
-        self.logger = Logger().logger
 
     def can_extract(self, file_path: Path) -> bool:
         """Checks whether the extractor can handle this file"""
@@ -65,7 +104,7 @@ class MetadataExtractor(ABC):
                 "extension": file_path.suffix.lower(),
             }
         except OSError as e:
-            self.logger.warning(f"Cannot stat {file_path}: {e}")
+            logger.warning("Cannot stat %s: %s", file_path, e)
             return {}
 
 
@@ -97,7 +136,8 @@ class ImageExtractor(MetadataExtractor):
                     metadata["exif"] = self._parse_exif(exif, ExifTags)
 
         except Exception as e:
-            self.logger.warning(f"Image extraction failed for {file_path}: {e}")
+            logger.warning("Image extraction failed for %s: %s", file_path, e,
+                           exc_info=logger.isEnabledFor(logging.DEBUG))
             metadata["error"] = str(e)
 
         return metadata
@@ -147,7 +187,8 @@ class VideoExtractor(MetadataExtractor):
                     break
 
         except Exception as e:
-            self.logger.warning(f"Video extraction failed for {file_path}: {e}")
+            logger.warning("Video extraction failed for %s: %s", file_path, e,
+                           exc_info=logger.isEnabledFor(logging.DEBUG))
             metadata["error"] = str(e)
 
         return metadata
@@ -155,25 +196,7 @@ class VideoExtractor(MetadataExtractor):
     @staticmethod
     def _probe(file_path: Path) -> Dict[str, Any]:
         """Runs ffprobe and returns JSON"""
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_format",
-                "-show_streams",
-                str(file_path),
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-            timeout=30,
-        )
-        return json.loads(result.stdout)
+        return _ffprobe(file_path)
 
     @staticmethod
     def _parse_streams(streams: List[dict]) -> List[Dict[str, Any]]:
@@ -229,32 +252,15 @@ class AudioExtractor(MetadataExtractor):
                     break
 
         except Exception as e:
-            self.logger.warning(f"Audio extraction failed for {file_path}: {e}")
+            logger.warning("Audio extraction failed for %s: %s", file_path, e,
+                           exc_info=logger.isEnabledFor(logging.DEBUG))
             metadata["error"] = str(e)
 
         return metadata
 
     @staticmethod
     def _probe(file_path: Path) -> Dict[str, Any]:
-        result = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_format",
-                "-show_streams",
-                str(file_path),
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=True,
-            timeout=30,
-        )
-        return json.loads(result.stdout)
+        return _ffprobe(file_path)
 
 
 class ExtractorRegistry:
@@ -272,12 +278,11 @@ class ExtractorRegistry:
             VideoExtractor(),
             AudioExtractor(),
         ]
-        self.logger = Logger().logger
 
     def register(self, extractor: MetadataExtractor) -> None:
         """Add a new extractor (e.g. for PDFs or archives)"""
         self._extractors.append(extractor)
-        self.logger.info(f"Registered extractor: {type(extractor).__name__}")
+        logger.info("Registered extractor: %s", type(extractor).__name__)
 
     def get_extractor(self, file_path: Path) -> Optional[MetadataExtractor]:
         """Returns a matching extractor or None"""
@@ -298,7 +303,7 @@ class ExtractorRegistry:
         """
         extractor = self.get_extractor(file_path)
         if not extractor:
-            self.logger.debug(f"No extractor for {file_path}")
+            logger.debug("No extractor for %s", file_path)
             return None
 
         return extractor.extract(file_path)

@@ -4,6 +4,7 @@ Rule: no silent creation. No database means a loud error with a hint.
 Only `meret init` creates one (create=True).
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Optional
@@ -25,6 +26,7 @@ DEFAULT_DB_NAME = DB_NAME
 
 # stdout, not stderr: CliRunner.output reads exactly that
 _console = Console()
+logger = logging.getLogger(__name__)
 
 
 class DatabaseNotFound(Exception):
@@ -59,18 +61,25 @@ def resolve_db_path(path: Optional[Path] = None) -> Path:
     if path is not None:
         # If path is a directory, append default filename
         if path.is_dir():
-            return path / "meret.db"
-        return path.expanduser().resolve()
+            resolved = path / "meret.db"
+        else:
+            resolved = path.expanduser().resolve()
+        logger.debug("db path from argument %s -> %s", path, resolved)
+        return resolved
     
     # Try config
     config = get_config()
     db_path = config.get("paths.default_db")
     
     if db_path:
-        return Path(db_path).expanduser().resolve()
+        resolved = Path(db_path).expanduser().resolve()
+        logger.debug("db path from config paths.default_db -> %s", resolved)
+        return resolved
     
     # Default: current dir
-    return Path.cwd() / "meret.db"
+    resolved = Path.cwd() / "meret.db"
+    logger.debug("db path defaulted to the current directory -> %s", resolved)
+    return resolved
 
 
 def resolve_library_path(path: Optional[Path] = None) -> Optional[Path]:
@@ -92,6 +101,7 @@ def resolve_library_path(path: Optional[Path] = None) -> Optional[Path]:
 def get_repo(db_path: Path | str | None = None, create: bool = False) -> SQLiteRepository:
     resolved = resolve_db_path(db_path)
     if not resolved.exists() and not create:
+        logger.warning("database not found: %s", resolved)
         exc = DatabaseNotFound(resolved)
         exc._render() 
         raise exc

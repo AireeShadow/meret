@@ -1,5 +1,8 @@
+import logging
 import os
+import sys
 import typer
+from collections import deque
 from pathlib import Path
 from typing import List, Optional
 
@@ -13,13 +16,57 @@ from meret.core.indexer import PHASE_COLLECT, PHASE_EXTRACT, PHASE_INDEX, Indexe
 from meret.core.models import Tag
 from meret.core.repository import AbstractRepository
 from meret.core.config import get_config, CONFIG_FILENAME
+from meret.core.logger import (
+    ENV_LEVEL,
+    disable_console_logging,
+    log_file_path,
+    log_uncaught_exceptions,
+    setup_logging,
+)
 
+from meret import __version__
 from meret.cli.deps import get_repo, resolve_db_path
 
 app = typer.Typer(help="Meret — tagged media file system", no_args_is_help=True)
 console = Console()
+logger = logging.getLogger(__name__)
 
 DB_OPTION = typer.Option(None, "--db", "-d", help="Database directory or path to a .db file")
+
+
+@app.callback()
+def main(
+    ctx: typer.Context,
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Debug logging, also echoed to stderr"
+    ),
+    log_level: Optional[str] = typer.Option(
+        None, "--log-level", help=f"DEBUG, INFO, WARNING, ERROR (default: ${ENV_LEVEL} or INFO)"
+    ),
+):
+    """Meret — tagged media file system."""
+    try:
+        path = setup_logging("DEBUG" if verbose else log_level, console=verbose)
+    except ValueError as e:
+        raise typer.BadParameter(str(e), param_hint="--log-level")
+    log_uncaught_exceptions()
+    logger.info(
+        "meret %s: %s | argv=%s cwd=%s log=%s",
+        __version__, ctx.invoked_subcommand, sys.argv[1:], os.getcwd(), path,
+    )
+
+
+@app.command()
+def logs(
+    lines: int = typer.Option(0, "--lines", "-n", help="Also print the last N lines"),
+):
+    """Show where the log file is (and optionally its tail)."""
+    path = log_file_path()
+    console.print(str(path), soft_wrap=True)
+    if lines > 0 and path.exists():
+        with path.open(encoding="utf-8", errors="replace") as f:
+            tail = deque(f, maxlen=lines)
+        console.print("".join(tail), end="", markup=False, highlight=False, soft_wrap=True)
 
 
 # ----- database -----
@@ -376,6 +423,7 @@ def config_set(
         cfg.set(key, value)
         console.print(f"[green]✓ Set {key} = {value}[/green]")
     except Exception as e:
+        logger.warning("config set %s=%r failed", key, value, exc_info=True)
         console.print(f"[red]Failed to set {key}: {e}[/red]")
         raise typer.Exit(1)
 
@@ -416,12 +464,14 @@ def tui(
 ):
     """Launch interactive TUI."""
     from meret.cli.tui import MeretApp
-    
+
+    disable_console_logging()  # the TUI owns the screen; the log file keeps everything
     try:
         app = MeretApp(resolve_db_path(db_path))
         app.run()
     except Exception as e:
-        console.print(f"[red]TUI Error: {e}[/red]")
+        logger.exception("TUI failed")
+        console.print(f"[red]TUI Error: {e}[/red] (details: meret logs)")
         raise typer.Exit(1)
 
 # meret/cli/app.py или отдельный файл

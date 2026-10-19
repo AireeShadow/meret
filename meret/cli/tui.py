@@ -9,9 +9,7 @@ import ctypes
 from pathlib import Path
 from typing import Optional
 
-import logging
-logger = logging.getLogger(__name__)
-
+from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -37,7 +35,10 @@ from textual.widgets.directory_tree import DirEntry
 from meret.cli.deps import get_repo, resolve_db_path, DatabaseNotFound
 from meret.core import tagpaths
 from meret.core.models import FileEntry, FileType
+from meret.core.logger import log_uncaught_exceptions, setup_logging
 from meret.vfs import VirtualTree, NotFound
+
+logger = logging.getLogger(__name__)
 
 def get_drives_winapi():
     """Get drives using Windows API — instant."""
@@ -124,9 +125,13 @@ class VirtualFileTree(Tree):
             self.virtual_tree = VirtualTree(repo)
             self.root.expand()
             self._populate_node(self.root, "/")
-        except Exception:
+        except DatabaseNotFound:
             self.root.remove_children()
             self.root.add_leaf("[dim]No database - run 'meret init'[/dim]")
+        except Exception as e:
+            logger.exception("virtual panel: loading %s failed", self.db_path)
+            self.root.remove_children()
+            self.root.add_leaf(f"[red]Error: {escape(str(e))}[/red] [dim](meret logs)[/dim]")
     
     def _populate_node(self, node, vpath: str):
         """Populate tree node with virtual directory contents."""
@@ -157,13 +162,14 @@ class VirtualFileTree(Tree):
                     node.add_leaf(entry.name, data=entry.vpath)
                     
         except Exception as e:
-            node.add_leaf(f"[red]Error: {e}[/red]")
+            logger.exception("virtual panel: listing %s failed", vpath)
+            node.add_leaf(f"[red]Error: {escape(str(e))}[/red]")
 
 
     def on_tree_node_expanded(self, event: Tree.NodeExpanded):
         """Lazy load children when node expanded."""
         node = event.node
-        logger.debug(f"Expanding node: label={node.label}, data={node.data}")
+        logger.debug("virtual panel: expanding %s", node.data)
         
         vpath = node.data
         if not vpath:
@@ -237,7 +243,8 @@ class SearchScreen(ModalScreen[list[FileEntry]]):
             for f in self.results[:50]:
                 self.list_view.append(ListItem(Label(f"{f.filename} [{f.type.value}]")))
         except Exception as e:
-            self.list_view.append(ListItem(Label(f"[red]Error: {e}[/red]")))
+            logger.exception("search %r failed", self.query)
+            self.list_view.append(ListItem(Label(f"[red]Error: {escape(str(e))}[/red]")))
     
     def on_list_view_selected(self, event: ListView.Selected):
         idx = event.list_view.index
@@ -427,9 +434,27 @@ class MeretApp(App):
         self.sort_by = "name"  # name, size, date
         self.sort_reverse = False
     
+    def on_mount(self) -> None:
+        logger.info("TUI started: db=%s fs_root=%s", self.db_path, self.fs_root)
+
+    def _handle_exception(self, error: Exception) -> None:
+        # Textual's crash hook (private, but the only one): keep the traceback in the
+        # log file — the screen version disappears with the terminal
+        logger.critical("TUI crashed", exc_info=error)
+        super()._handle_exception(error)
+
+    def _run(self, cmd: list[str], **kwargs) -> subprocess.CompletedProcess:
+        """subprocess.run with the command and its exit code in the log."""
+        logger.info("run: %s", cmd)
+        result = subprocess.run(cmd, **kwargs)
+        (logger.info if result.returncode == 0 else logger.warning)(
+            "exit %s: %s", result.returncode, cmd
+        )
+        return result
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        
+
         with Horizontal():
             # Left panel: Use SortedDirectoryTree from start!
             self.real_tree = SortedDirectoryTree(self.fs_root, sort_by=self.sort_by, reverse=self.sort_reverse)
@@ -504,8 +529,8 @@ class MeretApp(App):
                         self.virt_tree.action_select_cursor()
                     else:
                         self.action_open_file()
-                except:
-                    pass
+                except Exception:
+                    logger.exception("select/open %s failed", self.selected_virtual)
     
     def action_command_palette(self):
         """Open command palette."""
@@ -529,6 +554,7 @@ class MeretApp(App):
             "mount": self.action_mount,
             "umount": self.action_umount,
         }
+        logger.info("palette: %s", cmd)
         action = actions.get(cmd)
         if action is None:
             self.notify(f"'{cmd}' isn't available in the TUI yet", severity="warning")
@@ -539,7 +565,7 @@ class MeretApp(App):
         """Scan current directory."""
         if self.selected_real and self.selected_real.is_dir():
             self.notify(f"Scanning {self.selected_real}...")
-            subprocess.run(["meret", "scan", str(self.selected_real), "--db", str(self.db_path)])
+            self._run(["meret", "scan", str(self.selected_real), "--db", str(self.db_path)])
             self.virt_tree._load_tree()
             self.notify("Scan complete!")
     
@@ -549,7 +575,8 @@ class MeretApp(App):
             if os.name == 'nt':
                 os.startfile(self.selected_real)
             else:
-                subprocess.run(["xdg-open", str(self.selected_real)])
+                self._run(["xdg-open", str(self.selected_real)])
+            logger.info("opened %s", self.selected_real)
             self.notify(f"Opened {self.selected_real.name}")
             
         elif self.selected_virtual:
@@ -563,11 +590,13 @@ class MeretApp(App):
                 if os.name == 'nt':
                     os.startfile(real_path)
                 else:
-                    subprocess.run(["xdg-open", str(real_path)])
-                    
+                    self._run(["xdg-open", str(real_path)])
+
+                logger.info("opened %s -> %s", self.selected_virtual, real_path)
                 self.notify(f"Opened {self.selected_virtual} → {real_path.name}")
-                
+
             except Exception as e:
+                logger.exception("opening %s failed", self.selected_virtual)
                 self.notify(f"Error opening: {e}", severity="error")
     
     def action_tag(self):
@@ -593,10 +622,12 @@ class MeretApp(App):
                         file_id = entry.id
                     
                     repo.add_tag(file_id, tag)
+                    logger.info("tagged %s with %r", self.selected_real, tag)
                     self.notify(f"Tagged with '{tag}'")
                     self.virt_tree._load_tree()
-                    
+
                 except Exception as e:
+                    logger.exception("tagging %s with %r failed", self.selected_real, tag)
                     self.notify(f"Error: {e}", severity="error")
         
         self.push_screen(TagDialog(self.selected_real), on_tag)
@@ -638,6 +669,7 @@ class MeretApp(App):
         except DatabaseNotFound:
             self.notify("No database!", severity="error")
             return
+        logger.info("pruned %d unused tag(s)", removed)
         self.virt_tree._load_tree()
         self.notify(f"Removed {removed} unused tag(s)")
 
@@ -674,8 +706,10 @@ class MeretApp(App):
             try:
                 repo.delete_tag(path)
             except Exception as e:  # e.g. a subtag clashes with a same-named sibling
+                logger.exception("deleting tag %r failed", path)
                 self.notify(f"Error: {e}", severity="error")
                 return
+            logger.info("deleted tag %r", path)
             self.selected_virtual = None
             self.virt_tree._load_tree()
             self.notify(f"Deleted tag {path}")
@@ -686,11 +720,11 @@ class MeretApp(App):
 
     def action_config(self):
         """Open config editor."""
-        subprocess.run(["meret", "config", "edit"])
+        self._run(["meret", "config", "edit"])
     
     def action_init_db(self):
         """Initialize database."""
-        subprocess.run(["meret", "init", str(self.db_path)])
+        self._run(["meret", "init", str(self.db_path)])
         self.virt_tree._load_tree()
         self.notify("Database initialized!")
     
@@ -750,6 +784,7 @@ class MeretApp(App):
         if not hasattr(self, 'real_tree'):
             return
 
+        logger.info("real panel -> %s (sort=%s)", self.fs_root, self.sort_by)
         self.real_tree.sort_by = self.sort_by
         self.real_tree.reverse = self.sort_reverse
         # not "[name]": border titles are markup, so square brackets would vanish
@@ -803,6 +838,7 @@ class MeretApp(App):
                         try:
                             do_mount(tree, Path(path))
                         except Exception as e:
+                            logger.exception("mount at %s failed", path)
                             self.call_from_thread(
                                 lambda: self.notify(f"Mount error: {e}", severity="error")
                             )
@@ -811,9 +847,11 @@ class MeretApp(App):
                     self.notify(f"Mounting at {path}... (Ctrl+C in console to exit)")
                     
                 except ImportError as e:
+                    logger.warning("mount: no driver: %s", e)
                     self.notify(f"Missing driver: {e}", severity="error")
                     self.notify("Install: pip install fusepy (Linux/Mac) or winfspy (Windows)")
                 except Exception as e:
+                    logger.exception("mount at %s failed", path)
                     self.notify(f"Error: {e}", severity="error")
         
         self.push_screen(InputDialog("Enter mount point (e.g., M: or /mnt/meret):"), on_mountpoint)
@@ -824,9 +862,10 @@ class MeretApp(App):
         def on_unmount(path: str | None):
             if path:
                 try:
-                    subprocess.run(["meret", "umount", path], check=True)
+                    self._run(["meret", "umount", path], check=True)
                     self.notify(f"Unmounted {path}")
                 except Exception as e:
+                    logger.exception("umount %s failed", path)
                     self.notify(f"Error: {e}", severity="error")
         
         self.push_screen(InputDialog("Enter mount point to unmount:"), on_unmount)
@@ -885,6 +924,8 @@ class SortedDirectoryTree(DirectoryTree):
 def main():
     """Entry point for TUI."""
     import sys
+    setup_logging(console=False)
+    log_uncaught_exceptions()
     db_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
     app = MeretApp(db_path)
     app.run()

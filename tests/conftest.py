@@ -18,12 +18,23 @@ pytest_plugins = ("pytest_asyncio",)
 
 
 @pytest.fixture(autouse=True)
-def clean_logger():
-    """The logger is global — clear its handlers between tests."""
-    logger = logging.getLogger("meret")
-    logger.handlers.clear()
+def clean_logger(tmp_path_factory, monkeypatch):
+    """Logging is global: keep CLI logs out of the user's log dir, undo setup_logging()."""
+    from meret.core.logger import ENV_FILE, ENV_LEVEL, _MARK
+
+    log_file = tmp_path_factory.mktemp("logs") / "meret.log"
+    monkeypatch.setenv(ENV_FILE, str(log_file))
+    monkeypatch.delenv(ENV_LEVEL, raising=False)
+
+    root, logger = logging.getLogger(), logging.getLogger("meret")
+    root_level = root.level
     yield logger
-    logger.handlers.clear()
+
+    for handler in [h for h in root.handlers if getattr(h, _MARK, False)]:
+        root.removeHandler(handler)
+        handler.close()
+    root.setLevel(root_level)
+    logger.setLevel(logging.NOTSET)
 
 
 @pytest.fixture

@@ -32,11 +32,13 @@ import threading
 import time
 from pathlib import Path
 
-from meret.vfs import IsADirectory, NotFound, SourceFile, VirtualTree
-
 import logging
 
-_DEBUG = bool(os.environ.get("MERET_DEBUG"))
+from meret.vfs import IsADirectory, NotFound, SourceFile, VirtualTree
+
+# `meret -v mount ...` (or MERET_LOG_LEVEL=DEBUG) traces every handle; winfspy's own
+# "Unhandled exception" tracebacks land in the same log file.
+logger = logging.getLogger(__name__)
 
 # How long to wait for a clean stop before forcing an exit.
 STOP_GRACE_SECONDS = 5.0
@@ -46,7 +48,12 @@ POLL_INTERVAL = 0.2
 
 
 def _flush_streams() -> None:
-    """os._exit() doesn't flush buffers — do it manually."""
+    """os._exit() doesn't flush buffers — do it manually (log handlers too)."""
+    for handler in logging.getLogger().handlers:
+        try:
+            handler.flush()
+        except Exception:  # noqa: BLE001
+            pass
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
@@ -129,6 +136,7 @@ def _mount_fuse(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             with self._lock:
                 fh = next(self._fh)
                 self._files[fh] = src
+            logger.debug("open %s -> fh=%d (%s)", path, fh, src.path)
             return fh
 
         def read(self, path, size, offset, fh):
@@ -145,12 +153,14 @@ def _mount_fuse(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 src = self._files.pop(fh, None)
             if src is not None:
                 src.close()
+            logger.debug("release %s fh=%d", path, fh)
             return 0
 
         def access(self, path, mode):
             return 0
 
     Path(mountpoint).mkdir(parents=True, exist_ok=True)
+    logger.info("FUSE mount at %s", mountpoint)
     FUSE(MeretOperations(), mountpoint, foreground=foreground, ro=True, nothreads=False)
 
 
@@ -172,9 +182,6 @@ def _filetime(mtime: float) -> int:
 
 
 def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
-    if _DEBUG:
-        logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-
     from winfspy import (
         FILE_ATTRIBUTE,
         NTStatusEndOfFile,
@@ -196,11 +203,10 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             # may read through one handle at once
             self._source_lock = threading.Lock()
 
-        # ---------- debugging (MERET_DEBUG=1) ----------
+        # ---------- handle tracing (DEBUG) ----------
 
-        def _log(self, msg: str) -> None:
-            if _DEBUG:
-                print(f"[meret] {msg}", flush=True)
+        def _log(self, fmt: str, *args) -> None:
+            logger.debug(fmt, *args)
 
         @staticmethod
         def _addr(handle) -> int:
@@ -208,12 +214,12 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
         def ll_create(self, *args):
             status = super().ll_create(*args)
-            self._log(f"ll_create -> status={status:#x} ctx={self._addr(args[-2][0]):#x}")
+            self._log("ll_create -> status=%#x ctx=%#x", status, self._addr(args[-2][0]))
             return status
 
         def ll_open(self, *args):
             status = super().ll_open(*args)
-            self._log(f"ll_open   -> status={status:#x} ctx={self._addr(args[-2][0]):#x}")
+            self._log("ll_open   -> status=%#x ctx=%#x", status, self._addr(args[-2][0]))
             return status
 
         def ll_close(self, file_context):
@@ -232,12 +238,13 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 # a pointer we don't know — let winfspy decide
                 return super().ll_close(file_context)
 
-            self._log(f"ll_close  <- ptr={self._addr(file_context):#x}")
+            self._log("ll_close  <- ptr=%#x", self._addr(file_context))
             try:
                 self.close(ffi.from_handle(file_context))
             except NTStatusError as exc:
                 return exc.value
             except Exception:  # noqa: BLE001
+                logger.exception("close failed")
                 return NTSTATUS.STATUS_UNEXPECTED_IO_ERROR
             return NTSTATUS.STATUS_SUCCESS
 
@@ -279,6 +286,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                     except NotFound:
                         raise NTStatusObjectNameNotFound()
                     file_context["source"] = src
+                    self._log("source opened for %s -> %s", file_context["path"], src.path)
                 return src
 
         def open(self, file_name, create_options, granted_access):
@@ -286,6 +294,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             try:
                 return self._context(vpath)
             except NotFound:
+                self._log("open %s -> not found", vpath)
                 raise NTStatusObjectNameNotFound()
 
         def create(
@@ -305,6 +314,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             try:
                 return self._context(vpath)
             except NotFound:
+                logger.info("refused to create %s: the FS is read-only", vpath)
                 raise NTStatusMediaWriteProtected()
 
         def close(self, file_context):
@@ -313,6 +323,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                     src, file_context["source"] = file_context.get("source"), None
                 if src is not None:
                     src.close()
+                    self._log("source closed for %s", file_context["path"])
             return None
 
         def cleanup(self, file_context, file_name, flags):
@@ -357,6 +368,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
             entries += [{"file_name": n.name, **self._info(n)} for n in tree.listdir(path)]
             entries.sort(key=lambda e: e["file_name"])
+            self._log("read_directory %s marker=%r: %d entries", path, marker, len(entries))
 
             if marker is None:
                 return entries
@@ -402,6 +414,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         try:
             lib.FspFileSystemRemoveMountPoint(ptr[0])
         except Exception as exc:  # noqa: BLE001
+            logger.exception("failed to remove the mount point")
             print(f"meret: failed to remove the mount point: {exc!r}", file=sys.stderr)
 
     def _stop() -> None:
@@ -409,8 +422,10 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         try:
             fs.stop()
         except Exception as exc:  # noqa: BLE001
+            logger.exception("error while stopping the FS")
             print(f"meret: error while stopping the FS: {exc!r}", file=sys.stderr)
         finally:
+            logger.info("FS stopped")
             stopped.set()
 
     def _start_watchdog() -> None:
@@ -418,6 +433,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
         def _watchdog() -> None:
             if not stopped.wait(STOP_GRACE_SECONDS):
+                logger.error("FS did not stop within %g s — forcing exit", STOP_GRACE_SECONDS)
                 print(
                     f"\nmeret: FS did not stop within {STOP_GRACE_SECONDS:g} s — forcing exit",
                     file=sys.stderr,
@@ -429,6 +445,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
 
     def _request_shutdown(reason: str) -> None:
         if shutdown.is_set():
+            logger.warning("%s again — forcing exit", reason)
             print(f"\nmeret: {reason} — forcing exit")
             _flush_streams()
             os._exit(0)
@@ -437,10 +454,12 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             f"\nmeret: {reason} — stopping the FS (Ctrl+C or Enter again to exit immediately)",
             flush=True,
         )
+        logger.info("%s — stopping the FS", reason)
         shutdown.set()
         threading.Thread(target=_stop, name="meret-stop", daemon=True).start()
         _start_watchdog()
 
+    logger.info("WinFsp mount at %s", mountpoint)
     try:
         fs.start()
     except KeyboardInterrupt:
@@ -453,6 +472,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         os._exit(0)
     except BaseException:
         # Startup failed: the dispatcher may already be running — clean up after ourselves.
+        logger.exception("mount at %s failed to start", mountpoint)
         _flush_streams()
         try:
             fs.stop()
@@ -476,6 +496,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             time.sleep(POLL_INTERVAL)
 
         if not stopped.wait(STOP_GRACE_SECONDS):
+            logger.error("FS did not stop within %g s — forcing exit", STOP_GRACE_SECONDS)
             print(f"meret: FS did not stop within {STOP_GRACE_SECONDS:g} s — forcing exit")
     finally:
         _flush_streams()

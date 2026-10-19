@@ -1,16 +1,19 @@
 import re
 import json
+import logging
 import sqlite3
 import threading
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional
 
 from meret.core import tagpaths
-from meret.core.logger import Logger
+from meret.core.logger import traced
 from meret.core.models import FileEntry, FileType, Tag, TagNode
 from meret.core.repository import AbstractRepository
 
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+logger = logging.getLogger(__name__)
+_traced = traced(logger)  # DEBUG: every public call with args, result size and time
 _TAG_SEP = "\x1f"  # separator for GROUP_CONCAT
 _WORD = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
@@ -86,7 +89,7 @@ def _iter_statements(script: str):
         yield tail
 
 
-class SQLiteRepository(AbstractRepository, Logger):
+class SQLiteRepository(AbstractRepository):
     _SAVE_FILE_SQL = """
         INSERT INTO files (filepath, filename, rating, type, metadata, size_bytes, mtime)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -102,7 +105,6 @@ class SQLiteRepository(AbstractRepository, Logger):
     _EXPECTED_TABLES = ("files", "tags", "file_tags")
 
     def __init__(self, db_path: str):
-        Logger.__init__(self)
         self.db_path = str(db_path)
         self.fts_enabled = True
         self._watch: Optional[sqlite3.Connection] = None  # for data_version()
@@ -142,13 +144,14 @@ class SQLiteRepository(AbstractRepository, Logger):
                 except sqlite3.OperationalError as e:
                     if "fts5" in stmt.lower():  # build without FTS5 — don't crash
                         self.fts_enabled = False
-                        self.logger.warning(f"FTS5 unavailable: {e}")
+                        logger.warning(f"FTS5 unavailable: {e}")
                     else:
                         raise
             self._migrate_files(conn)
             self._migrate_tags(conn)
             conn.commit()
             self._check_schema(conn)
+        logger.debug("opened %s (fts=%s)", self.db_path, self.fts_enabled)
 
     def _check_schema(self, conn) -> None:
         """The schema must be created in full.
@@ -198,7 +201,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                 "ON tags(COALESCE(parent_id, 0), name_key)"
             )
         except sqlite3.OperationalError as e:
-            self.logger.warning(f"same-name siblings found, unique index not created: {e}")
+            logger.warning(f"same-name siblings found, unique index not created: {e}")
 
     # ---------- conversion ----------
     @staticmethod
@@ -235,6 +238,7 @@ class SQLiteRepository(AbstractRepository, Logger):
         if "mtime" not in cols:
             conn.execute("ALTER TABLE files ADD COLUMN mtime REAL DEFAULT 0")
 
+    @_traced
     def get_file_by_id(self, file_id: int) -> Optional[FileEntry]:
         with self._connect() as conn:
             row = conn.execute(
@@ -242,6 +246,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             ).fetchone()
             return self._row_to_file(row) if row else None
 
+    @_traced
     def get_file_by_path(self, path: str) -> Optional[FileEntry]:
         with self._connect() as conn:
             row = conn.execute(
@@ -249,6 +254,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             ).fetchone()
             return self._row_to_file(row) if row else None
 
+    @_traced
     def save_file(self, file: FileEntry) -> int:
         with self._connect() as conn:
             size, mtime = self._fingerprint(file)
@@ -272,6 +278,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             ).fetchone()
             return row["id"]
 
+    @_traced
     def save_files(
         self,
         files: List[FileEntry],
@@ -300,7 +307,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                     except (TypeError, ValueError) as e:
                         stats["errors"] += 1
                         meta = None
-                        self.logger.error(f"metadata is not serializable: {entry.filepath}: {e}")
+                        logger.error(f"metadata is not serializable: {entry.filepath}: {e}")
                     size, mtime = self._fingerprint(entry)
                     rows.append(
                         (
@@ -327,6 +334,7 @@ class SQLiteRepository(AbstractRepository, Logger):
 
         return stats
 
+    @_traced
     def delete_file(self, file_id: int) -> bool:
         with self._connect() as conn:
             cur = conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
@@ -431,6 +439,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             cur = row["parent_id"] if row else None
         return False
 
+    @_traced
     def add_tag(self, file_id: int, tag: str, colour: Optional[str] = None) -> int:
         with self._connect() as conn:
             tag_id = self._ensure_tag(conn, tag, colour)
@@ -441,6 +450,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             conn.commit()
             return tag_id
 
+    @_traced
     def remove_tag(self, file_id: int, tag: str) -> bool:
         with self._connect() as conn:
             tag_id = self._tag_id(conn, tag)
@@ -453,6 +463,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             conn.commit()
             return cur.rowcount > 0
 
+    @_traced
     def set_file_tags(self, file_id: int, tags: List[str]) -> bool:
         with self._connect() as conn:
             conn.execute("DELETE FROM file_tags WHERE file_id = ?", (file_id,))
@@ -465,6 +476,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             conn.commit()
             return True
 
+    @_traced
     def rename_tag(self, old: str, new: str) -> bool:
         """Renaming = ONE row. If a sibling with that name exists, they are merged."""
         with self._connect() as conn:
@@ -501,6 +513,7 @@ class SQLiteRepository(AbstractRepository, Logger):
 
     # ---------- tags: creation and hierarchy ----------
 
+    @_traced
     def create_tag(self, name: str, colour: Optional[str] = None) -> bool:
         """Create a tag by path, building any missing parents.
 
@@ -514,6 +527,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             conn.commit()
             return True
 
+    @_traced
     def delete_tag(self, name: str) -> bool:
         """Deletes a tag: children move up to its parent, links go away via cascade."""
         with self._connect() as conn:
@@ -528,6 +542,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             conn.commit()
             return True
 
+    @_traced
     def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
         with self._connect() as conn:
             row = self._tag_row(conn, tag)
@@ -549,6 +564,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             return True
 
     # ---------- tags: reading ----------
+    @_traced
     def get_all_tags(self) -> List[Tag]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -556,6 +572,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             ).fetchall()
             return [Tag(**dict(r)) for r in rows]
 
+    @_traced
     def get_tag_usage(self, limit: int = 100) -> List[Tag]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -567,6 +584,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             ).fetchall()
             return [Tag(**dict(r)) for r in rows]
 
+    @_traced
     def get_tag_tree(self) -> List[TagNode]:
         tags = self.get_all_tags()
         nodes = {t.id: TagNode(**t.model_dump()) for t in tags}
@@ -592,6 +610,7 @@ class SQLiteRepository(AbstractRepository, Logger):
                 roots.append(node)
         return roots
 
+    @_traced
     def prune_orphan_tags(self) -> int:
         """Deletes tags with no files AND no children.
 
@@ -609,6 +628,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             return cur.rowcount
 
     # ---------- search ----------
+    @_traced
     def search_by_tags(
         self,
         tags: List[str],
@@ -649,6 +669,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             rows = conn.execute(sql, params).fetchall()
             return [self._row_to_file(r) for r in rows]
 
+    @_traced
     def search_by_tag_ids(
         self,
         groups: List[List[int]],
@@ -685,6 +706,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             rows = conn.execute(sql, params).fetchall()
             return [self._row_to_file(r) for r in rows]
 
+    @_traced
     def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]:
         with self._connect() as conn:
             if self.fts_enabled and query.strip():
@@ -707,6 +729,7 @@ class SQLiteRepository(AbstractRepository, Logger):
             ).fetchall()
             return [self._row_to_file(r) for r in rows]
 
+    @_traced
     def get_stats(self) -> dict:
         with self._connect() as conn:
             total = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
@@ -714,10 +737,12 @@ class SQLiteRepository(AbstractRepository, Logger):
             tags = conn.execute("SELECT COUNT(*) FROM tags").fetchone()[0]
             return {"total_files": total, "by_type": by_type, "total_tags": tags}
 
+    @_traced
     def known_paths(self) -> Set[str]:
         with self._connect() as conn:
             return {row[0] for row in conn.execute("SELECT filepath FROM files")}
 
+    @_traced
     def known_fingerprints(self) -> Dict[str, Tuple[int, float]]:
         """{filepath: (size, mtime)} — one query for the whole incremental scan."""
         with self._connect() as conn:

@@ -4,12 +4,13 @@ It knows nothing about formats: extractors handle metadata and the
 repository handles storage. Only traversal and coordination logic lives here.
 """
 
+import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Generator, List, Tuple, Optional
 
 from meret.core.extractors import ExtractorRegistry
-from meret.core.logger import Logger
 from meret.core.models import FileEntry, FileType
 from meret.core.repository import AbstractRepository
 
@@ -17,8 +18,10 @@ PHASE_COLLECT = "collect"
 PHASE_EXTRACT = "extract"
 PHASE_INDEX = "index"
 
+logger = logging.getLogger(__name__)
 
-class Indexer(Logger):
+
+class Indexer:
     """Walks a directory, extracts metadata and writes it to the repository."""
 
     def __init__(
@@ -29,7 +32,6 @@ class Indexer(Logger):
         chunk_size: int = 1000,
         skip_existing: bool = False,
     ) -> None:
-        super().__init__()
         self.repo = repository
         self.library = Path(library_path)
         self.workers = max(1, workers)
@@ -76,7 +78,7 @@ class Indexer(Logger):
             if progress_callback:
                 progress_callback(PHASE_COLLECT, done, total)
 
-        self.logger.info(f"Collected {len(found)}/{total} supported files")
+        logger.info("Collected %d/%d supported files under %s", len(found), total, self.library)
         return found
 
     # ---------- processing ----------
@@ -120,12 +122,12 @@ class Indexer(Logger):
                     if entry:
                         entries.append(entry)
                 except Exception as e:
-                    self.logger.error(f"Failed: {futures[future]}: {e}")
+                    logger.error("Failed: %s: %s", futures[future], e, exc_info=True)
                 if progress_callback:
                     progress_callback(PHASE_EXTRACT, done, len(files))
         except KeyboardInterrupt:
             self.interrupted = True
-            self.logger.warning("Extraction interrupted by user")
+            logger.warning("Extraction interrupted by user after %d/%d files", len(entries), len(files))
             for future in futures:
                 future.cancel()
             pool.shutdown(wait=False, cancel_futures=True)
@@ -156,8 +158,14 @@ class Indexer(Logger):
         progress_callback=None,
     ) -> Dict[str, int]:
         self.interrupted = False
+        logger.info(
+            "Scan %s: workers=%d chunk_size=%d skip_existing=%s dry_run=%s",
+            single_file or self.library, self.workers, self.chunk_size, self.skip_existing, dry_run,
+        )
+        started = time.perf_counter()
 
         files = self.collect(single_file=single_file, progress_callback=progress_callback)
+        logger.debug("collect took %.1f s", time.perf_counter() - started)
 
         skipped = 0
         if self.skip_existing and files:
@@ -165,9 +173,12 @@ class Indexer(Logger):
             before = len(files)
             files = [f for f in files if known.get(str(f)) != self._fingerprint(f)]
             skipped = before - len(files)
-            self.logger.info(f"Skipped {skipped}/{before} unchanged files")
+            logger.info("Skipped %d/%d unchanged files", skipped, before)
 
+        t0 = time.perf_counter()
         entries = self.extract(files, progress_callback=progress_callback)
+        logger.info("Extracted metadata for %d/%d files in %.1f s",
+                    len(entries), len(files), time.perf_counter() - t0)
 
         if dry_run:
             return {
@@ -179,7 +190,10 @@ class Indexer(Logger):
                 "interrupted": self.interrupted,
             }
 
+        t0 = time.perf_counter()
         stats = self.index(entries, progress_callback=progress_callback)
         stats["skipped"] = skipped
         stats["interrupted"] = self.interrupted
+        logger.info("Indexed in %.1f s (total %.1f s): %s",
+                    time.perf_counter() - t0, time.perf_counter() - started, stats)
         return stats

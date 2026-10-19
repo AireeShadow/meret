@@ -6,6 +6,7 @@ Config path: platformdirs.user_config_dir() / meret / config.toml
 """
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +16,8 @@ from pydantic import BaseModel, Field, field_validator
 
 APP_NAME = "meret"
 CONFIG_FILENAME = "config.toml"
+
+logger = logging.getLogger(__name__)
 
 
 class PathsConfig(BaseModel):
@@ -125,13 +128,15 @@ class ConfigManager:
             else:
                 data = json.loads(content)
             
-            return MeretConfig.model_validate(data)
+            config = MeretConfig.model_validate(data)
+            logger.debug("config loaded from %s", self.config_path)
+            return config
             
         except Exception as e:
             # Log warning and return defaults on error
-            import logging
-            logging.getLogger("meret").warning(
-                f"Failed to load config from {self.config_path}: {e}. Using defaults."
+            logger.warning(
+                "Failed to load config from %s: %s. Using defaults.", self.config_path, e,
+                exc_info=True,
             )
             return self._create_default()
     
@@ -154,9 +159,12 @@ class ConfigManager:
                 import tomli_w
                 with open(self.config_path, "wb") as f:
                     tomli_w.dump(data, f)
+                logger.debug("config saved to %s", self.config_path)
                 return
             except ImportError:
-                pass  # Fallback to JSON
+                # load() reads only the .toml — this save won't be seen again
+                logger.warning("tomli-w is not installed: config saved as JSON, not %s",
+                               self.config_path)
         
         # JSON fallback
         json_path = self.config_path.with_suffix(".json")
@@ -164,6 +172,7 @@ class ConfigManager:
             json.dumps(data, indent=2, ensure_ascii=False),
             encoding="utf-8"
         )
+        logger.debug("config saved to %s", json_path)
         
     def _create_default(self) -> MeretConfig:
         """Create default configuration."""

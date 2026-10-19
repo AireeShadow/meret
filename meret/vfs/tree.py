@@ -1,3 +1,4 @@
+import logging
 import os
 import posixpath
 import threading
@@ -14,6 +15,8 @@ from meret.vfs.errors import IsADirectory, NotFound
 
 _FORBIDDEN = '/\\:*?"<>|'
 _SAFE_SUB = "∕"  # U+2215 DIVISION SLASH
+
+logger = logging.getLogger(__name__)
 
 #: How long a snapshot lives when the repository can't report data_version().
 DEFAULT_TTL = 1.0
@@ -148,6 +151,8 @@ class VirtualTree:
             version = self._repo_version()
             snap = self._snap
             if snap is None or not self._is_fresh(snap, version):
+                previous = snap.version if snap is not None else None
+                started = time.perf_counter()
                 tags = self.repo.get_all_tags()
                 children: Dict[Optional[int], List[Tag]] = {}
                 for t in tags:
@@ -159,6 +164,11 @@ class VirtualTree:
                     children=children,
                 )
                 self._snap = snap
+                logger.debug(
+                    "snapshot rebuilt: data_version %s -> %s, %d tags in %.1f ms",
+                    previous, version, len(tags),
+                    (time.perf_counter() - started) * 1000,
+                )
             return snap
 
     # ---------- tag index ----------
@@ -227,8 +237,14 @@ class VirtualTree:
             snap = self._snapshot()
             listing = snap.listings.get(vpath)
             if listing is None:
+                started = time.perf_counter()
                 listing = self._build_listing(vpath, snap)
                 snap.listings[vpath] = listing
+                dirs = sum(1 for n in listing.nodes if n.is_dir)
+                logger.debug(
+                    "listing %s: %d folders, %d files in %.1f ms",
+                    vpath, dirs, len(listing.nodes) - dirs, (time.perf_counter() - started) * 1000,
+                )
             return listing
 
     def _build_listing(self, vpath: str, snap: _Snapshot) -> _Listing:
@@ -336,6 +352,7 @@ class VirtualTree:
         try:
             return SourceFile(path)
         except FileNotFoundError:
+            logger.warning("in the database but missing on disk: %s -> %s", vpath, path)
             raise NotFound(vpath) from None
 
     def read_range(self, vpath: str, offset: int, length: int) -> bytes:

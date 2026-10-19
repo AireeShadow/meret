@@ -595,3 +595,43 @@ class TestDeleteTag:
             await pilot.press("d")
             await pilot.pause(0.2)
             assert not isinstance(app.screen, ConfirmDialog)
+
+
+# ---------- logging ----------
+
+
+def test_virtual_panel_logs_real_errors(tmp_path, caplog):
+    """Not every failure is 'no database' — the real one goes to the log with a traceback."""
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="meret")
+    tree_widget = VirtualFileTree(tmp_path / "meret.db")
+    with patch("meret.cli.deps.get_repo", side_effect=RuntimeError("disk on fire [x]")):
+        tree_widget._load_tree()
+
+    labels = [str(c.label) for c in tree_widget.root.children]
+    assert any("disk on fire [x]" in label for label in labels)  # escaped, not eaten as markup
+    (record,) = [r for r in caplog.records if r.name == "meret.cli.tui"]
+    assert record.exc_info is not None
+
+
+def test_virtual_panel_missing_db_is_not_an_error(tmp_path, caplog):
+    import logging
+
+    caplog.set_level(logging.WARNING, logger="meret.cli.tui")
+    tree_widget = VirtualFileTree(tmp_path / "nope.db")
+    tree_widget._load_tree()
+    assert "No database" in str(tree_widget.root.children[0].label)
+    assert [r for r in caplog.records if r.name == "meret.cli.tui"] == []
+
+
+def test_subprocess_exit_codes_are_logged(caplog):
+    import logging
+    import sys
+
+    caplog.set_level(logging.INFO, logger="meret")
+    app = MeretApp(Path("."))
+    app._run([sys.executable, "-c", "raise SystemExit(3)"])
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith("run: ") for m in messages)
+    assert any(m.startswith("exit 3: ") for m in messages)
