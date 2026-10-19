@@ -420,7 +420,11 @@ class MeretApp(App):
     
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected):
         """Handle real file selection."""
+        if '..' in str(event.node.label):
+            self.action_go_up()
+            return
         self.selected_real = event.path
+        self.selected_virtual = None
         self.preview.update_preview(event.path, is_virtual=False)
         self._update_path_bar()
     
