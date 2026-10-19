@@ -1,3 +1,4 @@
+0.6.0 - initial locale feature
 0.5.11 - verbose logger fix
 0.5.10 - various fixes
 0.5.9 - readme covers all commands, tui, mounting, config and logging; ls/open/stat/mount/umount registered in the cli again

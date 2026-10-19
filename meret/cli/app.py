@@ -12,6 +12,7 @@ from rich.tree import Tree
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 from meret.core import tagpaths
+from meret.core.locale import _, ngettext, set_locale
 from meret.core.indexer import PHASE_COLLECT, PHASE_EXTRACT, PHASE_INDEX, Indexer
 from meret.core.models import Tag
 from meret.core.repository import AbstractRepository
@@ -37,14 +38,17 @@ DB_OPTION = typer.Option(None, "--db", "-d", help="Database directory or path to
 @app.callback()
 def main(
     ctx: typer.Context,
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Debug logging, also echoed to stderr"
-    ),
-    log_level: Optional[str] = typer.Option(
-        None, "--log-level", help=f"DEBUG, INFO, WARNING, ERROR (default: ${ENV_LEVEL} or INFO)"
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    log_level: Optional[str] = typer.Option(None, "--log-level"),
+    language: Optional[str] = typer.Option(
+        None, "--lang", "-l", help="Language (en, ru, etc.)"
     ),
 ):
     """Meret — tagged media file system."""
+    # Set locale early
+    if language:
+        set_locale(language)
+    
     try:
         path = setup_logging("DEBUG" if verbose else log_level, console=verbose)
     except ValueError as e:

@@ -53,3 +53,10 @@ markers = [
     "integration: marks tests as integration tests (slow)",
     "slow: marks tests as slow",
 ]
+
+[tool.babel.messages]
+input_files = "meret/**/*.py"
+output_file = "meret/locales/messages.pot"
+
+[tool.setuptools.package-data]
+meret = ["locales/**/*.mo", "locales/**/*.po"]
