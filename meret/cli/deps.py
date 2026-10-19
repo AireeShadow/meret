@@ -59,13 +59,10 @@ def resolve_db_path(path: Optional[Path] = None) -> Path:
     3. Current directory / .meret.db
     """
     if path is not None:
-        # If path is a directory, append default filename
-        if path.is_dir():
-            resolved = path / "meret.db"
-        else:
-            resolved = path.expanduser().resolve()
-        logger.debug("db path from argument %s -> %s", path, resolved)
-        return resolved
+        p = Path(path)
+        if p.is_dir():
+            return p / "meret.db"
+        return p.expanduser().resolve()
     
     # Try config
     config = get_config()

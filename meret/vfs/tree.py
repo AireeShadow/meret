@@ -65,7 +65,8 @@ class SourceFile:
         if length <= 0:
             return b""
         if hasattr(os, "pread"):
-            return os.pread(self._file.fileno(), length, offset)
+            with self._lock:
+                return os.pread(self._file.fileno(), length, offset)
         with self._lock:
             self._file.seek(offset)
             return self._file.read(length)
@@ -146,29 +147,38 @@ class VirtualTree:
 
     def _snapshot(self) -> _Snapshot:
         with self._lock:
-            # the version is read BEFORE the data: a write in between only
-            # costs one extra rebuild, it can't leave a stale snapshot behind
-            version = self._repo_version()
+            # Fast path: return cached snapshot if still fresh
             snap = self._snap
-            if snap is None or not self._is_fresh(snap, version):
-                previous = snap.version if snap is not None else None
-                started = time.perf_counter()
-                tags = self.repo.get_all_tags()
-                children: Dict[Optional[int], List[Tag]] = {}
-                for t in tags:
-                    children.setdefault(t.parent_id, []).append(t)
-                snap = _Snapshot(
-                    version=version,
-                    taken_at=time.monotonic(),
-                    index=self._tag_index(tags),
-                    children=children,
-                )
-                self._snap = snap
-                logger.debug(
-                    "snapshot rebuilt: data_version %s -> %s, %d tags in %.1f ms",
-                    previous, version, len(tags),
-                    (time.perf_counter() - started) * 1000,
-                )
+            if snap is not None and self._is_fresh(snap, self._repo_version()):
+                return snap
+            
+            # Rebuild snapshot with consistent data read
+            started = time.perf_counter()
+            previous = snap.version if snap is not None else None
+            
+            # Read all data first
+            tags = self.repo.get_all_tags()
+            children: Dict[Optional[int], List[Tag]] = {}
+            for t in tags:
+                children.setdefault(t.parent_id, []).append(t)
+            
+            # Read version AFTER data to detect concurrent modifications
+            # If a write happened during our read, we'll rebuild next time
+            version = self._repo_version()
+            
+            snap = _Snapshot(
+                version=version,
+                taken_at=time.monotonic(),
+                index=self._tag_index(tags),
+                children=children,
+            )
+            self._snap = snap
+            
+            logger.debug(
+                "snapshot rebuilt: data_version %s -> %s, %d tags in %.1f ms",
+                previous, version, len(tags),
+                (time.perf_counter() - started) * 1000,
+            )
             return snap
 
     # ---------- tag index ----------

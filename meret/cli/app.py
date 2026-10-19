@@ -465,36 +465,14 @@ def tui(
     """Launch interactive TUI."""
     from meret.cli.tui import MeretApp
 
-    disable_console_logging()  # the TUI owns the screen; the log file keeps everything
     try:
         app = MeretApp(resolve_db_path(db_path))
+        disable_console_logging()  # Only after successful init
         app.run()
     except Exception as e:
         logger.exception("TUI failed")
         console.print(f"[red]TUI Error: {e}[/red] (details: meret logs)")
         raise typer.Exit(1)
-
-# meret/cli/app.py или отдельный файл
-
-@app.command()
-def open_file(
-    virtual_path: str = typer.Argument(..., help="Virtual path to open"),
-    db: Optional[Path] = typer.Option(None, "--db", help="Database path"),
-):
-    """Open file by virtual path."""
-    from meret.vfs import VirtualTree
-    
-    repo = get_repo(db)
-    tree = VirtualTree(repo)
-    
-    real_path = tree.real_path(virtual_path)
-    
-    if os.name == 'nt':
-        os.startfile(real_path)
-    else:
-        subprocess.run(["xdg-open", str(real_path)])
-    
-    typer.echo(f"Opened: {real_path}")
 
 # ls / open / stat / mount / umount register themselves on `app` (must come last:
 # vfs_cmds imports `app` from this module)

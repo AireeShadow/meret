@@ -1,3 +1,4 @@
+0.5.10 - various fixes
 0.5.9 - readme covers all commands, tui, mounting, config and logging; ls/open/stat/mount/umount registered in the cli again
 0.5.8 - logging: one log file in the user log dir, -v/--log-level, `meret logs`, traced repo calls, crash tracebacks in the log
 0.5.7 - tui: working '..' navigation, virtual panel back beside the real one, command palette runs commands, fixed U/d/tree and help

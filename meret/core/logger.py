@@ -99,11 +99,13 @@ def setup_logging(
         path, maxBytes=5_000_000, backupCount=5, encoding="utf-8", delay=True
     )
     file_handler.setFormatter(logging.Formatter(FILE_FORMAT))
+    file_handler.setLevel(logging.DEBUG)  # Handle all messages from meret
     handlers: list[logging.Handler] = [file_handler]
 
     if console:
         stream = _StderrHandler()  # stderr: stdout is the command's output
         stream.setFormatter(logging.Formatter(CONSOLE_FORMAT))
+        stream.setLevel(logging.DEBUG)  # Echo all meret messages to console
         handlers.append(stream)
 
     for handler in handlers:
@@ -111,9 +113,8 @@ def setup_logging(
         root.addHandler(handler)
 
     root.setLevel(logging.WARNING)  # third-party noise stays out
-    logging.getLogger(APP_NAME).setLevel(meret_level)
+    logging.getLogger(APP_NAME).setLevel(meret_level)  # meret controls its own level
     return path
-
 
 def log_uncaught_exceptions() -> None:
     """Crashes go to the log file too, not just to a terminal that may be long gone.

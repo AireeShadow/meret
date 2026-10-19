@@ -1,29 +1,29 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [project]
 name = "meret"
-dynamic = ["version"]                 # ← required: the version comes from meret/__init__.py
+dynamic = ["version"]
 description = "Tagged media file system with virtual folders"
 readme = "README.md"
 license = {text = "GPL-3.0"}
 requires-python = ">=3.10"
 dependencies = [
+    # Core
     "typer[all]>=0.9.0",
     "rich>=15.0.0",
     "pydantic>=2.0.0",
     "Pillow>=10.0.0",
     "platformdirs>=3.0",
+    # All features now mandatory
+    "fsspec>=2023.0.0",
+    "tomli>=2.0.0; python_version<'3.11'",
+    "tomli-w>=1.0.0",
+    "Textual>=8.2.0",
+    # Platform-specific mount drivers (only install where needed)
+    "fusepy>=1.0.0; sys_platform != 'win32'",
+    "winfspy>=2.0.0; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
-dev        = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "black", "ruff", "mypy"]
-vfs-fsspec = ["fsspec"]
-vfs-fuse   = ["fusepy"]
-vfs-win    = ["winfspy"]
-config     = ["tomli>=2.0.0; python_version<'3.11'", "tomli-w>=1.0.0"]
-tui        = ["Textual>=8.2.0"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "black", "ruff", "mypy"]
 
 [project.scripts]
 meret = "meret.cli.app:app"
