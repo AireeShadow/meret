@@ -1,3 +1,4 @@
+0.5.11 - verbose logger fix
 0.5.10 - various fixes
 0.5.9 - readme covers all commands, tui, mounting, config and logging; ls/open/stat/mount/umount registered in the cli again
 0.5.8 - logging: one log file in the user log dir, -v/--log-level, `meret logs`, traced repo calls, crash tracebacks in the log

@@ -1,6 +1,7 @@
 """Shared CLI dependencies: where the database lives and how to open it.
 
 Rule: no silent creation. No database means a loud error with a hint.
+
 Only `meret init` creates one (create=True).
 """
 
@@ -10,7 +11,6 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-
 import click
 from rich.console import Console
 
@@ -20,39 +20,39 @@ from meret.core.config import get_config
 
 DB_NAME = "meret.db"
 ENV_DB_PATH = "MERET_DB"
-
 #: backwards-compatible alias for the old name
 DEFAULT_DB_NAME = DB_NAME
 
 # stdout, not stderr: CliRunner.output reads exactly that
 _console = Console()
+
 logger = logging.getLogger(__name__)
 
 
 class DatabaseNotFound(Exception):
     """Database file not found."""
-    
+
     def __init__(self, path: Path):
         self.path = path
         super().__init__(f"database not found: {path}")
-    
+
     def _render(self) -> None:
         """Render error message - call explicitly when needed."""
         _console.print()
         _console.print("[bold red]✗ Database not found[/bold red]")
-        _console.print(f"  looked here: [yellow]{self.path}[/yellow]")
+        _console.print(f" looked here: [yellow]{self.path}[/yellow]")
         _console.print()
         _console.print("[dim]What to do:[/dim]")
-        _console.print("  • create a database in the current directory: [green]meret init[/green]")
-        _console.print("  • pass the path explicitly: [green]meret scan --db /path/to/meret.db ...[/green]")
-        _console.print("  • or set the environment variable: [green]MERET_DB=/path/to/meret.db[/green]")
+        _console.print(" • create a database in the current directory: [green]meret init[/green]")
+        _console.print(" • pass the path explicitly: [green]meret scan --db /path/to/meret.db ...[/green]")
+        _console.print(" • or set the environment variable: [green]MERET_DB=/path/to/meret.db[/green]")
         _console.print()
 
 
 def resolve_db_path(path: Optional[Path] = None) -> Path:
     """
     Resolve database path from CLI arg or config.
-    
+
     Priority:
     1. Explicit path argument
     2. Config paths.default_db
@@ -61,18 +61,21 @@ def resolve_db_path(path: Optional[Path] = None) -> Path:
     if path is not None:
         p = Path(path)
         if p.is_dir():
-            return p / "meret.db"
-        return p.expanduser().resolve()
-    
+            result = p / "meret.db"
+            logger.debug("db path from argument (directory) -> %s", result)
+            return result
+        result = p.expanduser().resolve()
+        logger.debug("db path from argument -> %s", result)
+        return result
+
     # Try config
     config = get_config()
     db_path = config.get("paths.default_db")
-    
     if db_path:
         resolved = Path(db_path).expanduser().resolve()
         logger.debug("db path from config paths.default_db -> %s", resolved)
         return resolved
-    
+
     # Default: current dir
     resolved = Path.cwd() / "meret.db"
     logger.debug("db path defaulted to the current directory -> %s", resolved)
@@ -85,13 +88,12 @@ def resolve_library_path(path: Optional[Path] = None) -> Optional[Path]:
     """
     if path is not None:
         return path.expanduser().resolve()
-    
+
     config = get_config()
     lib_path = config.get("paths.default_library")
-    
     if lib_path:
         return Path(lib_path).expanduser().resolve()
-    
+
     return None
 
 
@@ -100,6 +102,6 @@ def get_repo(db_path: Path | str | None = None, create: bool = False) -> SQLiteR
     if not resolved.exists() and not create:
         logger.warning("database not found: %s", resolved)
         exc = DatabaseNotFound(resolved)
-        exc._render() 
+        exc._render()
         raise exc
     return SQLiteRepository(str(resolved))
