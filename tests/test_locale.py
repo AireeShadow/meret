@@ -50,12 +50,15 @@ class TestLocaleManager:
         assert loc.language == "ru"
     
     def test_init_defaults_to_system_locale(self):
-        with patch("locale.getlocale", return_value=("en_US", "UTF-8")):
-            loc = LocaleManager()
-            assert loc.language == "en"
-    
-    def test_init_fallback_on_locale_error(self):
-        with patch("locale.getlocale", side_effect=AttributeError):
+        with patch("meret.core.locale.system_language", return_value="ru"):
+            assert LocaleManager().language == "ru"
+            assert LocaleManager("auto").language == "ru"  # the config's default
+
+    def test_init_fallback_on_locale_error(self, monkeypatch):
+        for var in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+            monkeypatch.delenv(var, raising=False)
+        with patch("meret.core.locale._language_from_windows", return_value=None), \
+                patch("locale.getlocale", side_effect=AttributeError):
             loc = LocaleManager()
             assert loc.language == "en"
     

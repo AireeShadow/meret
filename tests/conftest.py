@@ -18,6 +18,18 @@ pytest_plugins = ("pytest_asyncio",)
 
 
 @pytest.fixture(autouse=True)
+def english_and_isolated_config(tmp_path_factory, monkeypatch):
+    """Whatever this machine's language and config are, tests see English and a temp config."""
+    import meret.core.config as config_module
+    import meret.core.locale as locale_module
+
+    path = tmp_path_factory.mktemp("config") / "config.toml"
+    monkeypatch.setattr(config_module, "_config_instance", config_module.ConfigManager(path))
+    monkeypatch.setenv("LANGUAGE", "en")  # first thing system_language() looks at
+    monkeypatch.setattr(locale_module, "_locale_manager", None)
+
+
+@pytest.fixture(autouse=True)
 def clean_logger(tmp_path_factory, monkeypatch):
     """Logging is global: keep CLI logs out of the user's log dir, undo setup_logging()."""
     from meret.core.logger import ENV_FILE, ENV_LEVEL, _MARK

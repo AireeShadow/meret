@@ -197,9 +197,42 @@ The file is `config.toml` in your user config folder:
 | Linux | `~/.config/meret/config.toml` |
 | macOS | `~/Library/Application Support/meret/config.toml` |
 
-Currently only `paths.default_db` is used. The `scan`, `gui` and `locale` sections
-are stored but not read yet — use `scan`'s flags instead. `config set` needs the
-`[config]` extra (without `tomli-w` it can't write TOML).
+Currently `paths.default_db` and `locale.language` are used. The `scan` and `gui`
+sections (and `locale.date_format`) are stored but not read yet — use `scan`'s flags
+instead. `config set` needs the `[config]` extra (without `tomli-w` it can't write
+TOML).
+
+## Language
+
+Command output is available in English and Russian.
+
+```bash
+meret --lang ru scan ~/Media             # this run only (-l ru)
+meret config set locale.language ru      # from now on
+meret config set locale.language auto    # follow the system (the default)
+```
+
+The first match wins: `--lang`, then `locale.language` in the config, then the
+system language (`LANGUAGE`/`LC_ALL`/`LANG`, else the Windows display language),
+then English. An unknown language falls back to English. `--lang` goes before the
+command name. Not translated yet: help texts, the "database not found" hint, the
+virtual-FS commands (`ls`, `open`, `stat`, `mount`, `umount`) and the TUI.
+
+### Translating
+
+Translations are plain gettext catalogs, read directly — no compile step:
+`meret/locales/<lang>/LC_MESSAGES/messages.po`. To add a language, copy the Russian
+file, change `Language:` and `Plural-Forms:` in its header, and translate the
+`msgstr` lines. In code, keep markup and values out of the message:
+
+```python
+msg = _("Database created: {path}").format(path=db_file)
+console.print(f"[green]✓ {msg}[/green]")
+```
+
+`python scripts/extract_strings.py` lists every translatable string in
+`meret/locales/messages.pot`, and `tests/test_locale_catalog.py` fails if a message in
+the code is missing from a catalog or a translation changes its `{placeholders}`.
 
 ## Logging and debugging
 

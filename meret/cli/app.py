@@ -41,22 +41,22 @@ def main(
     verbose: bool = typer.Option(False, "--verbose", "-v"),
     log_level: Optional[str] = typer.Option(None, "--log-level"),
     language: Optional[str] = typer.Option(
-        None, "--lang", "-l", help="Language (en, ru, etc.)"
+        None, "--lang", "-l",
+        help="Language: en, ru, … (default: config locale.language, else the system's)",
     ),
 ):
     """Meret — tagged media file system."""
-    # Set locale early
-    if language:
-        set_locale(language)
-    
     try:
         path = setup_logging("DEBUG" if verbose else log_level, console=verbose)
     except ValueError as e:
         raise typer.BadParameter(str(e), param_hint="--log-level")
     log_uncaught_exceptions()
+
+    # after logging, so a missing or broken translation is reported in the log
+    lang = set_locale(language or get_config().get("locale.language")).language
     logger.info(
-        "meret %s: %s | argv=%s cwd=%s log=%s",
-        __version__, ctx.invoked_subcommand, sys.argv[1:], os.getcwd(), path,
+        "meret %s: %s | lang=%s argv=%s cwd=%s log=%s",
+        __version__, ctx.invoked_subcommand, lang, sys.argv[1:], os.getcwd(), path,
     )
 
 
@@ -88,20 +88,25 @@ def init(
 
     if db_file.exists():
         if not force:
-            console.print(f"[yellow]Database already exists: {db_file}[/yellow]")
+            msg = _("Database already exists: {path}").format(path=db_file)
+            console.print(f"[yellow]{msg}[/yellow]")
             raise typer.Exit(1)
         for suffix in ("", "-wal", "-shm"):
             Path(f"{db_file}{suffix}").unlink(missing_ok=True)
 
     get_repo(path, create=True)
-    console.print(f"[green]✓ " + _("Database created: {db_file}[/green]"))
+    msg = _("Database created: {path}").format(path=db_file)
+    console.print(f"[green]✓ {msg}[/green]")
 
 
 @app.command()
 def where(db_path: Optional[Path] = DB_OPTION):
     """Show which database meret sees."""
     path = resolve_db_path(db_path)
-    mark = "[green]✓ " + _("exists[/green]") if path.exists() else "[red]✗ " + _("missing[/red]")
+    if path.exists():
+        mark = f"[green]✓ {_('exists')}[/green]"
+    else:
+        mark = f"[red]✗ {_('missing')}[/red]"
     console.print(f"{path}  {mark}")
 
 
@@ -121,7 +126,7 @@ def scan(
 ):
     """Scan and index media."""
     if not library.exists():
-        console.print(f"[red]No such path: {library}[/red]")
+        console.print(f"[red]{_('No such path: {path}').format(path=library)}[/red]")
         raise typer.Exit(1)
 
     indexer = Indexer(get_repo(db_path), library, workers=workers, skip_existing=skip_existing)
@@ -134,9 +139,9 @@ def scan(
         console=console,
     ) as progress:
         tasks = {
-            PHASE_COLLECT: progress.add_task("Finding files", total=None),
-            PHASE_EXTRACT: progress.add_task("Reading metadata", total=None),
-            PHASE_INDEX: progress.add_task("Writing to database", total=None),
+            PHASE_COLLECT: progress.add_task(_("Finding files"), total=None),
+            PHASE_EXTRACT: progress.add_task(_("Reading metadata"), total=None),
+            PHASE_INDEX: progress.add_task(_("Writing to database"), total=None),
         }
 
         def on_progress(phase: str, done: int, total: int) -> None:
@@ -145,17 +150,21 @@ def scan(
         stats = indexer.run(dry_run=dry_run, progress_callback=on_progress)
 
     if stats.get("interrupted"):
-        console.print("[yellow]⚠ " + _("Interrupted by user[/yellow]"))
+        console.print(f"[yellow]⚠ {_('Interrupted by user')}[/yellow]")
 
     if dry_run:
-        console.print(f"[cyan]New files: {stats['found']}, skipped: {stats['skipped']}[/cyan]")
-    else:
-        console.print(
-            f"[green]✓ " + _("New: {stats['indexed']}, "),
-            f"updated: {stats['updated']}, "
-            f"skipped: {stats['skipped']}, "
-            f"errors: {stats['errors']}[/green]"
+        msg = _("New files: {found}, skipped: {skipped}").format(
+            found=stats["found"], skipped=stats["skipped"]
         )
+        console.print(f"[cyan]{msg}[/cyan]")
+    else:
+        msg = _("New: {new}, updated: {updated}, skipped: {skipped}, errors: {errors}").format(
+            new=stats["indexed"],
+            updated=stats["updated"],
+            skipped=stats["skipped"],
+            errors=stats["errors"],
+        )
+        console.print(f"[green]✓ {msg}[/green]")
 
 
 # ----- search -----
@@ -180,15 +189,15 @@ def search(
         results = repo.search_by_name(query) if query else []
 
     if not results:
-        console.print("[yellow]Nothing found[/yellow]")
+        console.print(f"[yellow]{_('Nothing found')}[/yellow]")
         return
 
-    table = Table(title=f"Found: {len(results)}")
+    table = Table(title=_("Found: {n}").format(n=len(results)))
     for col, style in (
-        ("File", "cyan"),
-        ("Type", "green"),
-        ("Rating", "yellow"),
-        ("Tags", "magenta"),
+        (_("File"), "cyan"),
+        (_("Type"), "green"),  # values stay as typed in --type: image, video, audio
+        (_("Rating"), "yellow"),
+        (_("Tags"), "magenta"),
     ):
         table.add_column(col, style=style)
 
@@ -207,7 +216,7 @@ def _print_tree(repo: AbstractRepository) -> None:
             child = node.add(f"{n.name} [dim]({n.usage_count})[/dim]")
             build(n.children, child)
 
-    root = Tree("[bold]Tags[/bold]")
+    root = Tree(f"[bold]{_('Tags')}[/bold]")
     build(repo.get_tag_tree(), root)
     console.print(root)
 
@@ -244,7 +253,8 @@ def tag(
     repo = get_repo(db_path)
     entry = repo.get_file_by_path(str(filepath))
     if not entry:
-        console.print(f"[red]File is not in the database: {filepath}[/red]")
+        msg = _("File is not in the database: {path}").format(path=filepath)
+        console.print(f"[red]{msg}[/red]")
         raise typer.Exit(1)
 
     done: List[str] = []
@@ -253,7 +263,7 @@ def tag(
             tagpaths.resolve(label, repo.get_all_tags()) if remove else _ensure_path(repo, label)
         )
         if found is None:
-            console.print(f"[yellow]No such path: {label}[/yellow]")
+            console.print(f"[yellow]{_('No such path: {path}').format(path=label)}[/yellow]")
             continue
         full = _path_of_tag(repo, found)
         if remove:
@@ -263,8 +273,10 @@ def tag(
         done.append(full)
 
     updated = repo.get_file_by_id(entry.id)
-    console.print(f"[green]✓ " + _("{'Removed' if remove else 'Added'}: {', '.join(done)}[/green]"))
-    console.print(f"[dim]Tags: {', '.join(_path_of(repo, n) for n in updated.labels) or '—'}[/dim]")
+    msg = (_("Removed: {tags}") if remove else _("Added: {tags}")).format(tags=", ".join(done))
+    console.print(f"[green]✓ {msg}[/green]")
+    current = ", ".join(_path_of(repo, n) for n in updated.labels) or "—"
+    console.print(f"[dim]{_('Tags: {tags}').format(tags=current)}[/dim]")
 
 
 @app.command("tag-new")
@@ -277,9 +289,10 @@ def tag_new(
     repo = get_repo(db_path)
     found = _ensure_path(repo, path, colour)
     if found is None:
-        console.print("[red]Empty path[/red]")
+        console.print(f"[red]{_('Empty path')}[/red]")
         raise typer.Exit(1)
-    console.print(f"[green]✓ " + _("Tag: {_path_of_tag(repo, found)}[/green]"))
+    msg = _("Tag: {path}").format(path=_path_of_tag(repo, found))
+    console.print(f"[green]✓ {msg}[/green]")
 
 
 @app.command("tag-del")
@@ -291,10 +304,10 @@ def tag_del(
     repo = get_repo(db_path)
     found = tagpaths.resolve(path, repo.get_all_tags())
     if found is None:
-        console.print(f"[red]No such path: {path}[/red]")
+        console.print(f"[red]{_('No such path: {path}').format(path=path)}[/red]")
         raise typer.Exit(1)
     repo.delete_tag(_path_of_tag(repo, found))
-    console.print(f"[green]✓ " + _("Deleted: {path}[/green]"))
+    console.print(f"[green]✓ {_('Deleted: {path}').format(path=path)}[/green]")
 
 
 @app.command()
@@ -309,14 +322,14 @@ def parent(
 
     node = tagpaths.resolve(child, tags)
     if node is None:
-        console.print(f"[red]No such path: {child}[/red]")
+        console.print(f"[red]{_('No such path: {path}').format(path=child)}[/red]")
         raise typer.Exit(1)
 
     target = None
     if new_parent is not None:
         target = tagpaths.resolve(new_parent, tags)
         if target is None:
-            console.print(f"[red]No such path: {new_parent}[/red]")
+            console.print(f"[red]{_('No such path: {path}').format(path=new_parent)}[/red]")
             raise typer.Exit(1)
 
     by_id = {t.id: t for t in tags}
@@ -325,7 +338,10 @@ def parent(
     walk = target
     while walk is not None:
         if walk.id == node.id:
-            console.print(f"[red]{new_parent} is inside {child} — would create a cycle[/red]")
+            msg = _("{parent} is inside {child} — would create a cycle").format(
+                parent=new_parent, child=child
+            )
+            console.print(f"[red]{msg}[/red]")
             raise typer.Exit(1)
         walk = by_id.get(walk.parent_id)
 
@@ -333,10 +349,10 @@ def parent(
     target_path = tagpaths.path_of(target, by_id) if target else None
 
     if not repo.set_tag_parent(node_path, target_path):
-        console.print("[red]Failed — possibly it would create a cycle[/red]")
+        console.print(f"[red]{_('Failed — possibly it would create a cycle')}[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[green]✓ " + _("{node_path} → {target_path or 'root'}[/green]"))
+    console.print(f"[green]✓ {node_path} → {target_path or _('root')}[/green]")
     _print_tree(repo)
 
 
@@ -346,12 +362,12 @@ def list_tags(db_path: Optional[Path] = DB_OPTION):
     repo = get_repo(db_path)
     usage = repo.get_tag_usage()
     if not usage:
-        console.print("[yellow]No tags yet[/yellow]")
+        console.print(f"[yellow]{_('No tags yet')}[/yellow]")
         return
     paths = tagpaths.name_to_path(repo.get_all_tags())
-    table = Table(title=f"Tags: {len(usage)}")
-    table.add_column("Path", style="magenta")
-    table.add_column("Files", style="cyan", justify="right")
+    table = Table(title=_("Tags: {count}").format(count=len(usage)))
+    table.add_column(_("Path"), style="magenta")
+    table.add_column(_("Files"), style="cyan", justify="right")
     for t in usage:
         table.add_row(paths.get(t.name.casefold(), t.name), str(t.usage_count))
     console.print(table)
@@ -367,7 +383,7 @@ def tree(db_path: Optional[Path] = DB_OPTION):
 def tag_prune(db_path: Optional[Path] = DB_OPTION):
     """Delete tags that have no files and no children."""
     n = get_repo(db_path).prune_orphan_tags()
-    console.print(f"[green]✓ " + _("Tags deleted: {n}[/green]"))
+    console.print(f"[green]✓ {_('Tags deleted: {n}').format(n=n)}[/green]")
 
 
 # ----- misc -----
@@ -377,7 +393,7 @@ def tag_prune(db_path: Optional[Path] = DB_OPTION):
 def stats(db_path: Optional[Path] = DB_OPTION):
     """Database statistics."""
     s = get_repo(db_path).get_stats()
-    console.print(f"Files: {s['total_files']}, tags: {s['total_tags']}")
+    console.print(_("Files: {files}, tags: {tags}").format(files=s["total_files"], tags=s["total_tags"]))
     for t, c in s["by_type"].items():
         console.print(f"  {t}: {c}")
 
@@ -392,7 +408,7 @@ def config_show():
     from rich.syntax import Syntax
     
     cfg = get_config()
-    console.print(f"[cyan]Config file:[/cyan] {cfg.config_path}")
+    console.print(f"[cyan]{_('Config file')}:[/cyan] {cfg.config_path}")
     
     # Get effective config as plain dict (not Pydantic models!)
     def to_plain(value):
@@ -421,7 +437,7 @@ def config_show():
         }),
         "scan": to_plain(raw_scan) if raw_scan else {"workers": 8, "chunk_size": 1000, "skip_existing": True},
         "gui": to_plain(raw_gui) if raw_gui else {"theme": "system", "thumbnail_size": 256, "window_width": 1280, "window_height": 720},
-        "locale": to_plain(raw_locale) if raw_locale else {"language": "en", "date_format": "%Y-%m-%d"},
+        "locale": to_plain(raw_locale) if raw_locale else {"language": "auto", "date_format": "%Y-%m-%d"},
     }
     
     # Try to render as TOML
@@ -450,7 +466,7 @@ def config_show():
         content = "\n".join(lines)
     
     if not cfg.config_path.exists():
-        console.print("[yellow](file does not exist - showing defaults)[/yellow]")
+        console.print(f"[yellow]{_('(file does not exist — showing defaults)')}[/yellow]")
     
     console.print()
     syntax = Syntax(content, "toml", theme="monokai", line_numbers=True)
@@ -464,7 +480,7 @@ def config_get(key: str = typer.Argument(..., help="Config key (e.g., scan.worke
     value = cfg.get(key)
     
     if value is None:
-        console.print(f"[yellow]Key '{key}' not found or is None[/yellow]")
+        console.print(f"[yellow]{_('Key {key!r} not found or is empty').format(key=key)}[/yellow]")
         raise typer.Exit(1)
     
     console.print(f"[cyan]{key}[/cyan] = [green]{value}[/green]")
@@ -480,10 +496,10 @@ def config_set(
     
     try:
         cfg.set(key, value)
-        console.print(f"[green]✓ " + _("Set {key} = {value}[/green]"))
+        console.print(f"[green]✓ {_('Set {key} = {value}').format(key=key, value=value)}[/green]")
     except Exception as e:
         logger.warning("config set %s=%r failed", key, value, exc_info=True)
-        console.print(f"[red]Failed to set {key}: {e}[/red]")
+        console.print(f"[red]{_('Failed to set {key}: {error}').format(key=key, error=e)}[/red]")
         raise typer.Exit(1)
 
 
@@ -516,11 +532,11 @@ window_width = 1280
 window_height = 720
 
 [locale]
-language = "en"
+language = "auto"
 date_format = "%Y-%m-%d"
 '''
         config_path.write_text(default_content, encoding="utf-8")
-        console.print(f"[yellow]Created default config[/yellow]")
+        console.print(f"[yellow]{_('Created default config')}[/yellow]")
     
     # Open in editor
     try:
@@ -536,10 +552,10 @@ date_format = "%Y-%m-%d"
         else:  # Linux
             subprocess.run(["xdg-open", str(config_path)], check=True)
             
-        console.print(f"[green]✓ " + _("Opened {config_path}[/green]"))
+        console.print(f"[green]✓ {_('Opened {path}').format(path=config_path)}[/green]")
     except Exception as e:
-        console.print(f"[red]Failed to open editor: {e}[/red]")
-        console.print(f"[dim]Path: {config_path}[/dim]")
+        console.print(f"[red]{_('Failed to open editor: {error}').format(error=e)}[/red]")
+        console.print(f"[dim]{_('Path: {path}').format(path=config_path)}[/dim]")
 
 @config_app.command("reset")
 def config_reset(
@@ -547,20 +563,23 @@ def config_reset(
 ):
     """Reset configuration to defaults."""
     if not force:
-        confirm = typer.confirm("Reset all settings to defaults?")
+        confirm = typer.confirm(_("Reset all settings to defaults?"))
         if not confirm:
             raise typer.Abort()
     
     cfg = get_config()
     cfg.reset()
-    console.print("[green]✓ " + _("Configuration reset to defaults[/green]"))
+    console.print(f"[green]✓ {_('Configuration reset to defaults')}[/green]")
 
 
 @config_app.command("path")
 def config_path():
     """Show configuration file path."""
     cfg = get_config()
-    exists = "[green](exists)[/green]" if cfg.config_path.exists() else "[yellow](will be created)[/yellow]"
+    if cfg.config_path.exists():
+        exists = f"[green]({_('exists')})[/green]"
+    else:
+        exists = f"[yellow]({_('will be created')})[/yellow]"
     console.print(f"{cfg.config_path} {exists}")
 
 @app.command("tui")
@@ -576,7 +595,9 @@ def tui(
         app.run()
     except Exception as e:
         logger.exception("TUI failed")
-        console.print(f"[red]TUI Error: {e}[/red] (details: meret logs)")
+        console.print(
+            f"[red]{_('TUI error: {error}').format(error=e)}[/red] ({_('details: meret logs')})"
+        )
         raise typer.Exit(1)
 
 # ls / open / stat / mount / umount register themselves on `app` (must come last:

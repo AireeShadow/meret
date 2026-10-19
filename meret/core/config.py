@@ -56,7 +56,8 @@ class GUIConfig(BaseModel):
 
 class LocaleConfig(BaseModel):
     """Localization settings."""
-    language: str = Field(default="en", pattern="^[a-z]{2}(-[A-Z]{2})?$")
+    # "auto" = the system language; `--lang` overrides either
+    language: str = Field(default="auto", pattern="^(auto|[a-z]{2}(-[A-Z]{2})?)$")
     date_format: str = Field(default="%Y-%m-%d")
 
 

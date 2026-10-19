@@ -354,3 +354,101 @@ msgid_plural "hours"
 msgstr[0] "час"
 msgstr[1] "часа"
 msgstr[2] "часов"
+
+# CLI output (meret/cli/app.py): whole sentences, markup stays in the code
+
+msgid "Database already exists: {path}"
+msgstr "База данных уже существует: {path}"
+
+msgid "Database created: {path}"
+msgstr "База данных создана: {path}"
+
+msgid "No such path: {path}"
+msgstr "Путь не существует: {path}"
+
+msgid "New files: {found}, skipped: {skipped}"
+msgstr "Новых файлов: {found}, пропущено: {skipped}"
+
+msgid "New: {new}, updated: {updated}, skipped: {skipped}, errors: {errors}"
+msgstr "Новых: {new}, обновлено: {updated}, пропущено: {skipped}, ошибок: {errors}"
+
+msgid "Found: {n}"
+msgstr "Найдено: {n}"
+
+msgid "File is not in the database: {path}"
+msgstr "Файл отсутствует в базе данных: {path}"
+
+msgid "Added: {tags}"
+msgstr "Добавлено: {tags}"
+
+msgid "Removed: {tags}"
+msgstr "Удалено: {tags}"
+
+msgid "Tags: {tags}"
+msgstr "Теги: {tags}"
+
+msgid "Tag: {path}"
+msgstr "Тег: {path}"
+
+msgid "Deleted: {path}"
+msgstr "Удалено: {path}"
+
+msgid "{parent} is inside {child} — would create a cycle"
+msgstr "{parent} находится внутри {child} — получился бы цикл"
+
+msgid "Failed — possibly it would create a cycle"
+msgstr "Не удалось — возможно, получился бы цикл"
+
+msgid "root"
+msgstr "корень"
+
+msgid "Tags: {count}"
+msgstr "Тегов: {count}"
+
+msgid "Path"
+msgstr "Путь"
+
+msgid "Files"
+msgstr "Файлы"
+
+msgid "Tags deleted: {n}"
+msgstr "Удалено тегов: {n}"
+
+msgid "Files: {files}, tags: {tags}"
+msgstr "Файлов: {files}, тегов: {tags}"
+
+msgid "(file does not exist — showing defaults)"
+msgstr "(файла нет — показаны значения по умолчанию)"
+
+msgid "Key {key!r} not found or is empty"
+msgstr "Ключ {key!r} не найден или пуст"
+
+msgid "Set {key} = {value}"
+msgstr "Установлено: {key} = {value}"
+
+msgid "Failed to set {key}: {error}"
+msgstr "Не удалось установить {key}: {error}"
+
+msgid "Created default config"
+msgstr "Создан файл конфигурации по умолчанию"
+
+msgid "Opened {path}"
+msgstr "Открыт {path}"
+
+msgid "Failed to open editor: {error}"
+msgstr "Не удалось открыть редактор: {error}"
+
+msgid "Path: {path}"
+msgstr "Путь: {path}"
+
+msgid "Reset all settings to defaults?"
+msgstr "Сбросить все настройки к значениям по умолчанию?"
+
+msgid "will be created"
+msgstr "будет создан"
+
+msgid "TUI error: {error}"
+msgstr "Ошибка TUI: {error}"
+
+msgid "details: meret logs"
+msgstr "подробности: meret logs"
