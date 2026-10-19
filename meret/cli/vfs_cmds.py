@@ -15,6 +15,7 @@ from rich.table import Table
 from meret.cli.app import app
 from meret.cli.deps import get_repo, DatabaseNotFound
 from meret.vfs import IsADirectory, NotFound, VirtualTree
+from meret.core.locale import _
 
 console = Console()
 

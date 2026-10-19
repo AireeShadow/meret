@@ -94,14 +94,14 @@ def init(
             Path(f"{db_file}{suffix}").unlink(missing_ok=True)
 
     get_repo(path, create=True)
-    console.print(f"[green]✓ Database created: {db_file}[/green]")
+    console.print(f"[green]✓ " + _("Database created: {db_file}[/green]"))
 
 
 @app.command()
 def where(db_path: Optional[Path] = DB_OPTION):
     """Show which database meret sees."""
     path = resolve_db_path(db_path)
-    mark = "[green]✓ exists[/green]" if path.exists() else "[red]✗ missing[/red]"
+    mark = "[green]✓ " + _("exists[/green]") if path.exists() else "[red]✗ " + _("missing[/red]")
     console.print(f"{path}  {mark}")
 
 
@@ -145,13 +145,13 @@ def scan(
         stats = indexer.run(dry_run=dry_run, progress_callback=on_progress)
 
     if stats.get("interrupted"):
-        console.print("[yellow]⚠ Interrupted by user[/yellow]")
+        console.print("[yellow]⚠ " + _("Interrupted by user[/yellow]"))
 
     if dry_run:
         console.print(f"[cyan]New files: {stats['found']}, skipped: {stats['skipped']}[/cyan]")
     else:
         console.print(
-            f"[green]✓ New: {stats['indexed']}, "
+            f"[green]✓ " + _("New: {stats['indexed']}, "),
             f"updated: {stats['updated']}, "
             f"skipped: {stats['skipped']}, "
             f"errors: {stats['errors']}[/green]"
@@ -263,7 +263,7 @@ def tag(
         done.append(full)
 
     updated = repo.get_file_by_id(entry.id)
-    console.print(f"[green]✓ {'Removed' if remove else 'Added'}: {', '.join(done)}[/green]")
+    console.print(f"[green]✓ " + _("{'Removed' if remove else 'Added'}: {', '.join(done)}[/green]"))
     console.print(f"[dim]Tags: {', '.join(_path_of(repo, n) for n in updated.labels) or '—'}[/dim]")
 
 
@@ -279,7 +279,7 @@ def tag_new(
     if found is None:
         console.print("[red]Empty path[/red]")
         raise typer.Exit(1)
-    console.print(f"[green]✓ Tag: {_path_of_tag(repo, found)}[/green]")
+    console.print(f"[green]✓ " + _("Tag: {_path_of_tag(repo, found)}[/green]"))
 
 
 @app.command("tag-del")
@@ -294,7 +294,7 @@ def tag_del(
         console.print(f"[red]No such path: {path}[/red]")
         raise typer.Exit(1)
     repo.delete_tag(_path_of_tag(repo, found))
-    console.print(f"[green]✓ Deleted: {path}[/green]")
+    console.print(f"[green]✓ " + _("Deleted: {path}[/green]"))
 
 
 @app.command()
@@ -336,7 +336,7 @@ def parent(
         console.print("[red]Failed — possibly it would create a cycle[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[green]✓ {node_path} → {target_path or 'root'}[/green]")
+    console.print(f"[green]✓ " + _("{node_path} → {target_path or 'root'}[/green]"))
     _print_tree(repo)
 
 
@@ -367,7 +367,7 @@ def tree(db_path: Optional[Path] = DB_OPTION):
 def tag_prune(db_path: Optional[Path] = DB_OPTION):
     """Delete tags that have no files and no children."""
     n = get_repo(db_path).prune_orphan_tags()
-    console.print(f"[green]✓ Tags deleted: {n}[/green]")
+    console.print(f"[green]✓ " + _("Tags deleted: {n}[/green]"))
 
 
 # ----- misc -----
@@ -392,13 +392,68 @@ def config_show():
     from rich.syntax import Syntax
     
     cfg = get_config()
-    # Dump as TOML-like format
-    import json
-    content = json.dumps(cfg.config.model_dump(), indent=2, ensure_ascii=False)
-    
     console.print(f"[cyan]Config file:[/cyan] {cfg.config_path}")
+    
+    # Get effective config as plain dict (not Pydantic models!)
+    def to_plain(value):
+        """Convert Pydantic models and other objects to plain Python types."""
+        if value is None:
+            return ""  # TOML doesn't have null, use empty string
+        if hasattr(value, "model_dump"):
+            return {k: to_plain(v) for k, v in value.model_dump().items()}
+        if hasattr(value, "dict"):  # older Pydantic
+            return {k: to_plain(v) for k, v in value.dict().items()}
+        if isinstance(value, dict):
+            return {k: to_plain(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [to_plain(v) for v in value]
+        return value
+    
+    # Get raw values and convert
+    raw_scan = cfg.get("scan")
+    raw_gui = cfg.get("gui")
+    raw_locale = cfg.get("locale")
+    
+    config_dict = {
+        "paths": to_plain({
+            "default_db": cfg.get("paths.default_db"),
+            "default_library": cfg.get("paths.default_library"),
+        }),
+        "scan": to_plain(raw_scan) if raw_scan else {"workers": 8, "chunk_size": 1000, "skip_existing": True},
+        "gui": to_plain(raw_gui) if raw_gui else {"theme": "system", "thumbnail_size": 256, "window_width": 1280, "window_height": 720},
+        "locale": to_plain(raw_locale) if raw_locale else {"language": "en", "date_format": "%Y-%m-%d"},
+    }
+    
+    # Try to render as TOML
+    try:
+        import tomli_w
+        content = tomli_w.dumps(config_dict)
+    except ImportError:
+        # Fallback: manual TOML-like formatting
+        lines = []
+        for section, values in config_dict.items():
+            lines.append(f"[{section}]")
+            for key, val in values.items():
+                if val == "" or val is None:
+                    lines.append(f'{key} = ""')
+                elif isinstance(val, bool):
+                    lines.append(f"{key} = {str(val).lower()}")
+                elif isinstance(val, (int, float)):
+                    lines.append(f"{key} = {val}")
+                elif isinstance(val, str):
+                    # Escape special chars in strings
+                    escaped = val.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+                    lines.append(f'{key} = "{escaped}"')
+                else:
+                    lines.append(f'{key} = "{val}"')
+            lines.append("")
+        content = "\n".join(lines)
+    
+    if not cfg.config_path.exists():
+        console.print("[yellow](file does not exist - showing defaults)[/yellow]")
+    
     console.print()
-    syntax = Syntax(content, "json", theme="monokai", line_numbers=False)
+    syntax = Syntax(content, "toml", theme="monokai", line_numbers=True)
     console.print(syntax)
 
 
@@ -425,7 +480,7 @@ def config_set(
     
     try:
         cfg.set(key, value)
-        console.print(f"[green]✓ Set {key} = {value}[/green]")
+        console.print(f"[green]✓ " + _("Set {key} = {value}[/green]"))
     except Exception as e:
         logger.warning("config set %s=%r failed", key, value, exc_info=True)
         console.print(f"[red]Failed to set {key}: {e}[/red]")
@@ -435,10 +490,56 @@ def config_set(
 @config_app.command("edit")
 def config_edit():
     """Open config file in default editor."""
+    from meret.core.config import get_config, CONFIG_FILENAME
+    
     cfg = get_config()
-    cfg.edit()
-    console.print(f"[green]✓ Opened {cfg.config_path}[/green]")
+    config_path = cfg.config_path
+    
+    # Ensure directory exists
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Create file with defaults if it doesn't exist or is empty
+    if not config_path.exists() or config_path.stat().st_size < 10:
+        default_content = '''[paths]
+default_db = ""
+default_library = ""
 
+[scan]
+workers = 8
+chunk_size = 1000
+skip_existing = true
+
+[gui]
+theme = "system"
+thumbnail_size = 256
+window_width = 1280
+window_height = 720
+
+[locale]
+language = "en"
+date_format = "%Y-%m-%d"
+'''
+        config_path.write_text(default_content, encoding="utf-8")
+        console.print(f"[yellow]Created default config[/yellow]")
+    
+    # Open in editor
+    try:
+        import os
+        import platform
+        import subprocess
+        
+        system = platform.system()
+        if system == "Windows":
+            os.startfile(str(config_path))
+        elif system == "Darwin":  # macOS
+            subprocess.run(["open", str(config_path)], check=True)
+        else:  # Linux
+            subprocess.run(["xdg-open", str(config_path)], check=True)
+            
+        console.print(f"[green]✓ " + _("Opened {config_path}[/green]"))
+    except Exception as e:
+        console.print(f"[red]Failed to open editor: {e}[/red]")
+        console.print(f"[dim]Path: {config_path}[/dim]")
 
 @config_app.command("reset")
 def config_reset(
@@ -452,7 +553,7 @@ def config_reset(
     
     cfg = get_config()
     cfg.reset()
-    console.print("[green]✓ Configuration reset to defaults[/green]")
+    console.print("[green]✓ " + _("Configuration reset to defaults[/green]"))
 
 
 @config_app.command("path")
