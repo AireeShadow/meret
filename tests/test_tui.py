@@ -275,13 +275,12 @@ class TestMeretApp:
         keys = [b.key for b in bindings]
         assert "q" in keys  # quit
         assert ":" in keys  # command palette
-        assert "o" in keys  # open
         assert "s" in keys  # scan
         assert "t" in keys  # tag
         assert "r" in keys  # refresh
         assert "m" in keys  # mount
         assert "U" in keys  # umount
-        assert "v" in keys  # select drive (Windows)
+        assert "D" in keys  # select drive (Windows)
         assert "S" in keys  # sort
     
     @pytest.mark.asyncio
@@ -330,3 +329,269 @@ class TestMountActions:
         """Unmount action handles missing path gracefully."""
         app = MeretApp(tmp_path)
         # Should not raise
+
+# ---------- real-FS panel: '..', sorting, layout ----------
+
+
+async def _wait_for(pilot, cond, timeout: float = 5.0) -> None:
+    """DirectoryTree loads in a worker — poll instead of guessing a delay."""
+    for _ in range(int(timeout / 0.05)):
+        await pilot.pause(0.05)
+        if cond():
+            return
+    raise AssertionError("condition not met in time")
+
+
+def _rows(tree):
+    return [(type(c.data).__name__, str(c.label)) for c in tree.root.children]
+
+
+@pytest.fixture
+def fs_app(tmp_path: Path):
+    """App opened at <tmp>/a/b with a couple of files and a DB next to them."""
+    from meret.core.sqlite_repo import SQLiteRepository
+
+    base = tmp_path.resolve()
+    (base / "a" / "b" / "sub").mkdir(parents=True)
+    (base / "a" / "b" / "big.txt").write_text("x" * 500)
+    (base / "a" / "b" / "small.txt").write_text("x")
+    (base / "a" / "y.txt").write_text("y")
+    (base / "empty").mkdir()
+
+    db = base / "meret.db"
+    repo = SQLiteRepository(str(db))
+    f = repo.save_file(FileEntry(filename="big.txt", filepath=str(base / "a" / "b" / "big.txt"),
+                                 type=FileType.IMAGE))
+    repo.add_tag(f, "travel")
+
+    app = MeretApp(db)
+    app.fs_root = base / "a" / "b"
+    return app, base
+
+
+class TestRealPanel:
+    @pytest.mark.asyncio
+    async def test_virtual_panel_sits_next_to_real_panel(self, fs_app):
+        from textual.containers import Horizontal
+
+        app, _ = fs_app
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause()
+            assert app.virt_tree.parent is app.query_one(Horizontal)
+            real, virt = app.real_tree.region, app.virt_tree.region
+            assert virt.x >= real.right and virt.y == real.y
+            # preview and path bar must fit on screen under the panels
+            assert app.path_bar.region.bottom <= 40
+            await _wait_for(pilot, lambda: len(app.virt_tree.root.children) > 0)
+            assert [str(c.label) for c in app.virt_tree.root.children] == ["travel/"]
+
+    @pytest.mark.asyncio
+    async def test_parent_row_is_first(self, fs_app):
+        from meret.cli.tui import ParentEntry
+
+        app, base = fs_app
+        async with app.run_test() as pilot:
+            tree = app.real_tree
+            await _wait_for(pilot, lambda: len(tree.root.children) > 0)
+            up = tree.root.children[0]
+            assert isinstance(up.data, ParentEntry)
+            assert up.data.path == base / "a"
+            assert not up.allow_expand  # Enter must not expand the parent inside the tree
+            assert _rows(tree)[1:] == [
+                ("DirEntry", "sub"),
+                ("DirEntry", "big.txt"),
+                ("DirEntry", "small.txt"),
+            ]
+
+    @pytest.mark.asyncio
+    async def test_enter_on_parent_row_goes_up(self, fs_app):
+        app, base = fs_app
+        async with app.run_test() as pilot:
+            tree = app.real_tree
+            await _wait_for(pilot, lambda: len(tree.root.children) > 0)
+
+            tree.focus()
+            tree.move_cursor(tree.root.children[0])
+            await pilot.press("enter")
+            await _wait_for(pilot, lambda: Path(tree.path) == base / "a")
+
+            assert app.fs_root == base / "a"
+            assert app.real_tree is tree  # same widget, no remount
+            assert "Real Filesystem" in str(tree.border_title)
+            await _wait_for(pilot, lambda: ("DirEntry", "b") in _rows(tree))
+
+    @pytest.mark.asyncio
+    async def test_backspace_goes_up(self, fs_app):
+        app, base = fs_app
+        async with app.run_test() as pilot:
+            await _wait_for(pilot, lambda: len(app.real_tree.root.children) > 0)
+            app.real_tree.focus()
+            await pilot.press("backspace")
+            await _wait_for(pilot, lambda: Path(app.real_tree.path) == base / "a")
+
+    @pytest.mark.asyncio
+    async def test_parent_row_in_empty_folder(self, fs_app):
+        app, base = fs_app
+        app.fs_root = base / "empty"
+        async with app.run_test() as pilot:
+            tree = app.real_tree
+            await _wait_for(pilot, lambda: len(tree.root.children) > 0)
+            assert _rows(tree) == [("ParentEntry", "..")]
+
+    @pytest.mark.asyncio
+    async def test_sort_by_size_keeps_folders_first(self, fs_app):
+        app, base = fs_app
+        async with app.run_test() as pilot:
+            tree = app.real_tree
+            await _wait_for(pilot, lambda: len(tree.root.children) > 0)
+            app.sort_by = "size"
+            app._refresh_fs_tree()
+            await _wait_for(pilot, lambda: _rows(tree)[-1] == ("DirEntry", "big.txt"))
+            assert [label for _, label in _rows(tree)] == ["..", "sub", "small.txt", "big.txt"]
+            assert "size" in str(tree.border_title)
+
+    @pytest.mark.asyncio
+    async def test_selecting_real_file_selects_and_opens(self, fs_app):
+        app, base = fs_app
+        opened = []
+        app.action_open_file = lambda: opened.append(app.selected_real)
+        async with app.run_test() as pilot:
+            tree = app.real_tree
+            await _wait_for(pilot, lambda: len(tree.root.children) > 0)
+            tree.focus()
+            big = next(c for c in tree.root.children if str(c.label) == "big.txt")
+            tree.move_cursor(big)
+            await pilot.press("enter")
+            await _wait_for(pilot, lambda: opened)
+            assert opened == [base / "a" / "b" / "big.txt"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not __import__("sys").platform.startswith("win"), reason="Windows only")
+    async def test_drive_root_has_no_parent_row_and_up_picks_drive(self, fs_app):
+        app, _ = fs_app
+        app.fs_root = Path(Path.home().anchor)  # C:\
+        async with app.run_test() as pilot:
+            tree = app.real_tree
+            await _wait_for(pilot, lambda: len(tree.root.children) > 0)
+            assert all(kind != "ParentEntry" for kind, _ in _rows(tree))
+
+            tree.focus()
+            await pilot.press("backspace")
+            await _wait_for(pilot, lambda: isinstance(app.screen, DriveSelector))
+
+
+# ---------- bindings, command palette, delete tag ----------
+
+
+def test_every_binding_has_an_action():
+    """A binding to a missing action fails silently — catch typos like 'unmount'."""
+    for binding in MeretApp.BINDINGS:
+        name = binding.action.split("(")[0]
+        assert hasattr(MeretApp, f"action_{name}"), f"{binding.key!r} -> missing action_{name}"
+
+
+def test_every_palette_command_dispatches(monkeypatch):
+    """Each palette entry reaches a real action (untag is the one not built yet)."""
+    app = MeretApp(Path("."))
+    called = []
+    for cmd, _ in CommandPalette().commands:
+        if cmd == "untag":
+            continue
+        app.notify = lambda msg, **kw: called.append(("notify", msg))
+        before = len(called)
+        names = {
+            "scan": "action_scan", "search": "action_search", "tag": "action_tag",
+            "init": "action_init_db", "config": "action_config", "stats": "action_stats",
+            "tree": "action_tree", "prune": "action_prune", "mount": "action_mount",
+            "umount": "action_umount",
+        }
+        monkeypatch.setattr(app, names[cmd], lambda c=cmd: called.append(c))
+        app.run_command(cmd)
+        assert called[before:] == [cmd]
+
+
+def test_palette_matches_rank_exact_and_prefix_first():
+    palette = CommandPalette()
+    assert palette._matches("tree")[0] == "tree"
+    assert palette._matches("un")[0] == "untag"
+    assert palette._matches("")[: 2] == ["scan", "search"]
+
+
+class TestCommandPaletteFlow:
+    @pytest.mark.asyncio
+    async def test_typed_command_runs_on_enter(self, fs_app):
+        app, _ = fs_app
+        got = []
+        app.run_command = got.append
+        async with app.run_test() as pilot:
+            await pilot.press(":")
+            await pilot.press(*"tree", "enter")
+            await _wait_for(pilot, lambda: got)
+            assert got == ["tree"]
+
+    @pytest.mark.asyncio
+    async def test_picked_command_runs(self, fs_app):
+        app, _ = fs_app
+        got = []
+        app.run_command = got.append
+        async with app.run_test() as pilot:
+            await pilot.press(":")
+            await pilot.press(*"stat")  # filters the list down to 'stats'
+            await pilot.press("tab", "enter")
+            await _wait_for(pilot, lambda: got)
+            assert got == ["stats"]
+
+
+class TestDeleteTag:
+    async def _cursor_on_travel(self, app, pilot):
+        tree = app.virt_tree
+        await _wait_for(pilot, lambda: len(tree.root.children) > 0)
+        tree.focus()
+        tree.move_cursor(tree.root.children[0])
+        await pilot.pause()
+
+    @pytest.mark.asyncio
+    async def test_delete_after_confirmation(self, fs_app):
+        from meret.cli.tui import ConfirmDialog
+        from meret.core.sqlite_repo import SQLiteRepository
+
+        app, base = fs_app
+        async with app.run_test() as pilot:
+            await self._cursor_on_travel(app, pilot)
+            await pilot.press("d")
+            await _wait_for(pilot, lambda: isinstance(app.screen, ConfirmDialog))
+            await pilot.press("y")
+            await _wait_for(pilot, lambda: not isinstance(app.screen, ConfirmDialog))
+
+        assert SQLiteRepository(str(base / "meret.db")).get_all_tags() == []
+
+    @pytest.mark.asyncio
+    async def test_delete_cancelled_keeps_tag(self, fs_app):
+        from meret.cli.tui import ConfirmDialog
+        from meret.core.sqlite_repo import SQLiteRepository
+
+        app, base = fs_app
+        async with app.run_test() as pilot:
+            await self._cursor_on_travel(app, pilot)
+            await pilot.press("d")
+            await _wait_for(pilot, lambda: isinstance(app.screen, ConfirmDialog))
+            await pilot.press("enter")  # Enter is NOT a yes
+            await pilot.press("n")
+            await _wait_for(pilot, lambda: not isinstance(app.screen, ConfirmDialog))
+
+        names = [t.name for t in SQLiteRepository(str(base / "meret.db")).get_all_tags()]
+        assert names == ["travel"]
+
+    @pytest.mark.asyncio
+    async def test_delete_on_root_only_warns(self, fs_app):
+        from meret.cli.tui import ConfirmDialog
+
+        app, _ = fs_app
+        async with app.run_test() as pilot:
+            tree = app.virt_tree
+            await _wait_for(pilot, lambda: len(tree.root.children) > 0)
+            tree.focus()
+            tree.move_cursor(tree.root)
+            await pilot.press("d")
+            await pilot.pause(0.2)
+            assert not isinstance(app.screen, ConfirmDialog)

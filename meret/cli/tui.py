@@ -32,8 +32,10 @@ from textual.widgets import (
     Button,
     OptionList,
 )
+from textual.widgets.directory_tree import DirEntry
 
 from meret.cli.deps import get_repo, resolve_db_path, DatabaseNotFound
+from meret.core import tagpaths
 from meret.core.models import FileEntry, FileType
 from meret.vfs import VirtualTree, NotFound
 
@@ -243,6 +245,27 @@ class SearchScreen(ModalScreen[list[FileEntry]]):
             self.dismiss(self.results[idx])
 
 
+class ConfirmDialog(ModalScreen[bool]):
+    """Yes/no question. Only 'y' confirms: Enter is too easy to hit by accident."""
+
+    BINDINGS = [
+        Binding("y", "answer(True)", "Yes"),
+        Binding("n", "answer(False)", "No"),
+        Binding("escape", "answer(False)", "No"),
+    ]
+
+    def __init__(self, question: str):
+        super().__init__()
+        self.question = question
+
+    def compose(self) -> ComposeResult:
+        yield Label(self.question)
+        yield Label("[dim]y = yes, n / Esc = no[/dim]")
+
+    def action_answer(self, yes: bool) -> None:
+        self.dismiss(yes)
+
+
 class InputDialog(ModalScreen[str]):
     """Generic input dialog."""
     
@@ -267,9 +290,8 @@ class CommandPalette(ModalScreen[str]):
     
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),
-        Binding("enter", "select", "Select"),
     ]
-    
+
     def __init__(self):
         super().__init__()
         self.commands = [
@@ -286,27 +308,37 @@ class CommandPalette(ModalScreen[str]):
             ("umount", "Unmount filesystem"),
         ]
     
+    def _matches(self, query: str) -> list[str]:
+        """Commands for the typed text: exact, then name prefix, then anywhere."""
+        query = query.strip().lower()
+        hits = [cmd for cmd, desc in self.commands if query in cmd or query in desc.lower()]
+        return sorted(hits, key=lambda cmd: (cmd != query, not cmd.startswith(query)))
+
+    def _items(self, query: str = "") -> list[ListItem]:
+        # the command lives in ListItem.name — str(Label) is just "Label()"
+        descs = dict(self.commands)
+        return [ListItem(Label(f"{cmd:<15} {descs[cmd]}"), name=cmd) for cmd in self._matches(query)]
+
     def compose(self) -> ComposeResult:
         yield Input(placeholder="Type command...", id="cmd_input")
-        yield ListView(
-            *[ListItem(Label(f"{cmd:<15} {desc}")) for cmd, desc in self.commands],
-            id="cmd_list"
-        )
-    
-    def on_input_changed(self, event: Input.Changed):
+        yield ListView(*self._items(), id="cmd_list")
+
+    async def on_input_changed(self, event: Input.Changed):
         """Filter commands based on input."""
         list_view = self.query_one("#cmd_list", ListView)
-        list_view.clear()
-        query = event.value.lower()
-        for cmd, desc in self.commands:
-            if query in cmd.lower() or query in desc.lower():
-                list_view.append(ListItem(Label(f"{cmd:<15} {desc}")))
-    
+        items = self._items(event.value)
+        await list_view.clear()
+        await list_view.extend(items)
+        list_view.index = 0 if items else None  # clear() drops the highlight; Enter needs one
+
+    def on_input_submitted(self, event: Input.Submitted):
+        """Enter in the input runs the best match."""
+        matches = self._matches(event.value)
+        self.dismiss(matches[0] if matches else None)
+
     def on_list_view_selected(self, event: ListView.Selected):
         """Handle command selection."""
-        label = str(event.item.children[0])
-        cmd = label.split()[0]
-        self.dismiss(cmd)
+        self.dismiss(event.item.name)
 
 
 class MeretApp(App):
@@ -317,7 +349,7 @@ class MeretApp(App):
     
     Horizontal {
         width: 100%;
-        height: 100%;
+        height: 1fr;  /* what's left after preview/path bar — 100% pushed them off-screen */
     }
     
     DirectoryTree {
@@ -379,7 +411,7 @@ class MeretApp(App):
         Binding("backspace", "go_up", "Up"),
         Binding("S", "sort_files", "Sort"),
         Binding("m", "mount", "Mount"),
-        Binding("U", "unmount", "unmount"),
+        Binding("U", "umount", "Unmount"),
         Binding("D", "select_drive", "Select Drive"),  # Windows only
         Binding("/", "search", "Search"),
         Binding("?", "help", "Help"),
@@ -399,8 +431,8 @@ class MeretApp(App):
         yield Header(show_clock=True)
         
         with Horizontal():
-            # Left panel: Real filesystem - start from home for full navigation
-            self.real_tree = DirectoryTree(self.fs_root)
+            # Left panel: Use SortedDirectoryTree from start!
+            self.real_tree = SortedDirectoryTree(self.fs_root, sort_by=self.sort_by, reverse=self.sort_reverse)
             self.real_tree.border_title = f"Real Filesystem ({self.fs_root})"
             yield self.real_tree
             
@@ -419,22 +451,19 @@ class MeretApp(App):
         yield Footer()
     
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected):
-        """Handle real file selection."""
-        if '..' in str(event.node.label):
-            self.action_go_up()
-            return
+        """Handle real file selection: Enter/click opens it."""
         self.selected_real = event.path
         self.selected_virtual = None
         self.preview.update_preview(event.path, is_virtual=False)
         self._update_path_bar()
-    
+        self.action_open_file()
+
     def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected):
         """Handle real directory selection."""
-        # Check for '..' by label
-        if '..' in str(event.node.label) or '⬆️' in str(event.node.label):
+        if isinstance(event.node.data, ParentEntry):  # the '..' row
             self.action_go_up()
             return
-        
+
         # Regular directory
         self.selected_real = event.path
         self.selected_virtual = None
@@ -456,19 +485,6 @@ class MeretApp(App):
             node_label = str(event.node.label)
             if not event.node.allow_expand and not node_label.endswith("/"):
                 self.action_open_file()
-
-    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected):
-        """Handle real file selection."""
-        if event.path.name == '..' or (hasattr(self, '_up_selected') and self._up_selected):
-            self._up_selected = False
-            self.action_go_up()
-        return
-        self.selected_real = event.path
-        self.selected_virtual = None
-        self.preview.update_preview(event.path, is_virtual=False)
-        self._update_path_bar()
-        
-        self.action_open_file()
 
     def action_select_or_open(self):
         """Enter on file opens it, on dir expands it."""
@@ -500,17 +516,24 @@ class MeretApp(App):
         self.push_screen(CommandPalette(), on_command)
     
     def run_command(self, cmd: str):
-        """Execute meret command."""
-        if cmd == "scan":
-            self.action_scan()
-        elif cmd == "search":
-            self.action_search()
-        elif cmd == "stats":
-            self.action_stats()
-        elif cmd == "tree":
-            self.action_tree()
-        elif cmd == "config":
-            self.action_config()
+        """Execute a command picked in the palette."""
+        actions = {
+            "scan": self.action_scan,
+            "search": self.action_search,
+            "tag": self.action_tag,
+            "init": self.action_init_db,
+            "config": self.action_config,
+            "stats": self.action_stats,
+            "tree": self.action_tree,
+            "prune": self.action_prune,
+            "mount": self.action_mount,
+            "umount": self.action_umount,
+        }
+        action = actions.get(cmd)
+        if action is None:
+            self.notify(f"'{cmd}' isn't available in the TUI yet", severity="warning")
+            return
+        action()
     
     def action_scan(self):
         """Scan current directory."""
@@ -603,6 +626,64 @@ class MeretApp(App):
         except DatabaseNotFound:
             self.notify("No database!", severity="error")
     
+    def action_tree(self):
+        """The tag tree is the virtual panel: reload it and move focus there."""
+        self.virt_tree._load_tree()
+        self.virt_tree.focus()
+
+    def action_prune(self):
+        """Remove tags that have no files and no subtags."""
+        try:
+            removed = get_repo(self.db_path).prune_orphan_tags()
+        except DatabaseNotFound:
+            self.notify("No database!", severity="error")
+            return
+        self.virt_tree._load_tree()
+        self.notify(f"Removed {removed} unused tag(s)")
+
+    def action_delete(self):
+        """Delete the tag under the cursor in the virtual panel, after confirmation.
+
+        Files are untouched; the tag's subtags move up to its parent.
+        """
+        vpath = None
+        if self.focused is self.virt_tree and self.virt_tree.cursor_node is not None:
+            vpath = self.virt_tree.cursor_node.data
+        vpath = vpath or self.selected_virtual
+        if not vpath:
+            self.notify("Select a tag folder in the virtual panel first", severity="warning")
+            return
+
+        try:
+            repo = get_repo(self.db_path)
+            node = VirtualTree(repo).stat(vpath)
+        except (DatabaseNotFound, NotFound) as e:
+            self.notify(f"Error: {e}", severity="error")
+            return
+        if not node.is_dir or node.tag_id is None:
+            self.notify("Select a tag folder (not a file or the root)", severity="warning")
+            return
+
+        # the vpath shows sanitized names — delete by the tag's real path
+        by_id = {t.id: t for t in repo.get_all_tags()}
+        path = tagpaths.path_of(by_id[node.tag_id], by_id)
+
+        def on_answer(yes: bool | None):
+            if not yes:
+                return
+            try:
+                repo.delete_tag(path)
+            except Exception as e:  # e.g. a subtag clashes with a same-named sibling
+                self.notify(f"Error: {e}", severity="error")
+                return
+            self.selected_virtual = None
+            self.virt_tree._load_tree()
+            self.notify(f"Deleted tag {path}")
+
+        self.push_screen(
+            ConfirmDialog(f"Delete tag '{path}'? Files stay; its subtags move up."), on_answer
+        )
+
     def action_config(self):
         """Open config editor."""
         subprocess.run(["meret", "config", "edit"])
@@ -626,17 +707,15 @@ class MeretApp(App):
     
     def action_go_up(self):
         """Go to parent directory."""
-        # Check if we're at Windows drive root (e.g., C:\)
-        if platform.system() == "Windows":
-            # If at root of drive (C:\), show drive selector
-            if self.fs_root == self.fs_root.anchor:  # e.g., C:\ 
+        here = self.fs_root.expanduser().resolve()
+        if here.parent == here:
+            # root of a drive (C:\) or of the filesystem: on Windows pick another drive
+            if platform.system() == "Windows":
                 self.action_select_drive()
-                return
-        
-        parent = self.fs_root.parent
-        if parent.exists() and str(parent) != str(self.fs_root):
-            self.fs_root = parent
-            self._refresh_fs_tree()
+            return
+
+        self.fs_root = here.parent
+        self._refresh_fs_tree()
 
     def action_sort_files(self):
         """Toggle sort mode."""
@@ -663,48 +742,45 @@ class MeretApp(App):
         self.push_screen(DriveSelector(), on_drive_selected)
 
     def _refresh_fs_tree(self):
-        """Refresh with sorting."""
+        """Point the real-FS panel at fs_root with the current sort mode.
+
+        The same widget is reused: setting `path` makes DirectoryTree reload
+        (always_update=True, so a sort change on the same folder reloads too).
+        """
         if not hasattr(self, 'real_tree'):
-            return 
-        # Remove old tree
-        self.real_tree.remove()
-        
-        # Create new tree with custom sorting
-        new_tree = SortedDirectoryTree(
-            self.fs_root, 
-            sort_by=self.sort_by,
-            reverse=self.sort_reverse
-        )
-        new_tree.border_title = f"Real Filesystem ({self.fs_root}) [{self.sort_by}]"
-        
-        horizontal = self.query_one(Horizontal)
-        horizontal.mount(new_tree, before=self.virt_tree)
-        self.real_tree = new_tree
+            return
+
+        self.real_tree.sort_by = self.sort_by
+        self.real_tree.reverse = self.sort_reverse
+        # not "[name]": border titles are markup, so square brackets would vanish
+        self.real_tree.border_title = f"Real Filesystem ({self.fs_root}) · {self.sort_by}"
+        self.real_tree.path = self.fs_root
         self.real_tree.focus()
     
     def action_help(self):
         """Show help."""
         help_text = """
         [b]Meret TUI Help[/b]
-        
+
         [green]Navigation:[/green]
-        ↑/↓ or j/k    Navigate
-        Enter         Open/Expand
-        q             Quit
-        
-        [green]Navigation Keys:[/green]
-        h or ~        Go to home directory
-        u or Backspace Go to parent directory
-        
+        ↑/↓            Navigate
+        Enter          Open file / expand folder
+        .. or u/Bksp   Go to parent directory
+        h or ~         Go to home directory
+        D              Select drive (Windows)
+        S              Cycle sort: name / size / date
+        q              Quit
+
         [green]Commands:[/green]
-        :             Command palette
-        o             Open file
-        s             Scan directory
-        t             Tag file
-        r             Refresh
-        /             Search
-        c             Config
-        i             Init DB
+        :              Command palette
+        /              Search
+        s              Scan selected directory
+        t              Tag selected file
+        d              Delete tag (virtual panel)
+        r              Refresh
+        m / U          Mount / unmount
+        c              Config
+        i              Init DB
         """
         self.notify(help_text, timeout=10)
 
@@ -755,139 +831,57 @@ class MeretApp(App):
         
         self.push_screen(InputDialog("Enter mount point to unmount:"), on_unmount)
 
-class DirEntryWrapper:
-    """Wrapper to make Path compatible with DirectoryTree."""
-    def __init__(self, path: Path):
-        self.path = path
-        self.loaded = False
+class ParentEntry(DirEntry):
+    """Data of the '..' row. Selecting it moves the panel one level up."""
+
 
 class SortedDirectoryTree(DirectoryTree):
-    """DirectoryTree with sorting."""
-    
+    """DirectoryTree with sorting and a '..' row on top of the root listing.
+
+    Everything goes through DirectoryTree's own hooks: loading stays in its
+    worker, nodes keep real DirEntry data, so expanding/reloading keep working.
+    Changing the root (going up, home, another drive) = setting `path`.
+    """
+
     def __init__(self, path: Path, sort_by: str = "name", reverse: bool = False, **kwargs):
         self.sort_by = sort_by
         self.reverse = reverse
         super().__init__(path, **kwargs)
-    
-    async def _on_tree_node_expanded(self, event):
-        """Sort after default expansion."""
-        await super()._on_tree_node_expanded(event)
-        self._sort_children(event.node)
-    
-    def _sort_node(self, node):
-        """Sort children of a node."""
-        if not node.children:
-            return
-        
-        # Get (label, data) pairs
-        children_data = []
-        for child in node.children:
-            label = str(child.label)
-            data = child.data
-            is_dir = label.startswith("📁")
-            
-            # Get sort key
-            try:
-                if self.sort_by == "name":
-                    key = label.lower()
-                elif self.sort_by == "size" and not is_dir:
-                    key = Path(data).stat().st_size if data else 0
-                else:
-                    key = label.lower()
-            except:
-                key = label.lower()
-            
-            children_data.append((key, is_dir, label, data))
-        
-        # Sort: dirs first, then by key
-        children_data.sort(key=lambda x: (not x[1], x[0]), reverse=self.sort_reverse)
-        
-        # Clear and re-add
-        node.remove_children()
-        for _, is_dir, label, data in children_data:
-            if is_dir:
-                child = node.add(label, data=data)
-                child.add("[dim]...[/dim]")
-            else:
-                node.add_leaf(label, data=data)
 
-    def _populate_node(self, node, content):
-        """Override to add sorting and '..' entry."""
+    def _sort_key(self, path: Path):
+        """name / size / date. Folders have no meaningful size — by name."""
         try:
-            if node == self.root:
-                node_path = self.path
-            else:
-                node_path = node.data.path if hasattr(node.data, 'path') else Path(node.data)
-            
-            entries = list(node_path.iterdir())
-            
-            # Create list with '..' at first position
-            all_entries = []
-            
-            # Add '..' if we can go up
-            parent = node_path.parent
-            if parent != node_path and str(parent) != str(node_path):
-                parent_wrapper = DirEntryWrapper(parent)
-                all_entries.append(('..', parent_wrapper, True))
-            
-            # Add regular files and folders
-            for entry in entries:
-                wrapper = DirEntryWrapper(entry)
-                all_entries.append((entry.name, wrapper, entry.is_dir()))
-            
-            # Sort: first '..', then dirs, then files
-            def sort_key(item):
-                name, wrapper, is_dir = item
-                if name == '..':
-                    return (0, '')
-                elif is_dir:
-                    return (1, name.lower())
-                else:
-                    return (2, name.lower())
-            
-            all_entries.sort(key=sort_key, reverse=self.reverse)
-            
-            # Add to tree
-            node.remove_children()
-            
-            for name, wrapper, is_dir in all_entries:
-                if name == '..':
-                    up_node = node.add("⬆️ ..", data=wrapper)
-                    up_node.add("")
-                elif is_dir:
-                    child = node.add(f"📁 {name}", data=wrapper)
-                    child.add("[dim]...[/dim]")
-                else:
-                    node.add_leaf(f"📄 {name}", data=wrapper)
-                    
-        except PermissionError:
-            node.add_leaf("[dim]Access denied[/dim]")
-        except Exception as e:
-            node.add_leaf(f"[red]Error: {e}[/red]")
+            if self.sort_by == "size" and not self._safe_is_dir(path):
+                return (0, path.stat().st_size, "")
+            if self.sort_by == "date":
+                return (0, path.stat().st_mtime, "")
+        except OSError:
+            pass
+        return (1, 0, path.name.lower())
 
-    def _sort_children(self, node):
-        """Sort children of a node."""
-        if not node.children:
-            return
-        
-        items = []
-        for child in node.children:
-            label = str(child.label)
-            # If child has children or starts with 📁, it's a directory
-            is_dir = len(child.children) > 0 or label.startswith("📁 ")
-            name = label[2:] if label.startswith(("📁 ", "📄 ")) else label
-            items.append((name.lower(), is_dir, label, child.data))
-        
-        items.sort(key=lambda x: (not x[1], x[0]), reverse=self.reverse)
-        
-        node.remove_children()
-        for _, is_dir, label, data in items:
-            if is_dir:
-                child = node.add(label, data=data)
-                child.add("[dim]...[/dim]")
-            else:
-                node.add_leaf(label, data=data)
-            
+    def _populate_node(self, node, content) -> None:
+        paths = list(content)
+        dirs = [p for p in paths if self._safe_is_dir(p)]
+        files = [p for p in paths if not self._safe_is_dir(p)]
+        # folders always on top; the sort mode orders each group
+        ordered = sorted(dirs, key=self._sort_key, reverse=self.reverse) + sorted(
+            files, key=self._sort_key, reverse=self.reverse
+        )
+        super()._populate_node(node, ordered)
+
+        if node is self.root:
+            here = Path(self.path).expanduser().resolve()
+            if here.parent != here:  # a drive / filesystem root has nowhere to go
+                node.add("..", data=ParentEntry(here.parent), before=0, allow_expand=False)
+
+    def render_label(self, node, base_style, style) -> Text:
+        if isinstance(node.data, ParentEntry):
+            label = node.label.copy()
+            label.stylize(style)
+            return Text.assemble(("⬆ ", base_style), label)
+        return super().render_label(node, base_style, style)
+
+
 def main():
     """Entry point for TUI."""
     import sys

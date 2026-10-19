@@ -1,3 +1,4 @@
+0.5.7 - tui: working '..' navigation, virtual panel back beside the real one, command palette runs commands, fixed U/d/tree and help
 0.5.6 - trying to do it again
 0.5.5 - trying to implement ..
 0.5.4 - open file command
