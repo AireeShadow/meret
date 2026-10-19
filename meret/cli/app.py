@@ -496,6 +496,10 @@ def open_file(
     
     typer.echo(f"Opened: {real_path}")
 
+# ls / open / stat / mount / umount register themselves on `app` (must come last:
+# vfs_cmds imports `app` from this module)
+from meret.cli import vfs_cmds  # noqa: E402,F401
+
 if __name__ == "__main__":
     app()
 

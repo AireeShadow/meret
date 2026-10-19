@@ -119,3 +119,26 @@ def test_stat_directory(db):
     r = runner.invoke(app, ["stat", "/travel", "--db", str(db)])
     assert r.exit_code == 0
     assert "directory" in r.output
+
+
+def test_vfs_commands_are_registered_in_the_real_cli():
+    """Not via this test module's own import of vfs_cmds — the installed entry point."""
+    import os
+    import subprocess
+    import sys
+
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "COLUMNS": "200"}
+    out = subprocess.run(
+        [sys.executable, "-m", "meret", "--help"],
+        capture_output=True, text=True, encoding="utf-8", env=env, check=True,
+    ).stdout
+    for cmd in ("ls", "open", "stat", "mount", "umount"):
+        assert f" {cmd} " in out, f"{cmd} missing from `meret --help`"
+
+
+def test_vfs_commands_use_the_usual_db_lookup(db, monkeypatch):
+    """No --db: same lookup as every other command (here: ./meret.db)."""
+    monkeypatch.chdir(db)
+    r = runner.invoke(app, ["ls", "/travel"])
+    assert r.exit_code == 0, r.output
+    assert "seaside" in r.output
