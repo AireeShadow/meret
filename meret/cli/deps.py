@@ -17,6 +17,7 @@ from rich.console import Console
 from meret.core.repository import AbstractRepository
 from meret.core.sqlite_repo import SQLiteRepository
 from meret.core.config import get_config
+from meret.core.locale import _
 
 DB_NAME = "meret.db"
 ENV_DB_PATH = "MERET_DB"
@@ -34,18 +35,18 @@ class DatabaseNotFound(Exception):
 
     def __init__(self, path: Path):
         self.path = path
-        super().__init__(f"database not found: {path}")
+        super().__init__(f"{_('database not found')}: {path}")
 
     def _render(self) -> None:
         """Render error message - call explicitly when needed."""
         _console.print()
-        _console.print("[bold red]✗ Database not found[/bold red]")
-        _console.print(f" looked here: [yellow]{self.path}[/yellow]")
+        _console.print(f"[bold red]✗ {_('Database not found')}[/bold red]")
+        _console.print(f" {_('looked here:')} [yellow]{self.path}[/yellow]")
         _console.print()
-        _console.print("[dim]What to do:[/dim]")
-        _console.print(" • create a database in the current directory: [green]meret init[/green]")
-        _console.print(" • pass the path explicitly: [green]meret scan --db /path/to/meret.db ...[/green]")
-        _console.print(" • or set the environment variable: [green]MERET_DB=/path/to/meret.db[/green]")
+        _console.print(f"[dim]{_('What to do:')}[/dim]")
+        _console.print(f" • {_('create a database in the current directory:')} [green]meret init[/green]")
+        _console.print(f" • {_('pass the path explicitly:')} [green]meret scan --db /path/to/meret.db ...[/green]")
+        _console.print(f" • {_('or set the environment variable:')} [green]MERET_DB=/path/to/meret.db[/green]")
         _console.print()
 
 

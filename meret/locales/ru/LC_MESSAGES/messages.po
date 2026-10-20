@@ -518,3 +518,54 @@ msgstr "Сбросить конфигурацию к значениям по у�
 
 msgid "Show configuration file path."
 msgstr "Показать путь к файлу конфигурации."
+
+msgid "Database not found"
+msgstr "База данных не найдена"
+
+msgid "looked here:"
+msgstr "искали здесь:"
+
+msgid "What to do:"
+msgstr "Что делать:"
+
+msgid "create a database in the current directory:"
+msgstr "создать базу данных в текущей директории:"
+
+msgid "pass the path explicitly:"
+msgstr "указать путь явно:"
+
+msgid "or set the environment variable:"
+msgstr "или установить переменную окружения:"
+
+msgid "database not found"
+msgstr "база данных не найдена"
+
+msgid "No such command '{cmd}'."
+msgstr "Команда '{cmd}' не найдена."
+
+msgid "Did you mean"
+msgstr "Возможно, вы имели в виду"
+
+msgid "Usage:"
+msgstr "Использование:"
+
+msgid "Try"
+msgstr "Попробуйте"
+
+msgid "for help."
+msgstr "для справки."
+
+msgid "Usage: {usage}"
+msgstr "Использование: {usage}"
+
+msgid "Try '{command}' for help."
+msgstr "Выполните '{command}' для справы."
+
+msgid "Error: {message}"
+msgstr "Ошибка: {message}"
+
+msgid "No such command '{command}'."
+msgstr "Команда '{command}' не найдена."
+
+msgid "Did you mean:"
+msgstr "Возможно, вы имели в виду:"

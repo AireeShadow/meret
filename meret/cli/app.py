@@ -29,46 +29,18 @@ from meret.core.logger import (
 from meret import __version__
 from meret.cli.deps import get_repo, resolve_db_path
 
+import click
+
+def click_gettext(message):
+    return _(message)
+
+click.gettext = click_gettext
+click.ngettext = lambda s, p, n: ngettext(s, p, n)
+
 console = Console()
 logger = logging.getLogger(__name__)
 
 DB_OPTION = typer.Option(None, "--db", "-d", help="Database directory or path to a .db file")
-
-# Translated help strings (will be set in callback)
-_APP_HELP = "Meret — tagged media file system"
-_COMMANDS_HELP = {}
-
-
-def _set_translated_helps():
-    """Set translated help strings after locale is initialized."""
-    global _APP_HELP, _COMMANDS_HELP
-    
-    _APP_HELP = _("Meret — tagged media file system")
-    
-    _COMMANDS_HELP = {
-        "init": _("Create the database. The only command that creates it."),
-        "where": _("Show which database meret sees."),
-        "scan": _("Scan and index media."),
-        "search": _("Search by name and/or tags. A tag path also matches its whole subtree."),
-        "tag": _("Add/remove tags on a file. A path creates any missing parents."),
-        "tag-new": _("Create a tag and all of its missing parents along the path."),
-        "tag-del": _("Delete a tag. Its children move up to its parent's level."),
-        "parent": _("Move a tag (by path) under a new parent. Hierarchy = folders in the virtual FS."),
-        "tags": _("Show tags as paths, with file counts."),
-        "tree": _("Show the tag hierarchy as a tree."),
-        "tag-prune": _("Delete tags that have no files and no children."),
-        "stats": _("Database statistics."),
-        "config": _("Configuration management"),
-        "tui": _("Launch interactive TUI."),
-        "logs": _("Show where the log file is (and optionally its tail)."),
-        # Config subcommands
-        "config-show": _("Display current configuration."),
-        "config-get": _("Get a configuration value."),
-        "config-set": _("Set a configuration value."),
-        "config-edit": _("Open config file in default editor."),
-        "config-reset": _("Reset configuration to defaults."),
-        "config-path": _("Show configuration file path."),
-    }
 
 
 app = typer.Typer(help="Meret — tagged media file system", no_args_is_help=True)
@@ -95,9 +67,8 @@ def main(
     # Set locale early
     lang = set_locale(language or get_config().get("locale.language")).language
     
-    # Update help strings after locale is set
-    _set_translated_helps()
-    app.help = _APP_HELP
+    # Update app help after locale is set
+    app.help = _("Meret — tagged media file system")
     
     logger.info(
         "meret %s: %s | lang=%s argv=%s cwd=%s log=%s",
@@ -105,7 +76,7 @@ def main(
     )
 
 
-@app.command()
+@app.command(help=_("Show where the log file is (and optionally its tail)."))
 def logs(
     lines: int = typer.Option(0, "--lines", "-n", help=_("Also print the last N lines")),
 ):
@@ -119,7 +90,7 @@ def logs(
 
 
 # ----- database -----
-@app.command(help=_COMMANDS_HELP.get("init", "Create the database."))
+@app.command(help=_("Create the database. The only command that creates it."))
 def init(
     path: Optional[Path] = typer.Argument(
         None, help=_("Directory for the database or path to a .db file (default: current dir)")
@@ -141,7 +112,7 @@ def init(
     console.print(f"[green]✓ {msg}[/green]")
 
 
-@app.command(help=_COMMANDS_HELP.get("where", "Show which database meret sees."))
+@app.command(help=_("Show which database meret sees."))
 def where(db_path: Optional[Path] = DB_OPTION):
     """Show which database meret sees."""
     path = resolve_db_path(db_path)
@@ -153,7 +124,7 @@ def where(db_path: Optional[Path] = DB_OPTION):
 
 
 # ----- scan -----
-@app.command(help=_COMMANDS_HELP.get("scan", "Scan and index media."))
+@app.command(help=_("Scan and index media."))
 def scan(
     library: Path = typer.Argument(..., help=_("What to scan")),
     db_path: Optional[Path] = DB_OPTION,
@@ -207,7 +178,7 @@ def scan(
 
 
 # ----- search -----
-@app.command(help=_COMMANDS_HELP.get("search", "Search by name and/or tags."))
+@app.command(help=_("Search by name and/or tags. A tag path also matches its whole subtree."))
 def search(
     query: str = typer.Argument("", help=_("Text in the file name")),
     db_path: Optional[Path] = DB_OPTION,
@@ -276,7 +247,7 @@ def _path_of(repo: AbstractRepository, name: str) -> str:
     return tagpaths.name_to_path(repo.get_all_tags()).get(name.casefold(), name)
 
 
-@app.command(help=_COMMANDS_HELP.get("tag", "Add/remove tags on a file."))
+@app.command(help=_("Add/remove tags on a file. A path creates any missing parents."))
 def tag(
     filepath: Path = typer.Argument(..., help=_("File")),
     labels: List[str] = typer.Argument(..., help=_("Tag paths: genre/mystery")),
@@ -315,7 +286,7 @@ def tag(
     console.print(f"[dim]{_('Tags: {tags}').format(tags=current)}[/dim]")
 
 
-@app.command("tag-new", help=_COMMANDS_HELP.get("tag-new", "Create a tag."))
+@app.command("tag-new", help=_("Create a tag and all of its missing parents along the path."))
 def tag_new(
     path: str = typer.Argument(..., help=_("Tag path: genre/mystery")),
     colour: Optional[str] = typer.Option(None, "--colour", "-c"),
@@ -332,7 +303,7 @@ def tag_new(
     console.print(f"[green]✓ {msg}[/green]")
 
 
-@app.command("tag-del", help=_COMMANDS_HELP.get("tag-del", "Delete a tag."))
+@app.command("tag-del", help=_("Delete a tag. Its children move up to its parent's level."))
 def tag_del(
     path: str = typer.Argument(..., help=_("Tag path")),
     db_path: Optional[Path] = DB_OPTION,
@@ -348,7 +319,7 @@ def tag_del(
     console.print(f"[green]✓ {_('Deleted: {path}').format(path=path)}[/green]")
 
 
-@app.command(help=_COMMANDS_HELP.get("parent", "Move a tag under a new parent."))
+@app.command(help=_("Move a tag (by path) under a new parent. Hierarchy = folders in the virtual FS."))
 def parent(
     child: str = typer.Argument(..., help=_("Path of the tag to move")),
     new_parent: Optional[str] = typer.Argument(None, help=_("New parent. Omit to move to the root")),
@@ -391,7 +362,7 @@ def parent(
     _print_tree(repo)
 
 
-@app.command("tags", help=_COMMANDS_HELP.get("tags", "Show tags as paths."))
+@app.command("tags", help=_("Show tags as paths, with file counts."))
 def list_tags(db_path: Optional[Path] = DB_OPTION):
     """Show tags as paths, with file counts."""
     repo = get_repo(db_path)
@@ -410,13 +381,13 @@ def list_tags(db_path: Optional[Path] = DB_OPTION):
     console.print(table)
 
 
-@app.command(help=_COMMANDS_HELP.get("tree", "Show the tag hierarchy."))
+@app.command(help=_("Show the tag hierarchy as a tree."))
 def tree(db_path: Optional[Path] = DB_OPTION):
     """Show the tag hierarchy as a tree."""
     _print_tree(get_repo(db_path))
 
 
-@app.command("tag-prune", help=_COMMANDS_HELP.get("tag-prune", "Delete orphan tags."))
+@app.command("tag-prune", help=_("Delete tags that have no files and no children."))
 def tag_prune(db_path: Optional[Path] = DB_OPTION):
     """Delete tags that have no files and no children."""
     n = get_repo(db_path).prune_orphan_tags()
@@ -424,7 +395,7 @@ def tag_prune(db_path: Optional[Path] = DB_OPTION):
 
 
 # ----- misc -----
-@app.command(help=_COMMANDS_HELP.get("stats", "Database statistics."))
+@app.command(help=_("Database statistics."))
 def stats(db_path: Optional[Path] = DB_OPTION):
     """Database statistics."""
     s = get_repo(db_path).get_stats()
@@ -438,7 +409,7 @@ config_app = typer.Typer(help=_("Configuration management"), no_args_is_help=Tru
 app.add_typer(config_app, name="config")
 
 
-@config_app.command("show", help=_COMMANDS_HELP.get("config-show", "Display configuration."))
+@config_app.command("show", help=_("Display current configuration."))
 def config_show():
     """Display current configuration."""
     from rich.syntax import Syntax
@@ -503,7 +474,7 @@ def config_show():
     console.print(syntax)
 
 
-@config_app.command("get", help=_COMMANDS_HELP.get("config-get", "Get a configuration value."))
+@config_app.command("get", help=_("Get a configuration value."))
 def config_get(key: str = typer.Argument(..., help=_("Config key (e.g., scan.workers)"))):
     """Get a configuration value."""
     cfg = get_config()
@@ -514,7 +485,7 @@ def config_get(key: str = typer.Argument(..., help=_("Config key (e.g., scan.wor
     console.print(f"[cyan]{key}[/cyan] = [green]{value}[/green]")
 
 
-@config_app.command("set", help=_COMMANDS_HELP.get("config-set", "Set a configuration value."))
+@config_app.command("set", help=_("Set a configuration value."))
 def config_set(
     key: str = typer.Argument(..., help=_("Config key (e.g., scan.workers)")),
     value: str = typer.Argument(..., help=_("Value to set")),
@@ -530,7 +501,7 @@ def config_set(
         raise typer.Exit(1)
 
 
-@config_app.command("edit", help=_COMMANDS_HELP.get("config-edit", "Open config in editor."))
+@config_app.command("edit", help=_("Open config file in default editor."))
 def config_edit():
     """Open config file in default editor."""
     from meret.core.config import get_config, CONFIG_FILENAME
@@ -582,7 +553,7 @@ date_format = "%Y-%m-%d"
         console.print(f"[dim]{_('Path: {path}').format(path=config_path)}[/dim]")
 
 
-@config_app.command("reset", help=_COMMANDS_HELP.get("config-reset", "Reset configuration."))
+@config_app.command("reset", help=_("Reset configuration to defaults."))
 def config_reset(
     force: bool = typer.Option(False, "--force", "-f", help=_("Skip confirmation"))
 ):
@@ -596,7 +567,7 @@ def config_reset(
     console.print(f"[green]✓ {_('Configuration reset to defaults')}[/green]")
 
 
-@config_app.command("path", help=_COMMANDS_HELP.get("config-path", "Show config path."))
+@config_app.command("path", help=_("Show configuration file path."))
 def config_path():
     """Show configuration file path."""
     cfg = get_config()
@@ -607,7 +578,7 @@ def config_path():
     console.print(f"{cfg.config_path}{exists}")
 
 
-@app.command("tui", help=_COMMANDS_HELP.get("tui", "Launch interactive TUI."))
+@app.command("tui", help=_("Launch interactive TUI."))
 def tui(
     db_path: Optional[Path] = DB_OPTION,
 ):
@@ -628,6 +599,7 @@ def tui(
 
 # ls / open / stat / mount / umount register themselves
 from meret.cli import vfs_cmds  # noqa: E402,F401
+
 
 if __name__ == "__main__":
     app()
