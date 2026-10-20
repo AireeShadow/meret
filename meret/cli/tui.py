@@ -302,9 +302,11 @@ class InputDialog(ModalScreen[str]):
 
 class CommandPalette(ModalScreen[str]):
     """Command palette"""
-    
+
     BINDINGS = [
-        Binding("escape", "dismiss", "Close"),
+        Binding("escape", "dismiss", _("Close")),
+        Binding("up", "cursor_up", _("Up")),
+        Binding("down", "cursor_down", _("Down")),
     ]
 
     def __init__(self):
@@ -322,7 +324,7 @@ class CommandPalette(ModalScreen[str]):
             ("mount", _("Mount virtual filesystem")),
             ("umount", _("Unmount filesystem")),
         ]
-    
+
     def _matches(self, query: str) -> list[str]:
         """Commands for the typed text: exact, then name prefix, then anywhere."""
         query = query.strip().lower()
@@ -330,13 +332,13 @@ class CommandPalette(ModalScreen[str]):
         return sorted(hits, key=lambda cmd: (cmd != query, not cmd.startswith(query)))
 
     def _items(self, query: str = "") -> list[ListItem]:
-        # the command lives in ListItem.name — str(Label) is just "Label()"
         descs = dict(self.commands)
-        return [ListItem(Label(f"{cmd:<15} {descs[cmd]}"), name=cmd) for cmd in self._matches(query)]
+        return [ListItem(Label(f"{cmd:<15}{descs[cmd]}"), name=cmd) for cmd in self._matches(query)]
 
     def compose(self) -> ComposeResult:
         with Vertical(id="palette-container"):
             yield Input(placeholder=_("Command..."), id="palette-input")
+            yield ListView(*self._items(), id="cmd_list")
             with Horizontal(id="palette-buttons"):
                 yield Button(_("Cancel"), id="cancel", variant="error")
                 yield Button(_("OK"), id="ok", variant="success")
@@ -347,7 +349,7 @@ class CommandPalette(ModalScreen[str]):
         items = self._items(event.value)
         await list_view.clear()
         await list_view.extend(items)
-        list_view.index = 0 if items else None  # clear() drops the highlight; Enter needs one
+        list_view.index = 0 if items else None
 
     def on_input_submitted(self, event: Input.Submitted):
         """Enter in the input runs the best match."""
@@ -357,15 +359,6 @@ class CommandPalette(ModalScreen[str]):
     def on_list_view_selected(self, event: ListView.Selected):
         """Handle command selection."""
         self.dismiss(event.item.name)
-
-    def action_select(self) -> None:
-        """Select current item."""
-        table = self.query_one(DataTable)
-        if table.row_count == 0:
-            return
-        row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
-        if row_key:
-            self.dismiss(str(row_key))
 
     def action_close(self) -> None:
         """Close palette."""
