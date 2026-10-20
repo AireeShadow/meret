@@ -82,18 +82,18 @@ class FilePreview(Static):
     def update_preview(self, path: Optional[Path], is_virtual: bool = False):
         """Update preview content."""
         if path is None:
-            self.update(_("[dim]No selection[/dim]"))
+            self.update(f"[dim]{_('No selection')}[/dim]")
             return
         
         if is_virtual:
-            self.update(_("[cyan]Virtual:[/cyan] {path}\n[dim]Use 'o' to open real file[/dim]").format(path=path))
+            self.update(f"[cyan]{_('Virtual:')}[/cyan] {{path}}\n[dim]{_('Use o to open real file')}[/dim]".format(path=path))
         else:
             try:
                 stat = path.stat()
                 size = self._human_size(stat.st_size)
-                self.update(_("[green]{name}[/green]\nSize: {size}\nModified: {mtime}").format(name=path.name, size=size, mtime=stat.st_mtime))
+                self.update(f"[green]{{name}}[/green]\n{_('Size:')} {{size}}\n{_('Modified:')} {{mtime}}".format(name=path.name, size=size, mtime=stat.st_mtime))
             except OSError:
-                self.update(_("[red]Cannot access file[/red]"))
+                self.update(f"[red]{_('Cannot access file')}[/red]")
     
     def _human_size(self, size: int) -> str:
         """Convert bytes to human readable."""
@@ -128,11 +128,11 @@ class VirtualFileTree(Tree):
             self._populate_node(self.root, "/")
         except DatabaseNotFound:
             self.root.remove_children()
-            self.root.add_leaf(_("[dim]No database - run 'meret init'[/dim]"))
+            self.root.add_leaf(f"[dim]{_('No database - run meret init')}[/dim]")
         except Exception as e:
             logger.exception("virtual panel: loading %s failed", self.db_path)
             self.root.remove_children()
-            self.root.add_leaf(_("[red]Error: {error}[/red] [dim](meret logs)[/dim]").format(error=escape(str(e))))
+            self.root.add_leaf(f"[red]{_('Error: {error}')}[/red] [dim]({_('meret logs')})[/dim]".format(error=escape(str(e))))
     
     def _populate_node(self, node, vpath: str):
         """Populate tree node with virtual directory contents."""
@@ -143,21 +143,21 @@ class VirtualFileTree(Tree):
             node.remove_children()
             
             if not entries:
-                node.add_leaf(_("[dim](empty)[/dim]"))
+                node.add_leaf(f"[dim]({_('empty')})[/dim]")
                 return
             
             # Add directories
             for entry in entries:
                 if entry.is_dir:
                     if not entry.vpath:
-                        node.add_leaf(_("[red]Error: empty vpath for {name}[/red]").format(name=entry.name))
+                        node.add_leaf(f"[red]{_('Error: empty vpath for {name}')}[/red]".format(name=entry.name))
                         continue
                         
                     child = node.add(entry.name + "/", data=entry.vpath)
                     child.add("[dim]...[/dim]")
                 else:
                     if not entry.vpath:
-                        node.add_leaf(_("[red]Error: empty vpath for {name}[/red]").format(name=entry.name))
+                        node.add_leaf(f"[red]{_('Error: empty vpath for {name}')}[/red]".format(name=entry.name))
                         continue
                         
                     node.add_leaf(entry.name, data=entry.vpath)
@@ -191,8 +191,8 @@ class TagDialog(ModalScreen[str]):
     """Dialog for entering tag name."""
     
     BINDINGS = [
-        Binding("escape", "dismiss", "Cancel"),
-        Binding("enter", "submit", "OK"),
+        Binding("escape", "dismiss", _("Cancel")),
+        Binding("enter", "submit", _("OK")),
     ]
     
     def __init__(self, file_path: Path):
@@ -201,8 +201,8 @@ class TagDialog(ModalScreen[str]):
     
     def compose(self) -> ComposeResult:
         yield Label(_("Tag file: {name}").format(name=self.file_path.name))
-        yield Input(placeholder=_("Enter tag (e.g., vacation/beach)"), id="tag_input")
-        yield Label(_("[dim]Press Enter to confirm, Esc to cancel[/dim]"))
+        yield Input(placeholder=_(_("Enter tag (e.g., vacation/beach)")), id="tag_input")
+        yield Label(f"[dim]{_('Press Enter to confirm, Esc to cancel')}[/dim]")
     
     def on_input_submitted(self, event: Input.Submitted):
         self.dismiss(event.value)
@@ -230,7 +230,7 @@ class SearchScreen(ModalScreen[list[FileEntry]]):
         yield Label(_("Search: {query}").format(query=self.query))
         self.list_view = ListView(id="results")
         yield self.list_view
-        yield Label(_("[dim]↑↓ to navigate, Enter to select, Esc to close[/dim]"))
+        yield Label(f"[dim]{_('Up/Down to navigate, Enter to select, Esc to close')}[/dim]")
     
     def on_mount(self):
         """Perform search."""
@@ -485,7 +485,7 @@ class MeretApp(App):
         yield self.preview
         
         # Path bar showing current selection
-        self.path_bar = Static(f"DB: {self.db_path} | Selected: -", id="path_bar")
+        self.path_bar = Static(f"{_('DB:')} {self.db_path} | {_('Selected:')} -", id="path_bar")
         yield self.path_bar
         
         yield Footer()
@@ -513,7 +513,7 @@ class MeretApp(App):
     def _update_path_bar(self):
         """Update path display."""
         sel = str(self.selected_real) if self.selected_real else "-"
-        self.path_bar.update(_("DB: {db} | Selected: {sel}").format(db=self.db_path, sel=sel))
+        self.path_bar.update(f"{_('DB:')} {self.db_path} | {_('Selected:')} {sel}")
         
     def on_tree_node_selected(self, event: Tree.NodeSelected):
         """Handle virtual file selection - ALSO open on Enter."""
@@ -766,6 +766,10 @@ class MeretApp(App):
         self.fs_root = here.parent
         self._refresh_fs_tree()
 
+    def action_up(self):
+        """Go to parent directory."""
+        self.action_go_up()
+
     def action_sort_files(self):
         """Toggle sort mode."""
         modes = [_("name"), _("size"), _("date")]
@@ -884,6 +888,10 @@ class MeretApp(App):
                     self.notify(f"Error: {e}", severity="error")
         
         self.push_screen(InputDialog("Enter mount point to unmount:"), on_unmount)
+
+    def action_home(self):
+        """Go to home directory."""
+        self.action_go_home()
 
 class ParentEntry(DirEntry):
     """Data of the '..' row. Selecting it moves the panel one level up."""

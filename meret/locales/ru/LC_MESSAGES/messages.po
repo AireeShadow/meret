@@ -1065,3 +1065,237 @@ msgstr "Директория с БД или путь к .db файлу"
 
 msgid "Language: en, ru, … (default: config locale.language, else the system's)"
 msgstr "Язык: en, ru, … (по умолчанию: из конфига, затем системный)"
+
+# Typer help texts (app.py)
+msgid "Also print the last N lines"
+msgstr "Также показать последние N строк"
+
+msgid "Directory for the database or path to a .db file (default: current dir)"
+msgstr "Директория для БД или путь к .db файлу (по умолчанию: текущая директория)"
+
+msgid "Recreate if the database exists"
+msgstr "Пересоздать, если база данных существует"
+
+msgid "What to scan"
+msgstr "Что сканировать"
+
+msgid "Skip files that are already indexed and unchanged on disk"
+msgstr "Пропустить файлы, которые уже проиндексированы и не изменились"
+
+msgid "Threads for reading metadata"
+msgstr "Потоки для чтения метаданных"
+
+msgid "Text in the file name"
+msgstr "Текст в имени файла"
+
+msgid "Tag path: genre/mystery"
+msgstr "Путь тега: genre/mystery"
+
+msgid "Files with ALL the tags"
+msgstr "Файлы со ВСЕМИ тегами"
+
+msgid "Tag paths: genre/mystery"
+msgstr "Пути тегов: genre/mystery"
+
+msgid "New parent. Omit to move to the root"
+msgstr "Новый родитель. Пропустите, чтобы переместить в корень"
+
+msgid "Config key (e.g., scan.workers)"
+msgstr "Ключ конфига (например, scan.workers)"
+
+msgid "Value to set"
+msgstr "Значение для установки"
+
+msgid "Skip confirmation"
+msgstr "Пропустить подтверждение"
+
+msgid "No such command '{cmd}'. Did you mean: {available}?"
+msgstr "Команда '{cmd}' не найдена. Возможно, вы имели в виду: {available}?"
+
+# TUI
+msgid "Down"
+msgstr "Вниз"
+
+msgid "No selection"
+msgstr "Нет выделения"
+
+msgid "Press Enter to confirm, Esc to cancel"
+msgstr "Нажмите Enter для подтверждения, Esc для отмены"
+
+msgid "Up/Down to navigate, Enter to select, Esc to close"
+msgstr "↑↓ для навигации, Enter для выбора, Esc для закрытия"
+
+msgid "Navigation"
+msgstr "Навигация"
+
+msgid "Navigate"
+msgstr "Навигация"
+
+msgid "expand folder"
+msgstr "развернуть папку"
+
+msgid "Go to parent directory"
+msgstr "Перейти в родительскую директорию"
+
+msgid "Go to home directory"
+msgstr "Перейти в домашнюю директорию"
+
+msgid "Cycle sort: name / size / date"
+msgstr "Цикл сортировки: имя / размер / дата"
+
+msgid "Commands"
+msgstr "Команды"
+
+msgid "Command palette"
+msgstr "Палитра команд"
+
+msgid "Scan selected directory"
+msgstr "Сканировать выбранную директорию"
+
+msgid "Delete tag (virtual panel)"
+msgstr "Удалить тег (виртуальная панель)"
+
+msgid "unmount"
+msgstr "размонтировать"
+
+msgid "No database - run meret init"
+msgstr "Нет базы данных — выполните meret init"
+
+msgid "empty"
+msgstr "пусто"
+
+msgid "Error: empty vpath for {name}"
+msgstr "Ошибка: пустой vpath для {name}"
+
+msgid "Error: {error}"
+msgstr "Ошибка: {error}"
+
+msgid "meret logs"
+msgstr "meret logs"
+
+msgid "Use o to open real file"
+msgstr "Нажмите o, чтобы открыть реальный файл"
+
+msgid "Size:"
+msgstr "Размер:"
+
+msgid "Modified:"
+msgstr "Изменено:"
+
+msgid "Virtual:"
+msgstr "Виртуальный:"
+
+msgid "Command..."
+msgstr "Команда..."
+
+# VFS cmds
+msgid "Windows"
+msgstr "Windows"
+
+msgid "List the contents of a virtual directory (tags = folders)."
+msgstr "Показать содержимое виртуальной директории (теги = папки)."
+
+msgid "Open a file with the system's default application."
+msgstr "Открыть файл приложением по умолчанию."
+
+msgid "path"
+msgstr "путь"
+
+msgid "type"
+msgstr "тип"
+
+msgid "Info about a virtual FS node."
+msgstr "Информация о узле виртуальной ФС."
+
+msgid "Mount tags as a drive/directory (read-only)."
+msgstr "Смонтировать теги как диск/директорию (только чтение)."
+
+msgid "Unmount: find the mount process and terminate it."
+msgstr "Размонтировать: найти процесс монтирования и завершить его."
+
+msgid "Darwin"
+msgstr "Darwin"
+
+msgid "Virtual path, e.g. /travel"
+msgstr "Виртуальный путь, например /travel"
+
+msgid "Show sizes"
+msgstr "Показать размеры"
+
+msgid "Path to the file"
+msgstr "Путь к файлу"
+
+msgid "Only print the path"
+msgstr "Только показать путь"
+
+msgid "Virtual path"
+msgstr "Виртуальный путь"
+
+msgid "directory (tag)"
+msgstr "директория (тег)"
+
+msgid "file"
+msgstr "файл"
+
+msgid "on disk"
+msgstr "на диске"
+
+msgid "Where to mount, e.g. M:"
+msgstr "Куда монтировать, например M:"
+
+msgid "Mount point, e.g. M: or K:\\tags"
+msgstr "Точка монтирования, например M: или K:\\tags"
+
+msgid "If Explorer still shows the mount point, press F5"
+msgstr "Если Explorer всё ещё показывает точку монтирования, нажмите F5"
+
+msgid "{n} folders, {m} files"
+msgstr "{n} папок, {m} файлов"
+
+msgid "Mounting at {path}... Ctrl+C or Enter to exit"
+msgstr "Монтирование в {path}... Ctrl+C или Enter для выхода"
+
+msgid "Unmounted"
+msgstr "Размонтировано"
+
+msgid "Linux/macOS: pip install fusepy"
+msgstr "Linux/macOS: pip install fusepy"
+
+msgid "Windows: WinFsp + pip install winfspy"
+msgstr "Windows: WinFsp + pip install winfspy"
+
+msgid "In the database but missing on disk: {path}"
+msgstr "В базе данных, но отсутствует на диске: {path}"
+
+msgid "Nothing is mounted at {path}"
+msgstr "Ничего не смонтировано в {path}"
+
+msgid "File not found: {path}"
+msgstr "Файл не найден: {path}"
+
+msgid "This is a directory (tag): {path}"
+msgstr "Это директория (тег): {path}"
+
+msgid "No driver: {error}"
+msgstr "Нет драйвера: {error}"
+
+msgid "terminated PID {pid}"
+msgstr "завершён PID {pid}"
+
+msgid "PID {pid}: {error}"
+msgstr "PID {pid}: {error}"
+
+msgid "Tag path"
+msgstr "Путь тега"
+
+msgid "Path of the tag to move"
+msgstr "Путь перемещаемого тега"
+
+msgid "directory (tag)"
+msgstr "директория (тег)"
+
+msgid "DB:"
+msgstr "БД:"
+
+msgid "Selected:"
+msgstr "Выбрано:"

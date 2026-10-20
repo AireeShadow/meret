@@ -249,3 +249,44 @@ def test_config_accepts_auto():
 
     assert LocaleConfig().language == "auto"
     assert LocaleConfig(language="ru").language == "ru"
+
+# ---------- TUI-specific translations ----------
+
+def test_tui_bindings_in_catalog():
+    """Test that all TUI binding labels are in Russian catalog."""
+    po = DEFAULT_LOCALE_DIR / "ru" / "LC_MESSAGES" / "messages.po"
+    if not po.exists():
+        pytest.skip("Russian .po not found")
+    
+    catalog = _parse_po(po.read_text(encoding="utf-8"))
+    
+    # All binding labels that should be translated
+    bindings = [
+        "Quit", "Config", "Init DB", "Open", "Scan", "Tag",
+        "Refresh", "Delete tag", "Home", "Up", "Sort",
+        "Mount", "Unmount", "Select Drive", "Search", "Help",
+        "Cancel", "OK", "Yes", "No", "Close", "Select",
+    ]
+    
+    missing = [b for b in bindings if b not in catalog]
+    assert not missing, f"Missing TUI bindings in catalog: {missing}"
+
+
+def test_tui_dialog_buttons_in_catalog():
+    """Test dialog button labels are translated."""
+    po = DEFAULT_LOCALE_DIR / "ru" / "LC_MESSAGES" / "messages.po"
+    if not po.exists():
+        pytest.skip("Russian .po not found")
+    
+    po_content = po.read_text(encoding="utf-8")
+    
+    buttons = {
+        "Cancel": "Отмена",
+        "OK": "ОК",
+        "Yes": "Да",
+        "No": "Нет",
+    }
+    
+    for btn, expected in buttons.items():
+        assert f'msgid "{btn}"' in po_content, f"Button '{btn}' not in .po"
+        assert expected in po_content, f"Translation '{expected}' for '{btn}' not found"
