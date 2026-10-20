@@ -452,3 +452,69 @@ msgstr "Ошибка TUI: {error}"
 
 msgid "details: meret logs"
 msgstr "подробности: meret logs"
+
+msgid "Meret — tagged media file system"
+msgstr "Meret — файловая система с тегами"
+
+msgid "Create the database. The only command that creates it."
+msgstr "Создать базу данных. Единственная команда, которая это делает."
+
+msgid "Show which database meret sees."
+msgstr "Показать, какую базу данных видит meret."
+
+msgid "Scan and index media."
+msgstr "Сканировать и индексировать медиафайлы."
+
+msgid "Search by name and/or tags. A tag path also matches its whole subtree."
+msgstr "Поиск по имени и/или тегам. Путь тега также совпадает со всем поддеревом."
+
+msgid "Add/remove tags on a file. A path creates any missing parents."
+msgstr "Добавить/удалить теги файла. Путь создаёт отсутствующие родители."
+
+msgid "Create a tag and all of its missing parents along the path."
+msgstr "Создать тег и всех отсутствующих родителей по пути."
+
+msgid "Delete a tag. Its children move up to its parent's level."
+msgstr "Удалить тег. Его дети поднимаются на уровень родителя."
+
+msgid "Move a tag (by path) under a new parent. Hierarchy = folders in the virtual FS."
+msgstr "Переместить тег под нового родителя. Иерархия = папки в виртуальной ФС."
+
+msgid "Show tags as paths, with file counts."
+msgstr "Показать теги как пути, с количеством файлов."
+
+msgid "Show the tag hierarchy as a tree."
+msgstr "Показать иерархию тегов как дерево."
+
+msgid "Delete tags that have no files and no children."
+msgstr "Удалить теги без файлов и без детей."
+
+msgid "Database statistics."
+msgstr "Статистика базы данных."
+
+msgid "Configuration management"
+msgstr "Управление конфигурацией"
+
+msgid "Launch interactive TUI."
+msgstr "Запустить интерактивный TUI."
+
+msgid "Show where the log file is (and optionally its tail)."
+msgstr "Показать расположение файла лога (и опционально его хвост)."
+
+msgid "Display current configuration."
+msgstr "Показать текущую конфигурацию."
+
+msgid "Get a configuration value."
+msgstr "Получить значение конфигурации."
+
+msgid "Set a configuration value."
+msgstr "Установить значение конфигурации."
+
+msgid "Open config file in default editor."
+msgstr "Открыть файл конфигурации в редакторе по умолчанию."
+
+msgid "Reset configuration to defaults."
+msgstr "Сбросить конфигурацию к значениям по умолчанию."
+
+msgid "Show configuration file path."
+msgstr "Показать путь к файлу конфигурации."

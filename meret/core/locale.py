@@ -419,3 +419,13 @@ def _(message: str, context: Optional[str] = None) -> str:
 def ngettext(singular: str, plural: str, n: int, context: Optional[str] = None) -> str:
     """Shorthand for plural translation."""
     return get_locale().translate_plural(singular, plural, n, context)
+
+try:
+    from meret.core.config import get_config
+    _cfg = get_config()
+    _lang = _cfg.get("locale.language")
+    if _lang and _lang != "auto":
+        # Create global instance with config language
+        _locale_manager = LocaleManager(_lang)
+except Exception:
+    pass
