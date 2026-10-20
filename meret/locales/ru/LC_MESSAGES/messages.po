@@ -721,6 +721,10 @@ msgstr "Поиск: {query}"
 msgid "Command: {cmd}"
 msgstr "Команда: {cmd}"
 
+msgid "Command"
+msgstr "Команда"
+
+
 msgid "Help"
 msgstr "Помощь"
 
@@ -1031,3 +1035,33 @@ msgstr "Поиск"
 
 msgid "Help"
 msgstr "Помощь"
+
+# Dialog buttons
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "OK"
+msgstr "ОК"
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "Select"
+msgstr "Выбрать"
+
+msgid "Yes"
+msgstr "Да"
+
+msgid "No"
+msgstr "Нет"
+
+# Border titles
+msgid "Real Filesystem ({path}) · {sort}"
+msgstr "Файлы ({path}) · {sort}"
+
+# Typer option helps
+msgid "Database directory or path to a .db file"
+msgstr "Директория с БД или путь к .db файлу"
+
+msgid "Language: en, ru, … (default: config locale.language, else the system's)"
+msgstr "Язык: en, ru, … (по умолчанию: из конфига, затем системный)"

@@ -257,9 +257,9 @@ class ConfirmDialog(ModalScreen[bool]):
     """Yes/no question. Only 'y' confirms: Enter is too easy to hit by accident."""
 
     BINDINGS = [
-        Binding("y", "answer(True)", "Yes"),
-        Binding("n", "answer(False)", "No"),
-        Binding("escape", "answer(False)", "No"),
+        Binding("y", "answer(True)", _("Yes")),
+        Binding("n", "answer(False)", _("No")),
+        Binding("escape", "answer(False)", _("No")),
     ]
 
     def __init__(self, question: str):
@@ -267,8 +267,11 @@ class ConfirmDialog(ModalScreen[bool]):
         self.question = question
 
     def compose(self) -> ComposeResult:
-        yield Label(self.question)
-        yield Label(_("[dim]y = yes, n / Esc = no[/dim]"))
+        with Vertical(id="confirm-dialog"):
+            yield Label(self.question)
+            with Horizontal(id="confirm-buttons"):
+                yield Button(_("Yes"), id="yes", variant="success")
+                yield Button(_("No"), id="no", variant="error")
 
     def action_answer(self, yes: bool) -> None:
         self.dismiss(yes)
@@ -282,8 +285,12 @@ class InputDialog(ModalScreen[str]):
         self.prompt = prompt
     
     def compose(self) -> ComposeResult:
-        yield Label(self.prompt)
-        yield Input(id="input")
+        with Vertical(id="input-dialog"):
+            yield Label(self.label)
+            yield Input(placeholder=self.placeholder, id="input-field")
+            with Horizontal(id="input-buttons"):
+                yield Button(_("Cancel"), id="cancel", variant="error")
+                yield Button(_("OK"), id="ok", variant="success")
     
     def on_input_submitted(self, event: Input.Submitted):
         self.dismiss(event.value)
@@ -294,7 +301,7 @@ class InputDialog(ModalScreen[str]):
 
 
 class CommandPalette(ModalScreen[str]):
-    """Command palette like in k9s."""
+    """Command palette"""
     
     BINDINGS = [
         Binding("escape", "dismiss", "Close"),
@@ -328,8 +335,11 @@ class CommandPalette(ModalScreen[str]):
         return [ListItem(Label(f"{cmd:<15} {descs[cmd]}"), name=cmd) for cmd in self._matches(query)]
 
     def compose(self) -> ComposeResult:
-        yield Input(placeholder=_("Type command..."), id="cmd_input")
-        yield ListView(*self._items(), id="cmd_list")
+        with Vertical(id="palette-container"):
+            yield Input(placeholder=_("Command..."), id="palette-input")
+            with Horizontal(id="palette-buttons"):
+                yield Button(_("Cancel"), id="cancel", variant="error")
+                yield Button(_("OK"), id="ok", variant="success")
 
     async def on_input_changed(self, event: Input.Changed):
         """Filter commands based on input."""
@@ -347,6 +357,19 @@ class CommandPalette(ModalScreen[str]):
     def on_list_view_selected(self, event: ListView.Selected):
         """Handle command selection."""
         self.dismiss(event.item.name)
+
+    def action_select(self) -> None:
+        """Select current item."""
+        table = self.query_one(DataTable)
+        if table.row_count == 0:
+            return
+        row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
+        if row_key:
+            self.dismiss(str(row_key))
+
+    def action_close(self) -> None:
+        """Close palette."""
+        self.dismiss(None)
 
 
 class MeretApp(App):
@@ -404,25 +427,23 @@ class MeretApp(App):
     """
     
     BINDINGS = [
-        Binding("q", "quit", "Quit"),
+        Binding("q", "quit", _("Quit")),
         Binding(":", "command_palette", "Command"),
-        Binding("i", "init_db", "Init DB"),
+        Binding("i", "init_db", _("Init DB")),
         Binding("enter", "open_file", "Open"),
-        Binding("s", "scan", "Scan"),
-        Binding("t", "tag", "Tag"),
-        Binding("r", "refresh", "Refresh"),
-        Binding("c", "config", "Config"),
-        Binding("d", "delete", "Delete tag"),
-        Binding("h", "go_home", "Home"),
-        Binding("~", "go_home", "Home"),
-        Binding("u", "go_up", "Up"),
-        Binding("backspace", "go_up", "Up"),
-        Binding("S", "sort_files", "Sort"),
-        Binding("m", "mount", "Mount"),
-        Binding("U", "umount", "Unmount"),
-        Binding("D", "select_drive", "Select Drive"),  # Windows only
-        Binding("/", "search", "Search"),
-        Binding("?", "help", "Help"),
+        Binding("s", "scan", _("Scan")),
+        Binding("t", "tag", _("Tag")),
+        Binding("r", "refresh", _("Refresh")),
+        Binding("c", "config", _("Config")),
+        Binding("d", "delete", _("Delete tag")),
+        Binding("h,~", "home", _("Home")),
+        Binding("u,backspace,..", "up", _("Up")),
+        Binding("S", "sort_files", _("Sort")),
+        Binding("m", "mount", _("Mount")),
+        Binding("U", "umount", _("Unmount")),
+        Binding("D", "select_drive", _("Select Drive")),  # Windows only
+        Binding("/", "search", _("Search")),
+        Binding("?", "help", _("Help")),
     ]
     
     def __init__(self, db_path: Optional[Path] = None):
@@ -795,28 +816,28 @@ class MeretApp(App):
     
     def action_help(self):
         """Show help."""
-        help_text = """
+        help_text = f"""
         [b]Meret TUI Help[/b]
 
-        [green]Navigation:[/green]
-        ↑/↓            Navigate
-        Enter          Open file / expand folder
-        .. or u/Bksp   Go to parent directory
-        h or ~         Go to home directory
-        D              Select drive (Windows)
-        S              Cycle sort: name / size / date
-        q              Quit
+        [green]{_('Navigation')}:[/green]
+        ↑/↓            {_('Navigate')}
+        Enter          {_('Open file')} / {_('expand folder')}
+        .. or u/Bksp   {_('Go to parent directory')}
+        h or ~         {_('Go to home directory')}
+        D              {_('Select drive')} (Windows)
+        S              {_('Cycle sort: name / size / date')}
+        q              {_('Quit')}
 
-        [green]Commands:[/green]
-        :              Command palette
-        /              Search
-        s              Scan selected directory
-        t              Tag selected file
-        d              Delete tag (virtual panel)
-        r              Refresh
-        m / U          Mount / unmount
-        c              Config
-        i              Init DB
+        [green]{_('Commands')}:[/green]
+        :              {_('Command palette')}
+        /              {_('Search')}
+        s              {_('Scan selected directory')}
+        t              {_('Tag selected file')}
+        d              {_('Delete tag (virtual panel)')}
+        r              {_('Refresh')}
+        m / U          {_('Mount')} / {_('unmount')}
+        c              {_('Config')}
+        i              {_('Init DB')}
         """
         self.notify(help_text, timeout=10)
 
