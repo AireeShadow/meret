@@ -569,3 +569,245 @@ msgstr "Команда '{command}' не найдена."
 
 msgid "Did you mean:"
 msgstr "Возможно, вы имели в виду:"
+
+# TUI strings
+msgid "Select a file to preview"
+msgstr "Выберите файл для предпросмотра"
+
+msgid "Preview"
+msgstr "Предпросмотр"
+
+msgid "No selection"
+msgstr "Ничего не выбрано"
+
+msgid "Virtual: {path}\nUse 'o' to open real file"
+msgstr "Виртуальный: {path}\nНажмите 'o' чтобы открыть реальный файл"
+
+msgid "Cannot access file"
+msgstr "Нет доступа к файлу"
+
+msgid "Error: {error}"
+msgstr "Ошибка: {error}"
+
+msgid "File: {path}\nSize: {size} bytes"
+msgstr "Файл: {path}\nРазмер: {size} байт"
+
+msgid "Tag file: {filename}"
+msgstr "Тег для файла: {filename}"
+
+msgid "Enter tag (e.g., vacation/beach)"
+msgstr "Введите тег (например, путешествия/пляж)"
+
+msgid "Press Enter to confirm, Esc to cancel"
+msgstr "Enter — подтвердить, Esc — отменить"
+
+msgid "Search: {query}"
+msgstr "Поиск: {query}"
+
+msgid "(all files)"
+msgstr "(все файлы)"
+
+msgid "↑↓ to navigate, Enter to select, Esc to close"
+msgstr "↑↓ навигация, Enter — выбрать, Esc — закрыть"
+
+msgid "y = yes, n / Esc = no"
+msgstr "y — да, n / Esc — нет"
+
+msgid "Type command..."
+msgstr "Введите команду..."
+
+msgid "Scan directory for media"
+msgstr "Сканировать директорию на медиафайлы"
+
+msgid "Search files by tags/name"
+msgstr "Искать файлы по тегам/имени"
+
+msgid "Tag selected file"
+msgstr "Добавить тег к выбранному файлу"
+
+msgid "Remove tag from file"
+msgstr "Удалить тег с файла"
+
+msgid "Initialize new database"
+msgstr "Инициализировать новую базу данных"
+
+msgid "Edit configuration"
+msgstr "Редактировать конфигурацию"
+
+msgid "Show database statistics"
+msgstr "Показать статистику базы данных"
+
+msgid "Show tag tree"
+msgstr "Показать дерево тегов"
+
+msgid "Remove orphaned tags"
+msgstr "Удалить потерянные теги"
+
+msgid "Mount virtual filesystem"
+msgstr "Смонтировать виртуальную файловую систему"
+
+msgid "Unmount filesystem"
+msgstr "Размонтировать файловую систему"
+
+msgid "Loading..."
+msgstr "Загрузка..."
+
+msgid "No database - run 'meret init'"
+msgstr "Нет базы данных — выполните 'meret init'"
+
+msgid "Virtual FS (Tags)"
+msgstr "Виртуальная ФС (Теги)"
+
+msgid "Real Filesystem ({path})"
+msgstr "Реальная файловая система ({path})"
+
+msgid "Meret TUI"
+msgstr "Meret TUI"
+
+msgid "Database initialized!"
+msgstr "База данных инициализирована!"
+
+msgid "Opened file"
+msgstr "Файл открыт"
+
+msgid "Scanning..."
+msgstr "Сканирование..."
+
+msgid "Tagged with '{tag}'"
+msgstr "Добавлен тег '{tag}'"
+
+msgid "Refreshed"
+msgstr "Обновлено"
+
+msgid "Configuration"
+msgstr "Конфигурация"
+
+msgid "Delete tag"
+msgstr "Удалить тег"
+
+msgid "Home directory"
+msgstr "Домашняя директория"
+
+msgid "Go up"
+msgstr "Вверх"
+
+msgid "name"
+msgstr "имя"
+
+msgid "size"
+msgstr "размер"
+
+msgid "date"
+msgstr "дата"
+
+msgid "Sort by: {mode}"
+msgstr "Сортировка: {mode}"
+
+msgid "Mounting..."
+msgstr "Монтирование..."
+
+msgid "Unmounting..."
+msgstr "Размонтирование..."
+
+msgid "Drive selection only available on Windows"
+msgstr "Выбор диска доступен только в Windows"
+
+msgid "Select drive"
+msgstr "Выбрать диск"
+
+msgid "Search: {query}"
+msgstr "Поиск: {query}"
+
+msgid "Command: {cmd}"
+msgstr "Команда: {cmd}"
+
+msgid "Help"
+msgstr "Помощь"
+
+msgid "Navigation:\n"
+"  ↑/↓ Navigate\n"
+"  Enter Open file / expand folder\n"
+"  .. or u/Backspace Go to parent\n"
+"  h or ~ Go home\n"
+"  D Select drive (Windows)\n"
+"  S Cycle sort: name / size / date\n"
+"Commands:\n"
+"  q Quit\n"
+"  : Command palette\n"
+"  / Search\n"
+"  s Scan directory\n"
+"  t Tag selected file\n"
+"  d Delete tag\n"
+"  r Refresh\n"
+"  m/U Mount/Unmount\n"
+"  c Config\n"
+"  i Init DB"
+msgstr "Навигация:\n"
+"  ↑/↓ Навигация\n"
+"  Enter Открыть файл / развернуть папку\n"
+"  .. или u/Backspace В родительскую директорию\n"
+"  h или ~ Домой\n"
+"  D Выбрать диск (Windows)\n"
+"  S Сменить сортировку: имя / размер / дата\n"
+"Команды:\n"
+"  q Выход\n"
+"  : Палитра команд\n"
+"  / Поиск\n"
+"  s Сканировать директорию\n"
+"  t Тег для выбранного файла\n"
+"  d Удалить тег\n"
+"  r Обновить\n"
+"  m/U Монтировать/Размонтировать\n"
+"  c Конфигурация\n"
+"  i Инициализировать БД"
+
+msgid "Textual is required for the TUI. Install: pip install textual"
+msgstr "Для TUI требуется Textual. Установите: pip install textual"
+
+msgid "Quit"
+msgstr "Выход"
+
+msgid "Command"
+msgstr "Команда"
+
+msgid "Init DB"
+msgstr "Иниц. БД"
+
+msgid "Open"
+msgstr "Открыть"
+
+msgid "Scan"
+msgstr "Сканировать"
+
+msgid "Tag"
+msgstr "Тег"
+
+msgid "Refresh"
+msgstr "Обновить"
+
+msgid "Config"
+msgstr "Конфиг"
+
+msgid "Delete tag"
+msgstr "Удалить тег"
+
+msgid "Home"
+msgstr "Домой"
+
+msgid "Up"
+msgstr "Вверх"
+
+msgid "Sort"
+msgstr "Сортировка"
+
+msgid "Mount"
+msgstr "Монтировать"
+
+msgid "Unmount"
+msgstr "Размонтировать"
+
+msgid "Select Drive"
+msgstr "Выбрать диск"
+
+msgid "Search"
+msgstr "Поиск"

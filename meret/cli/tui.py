@@ -37,6 +37,7 @@ from meret.core import tagpaths
 from meret.core.models import FileEntry, FileType
 from meret.core.logger import log_uncaught_exceptions, setup_logging
 from meret.vfs import VirtualTree, NotFound
+from meret.core.locale import _
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ class FilePreview(Static):
     
     def __init__(self):
         super().__init__("Select a file to preview", id="preview")
-        self.border_title = "Preview"
+        self.border_title = _("Preview")
     
     def update_preview(self, path: Optional[Path], is_virtual: bool = False):
         """Update preview content."""
@@ -431,7 +432,7 @@ class MeretApp(App):
         self.selected_virtual: Optional[str] = None
         # Start from home directory for full filesystem access
         self.fs_root = Path.home()
-        self.sort_by = "name"  # name, size, date
+        self.sort_by = _("name")  # name, size, date
         self.sort_reverse = False
     
     def on_mount(self) -> None:
@@ -726,13 +727,13 @@ class MeretApp(App):
         """Initialize database."""
         self._run(["meret", "init", str(self.db_path)])
         self.virt_tree._load_tree()
-        self.notify("Database initialized!")
+        self.notify(_("Database initialized!"))
     
     def action_refresh(self):
         """Refresh both panels."""
         self.real_tree.reload()
         self.virt_tree._load_tree()
-        self.notify("Refreshed")
+        self.notify(_("Refreshed"))
     
     def action_go_home(self):
         """Navigate to home directory."""
@@ -753,10 +754,10 @@ class MeretApp(App):
 
     def action_sort_files(self):
         """Toggle sort mode."""
-        modes = ["name", "size", "date"]
+        modes = [_("name"), _("size"), _("date")]
         idx = modes.index(self.sort_by)
         self.sort_by = modes[(idx + 1) % len(modes)]
-        self.notify(f"Sort by: {self.sort_by}")
+        self.notify(_("Sort by: {mode}").format(mode=self.sort_by))
         self._refresh_fs_tree()
         
     def action_select_drive(self):

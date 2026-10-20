@@ -29,13 +29,21 @@ from meret.core.logger import (
 from meret import __version__
 from meret.cli.deps import get_repo, resolve_db_path
 
+
 import click
+from meret.core.locale import _
 
-def click_gettext(message):
-    return _(message)
+class TranslatedTyper(typer.Typer):
+    """Typer with translated error messages."""
+    
+    def command_not_found(self, ctx: click.Context, cmd_name: str) -> None:
+        available = ", ".join(sorted(self.list_commands(ctx)))
+        message = _("No such command '{cmd}'. Did you mean: {available}?").format(
+            cmd=cmd_name, available=available
+        )
+        raise click.UsageError(message, ctx)
 
-click.gettext = click_gettext
-click.ngettext = lambda s, p, n: ngettext(s, p, n)
+app = TranslatedTyper(help=_("Meret — tagged media file system"), no_args_is_help=True)
 
 console = Console()
 logger = logging.getLogger(__name__)
