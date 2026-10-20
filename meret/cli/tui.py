@@ -58,7 +58,7 @@ class DriveSelector(ModalScreen[str]):
     """Simple drive selector."""
     
     def compose(self) -> ComposeResult:
-        yield Label("Select Drive:")
+        yield Label(_("Select Drive:"))
         self.options = OptionList()
         yield self.options
     
@@ -76,24 +76,24 @@ class FilePreview(Static):
     """Preview panel for selected file."""
     
     def __init__(self):
-        super().__init__("Select a file to preview", id="preview")
+        super().__init__(_("Select a file to preview"), id="preview")
         self.border_title = _("Preview")
     
     def update_preview(self, path: Optional[Path], is_virtual: bool = False):
         """Update preview content."""
         if path is None:
-            self.update("[dim]No selection[/dim]")
+            self.update(_("[dim]No selection[/dim]"))
             return
         
         if is_virtual:
-            self.update(f"[cyan]Virtual:[/cyan] {path}\n[dim]Use 'o' to open real file[/dim]")
+            self.update(_("[cyan]Virtual:[/cyan] {path}\n[dim]Use 'o' to open real file[/dim]").format(path=path))
         else:
             try:
                 stat = path.stat()
                 size = self._human_size(stat.st_size)
-                self.update(f"[green]{path.name}[/green]\nSize: {size}\nModified: {stat.st_mtime}")
+                self.update(_("[green]{name}[/green]\nSize: {size}\nModified: {mtime}").format(name=path.name, size=size, mtime=stat.st_mtime))
             except OSError:
-                self.update("[red]Cannot access file[/red]")
+                self.update(_("[red]Cannot access file[/red]"))
     
     def _human_size(self, size: int) -> str:
         """Convert bytes to human readable."""
@@ -110,7 +110,7 @@ class VirtualFileTree(Tree):
     def __init__(self, db_path: Path):
         super().__init__("/", id="virtual_tree")
         self.db_path = db_path
-        self.border_title = "Virtual FS (Tags)"
+        self.border_title = _("Virtual FS (Tags)")
         self.root.data = "/"
 
     def on_mount(self) -> None:
@@ -128,11 +128,11 @@ class VirtualFileTree(Tree):
             self._populate_node(self.root, "/")
         except DatabaseNotFound:
             self.root.remove_children()
-            self.root.add_leaf("[dim]No database - run 'meret init'[/dim]")
+            self.root.add_leaf(_("[dim]No database - run 'meret init'[/dim]"))
         except Exception as e:
             logger.exception("virtual panel: loading %s failed", self.db_path)
             self.root.remove_children()
-            self.root.add_leaf(f"[red]Error: {escape(str(e))}[/red] [dim](meret logs)[/dim]")
+            self.root.add_leaf(_("[red]Error: {error}[/red] [dim](meret logs)[/dim]").format(error=escape(str(e))))
     
     def _populate_node(self, node, vpath: str):
         """Populate tree node with virtual directory contents."""
@@ -143,21 +143,21 @@ class VirtualFileTree(Tree):
             node.remove_children()
             
             if not entries:
-                node.add_leaf("[dim](empty)[/dim]")
+                node.add_leaf(_("[dim](empty)[/dim]"))
                 return
             
             # Add directories
             for entry in entries:
                 if entry.is_dir:
                     if not entry.vpath:
-                        node.add_leaf(f"[red]Error: empty vpath for {entry.name}[/red]")
+                        node.add_leaf(_("[red]Error: empty vpath for {name}[/red]").format(name=entry.name))
                         continue
                         
                     child = node.add(entry.name + "/", data=entry.vpath)
                     child.add("[dim]...[/dim]")
                 else:
                     if not entry.vpath:
-                        node.add_leaf(f"[red]Error: empty vpath for {entry.name}[/red]")
+                        node.add_leaf(_("[red]Error: empty vpath for {name}[/red]").format(name=entry.name))
                         continue
                         
                     node.add_leaf(entry.name, data=entry.vpath)
@@ -200,9 +200,9 @@ class TagDialog(ModalScreen[str]):
         self.file_path = file_path
     
     def compose(self) -> ComposeResult:
-        yield Label(f"Tag file: {self.file_path.name}")
-        yield Input(placeholder="Enter tag (e.g., vacation/beach)", id="tag_input")
-        yield Label("[dim]Press Enter to confirm, Esc to cancel[/dim]")
+        yield Label(_("Tag file: {name}").format(name=self.file_path.name))
+        yield Input(placeholder=_("Enter tag (e.g., vacation/beach)"), id="tag_input")
+        yield Label(_("[dim]Press Enter to confirm, Esc to cancel[/dim]"))
     
     def on_input_submitted(self, event: Input.Submitted):
         self.dismiss(event.value)
@@ -227,10 +227,10 @@ class SearchScreen(ModalScreen[list[FileEntry]]):
         self.results: list[FileEntry] = []
     
     def compose(self) -> ComposeResult:
-        yield Label(f"Search: {self.query}")
+        yield Label(_("Search: {query}").format(query=self.query))
         self.list_view = ListView(id="results")
         yield self.list_view
-        yield Label("[dim]↑↓ to navigate, Enter to select, Esc to close[/dim]")
+        yield Label(_("[dim]↑↓ to navigate, Enter to select, Esc to close[/dim]"))
     
     def on_mount(self):
         """Perform search."""
@@ -268,7 +268,7 @@ class ConfirmDialog(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         yield Label(self.question)
-        yield Label("[dim]y = yes, n / Esc = no[/dim]")
+        yield Label(_("[dim]y = yes, n / Esc = no[/dim]"))
 
     def action_answer(self, yes: bool) -> None:
         self.dismiss(yes)
@@ -303,17 +303,17 @@ class CommandPalette(ModalScreen[str]):
     def __init__(self):
         super().__init__()
         self.commands = [
-            ("scan", "Scan directory for media"),
-            ("search", "Search files by tags/name"),
-            ("tag", "Tag selected file"),
-            ("untag", "Remove tag from file"),
-            ("init", "Initialize new database"),
-            ("config", "Edit configuration"),
-            ("stats", "Show database statistics"),
-            ("tree", "Show tag tree"),
-            ("prune", "Remove orphaned tags"),
-            ("mount", "Mount virtual filesystem"),
-            ("umount", "Unmount filesystem"),
+            ("scan", _("Scan directory for media")),
+            ("search", _("Search files by tags/name")),
+            ("tag", _("Tag selected file")),
+            ("untag", _("Remove tag from file")),
+            ("init", _("Initialize new database")),
+            ("config", _("Edit configuration")),
+            ("stats", _("Show database statistics")),
+            ("tree", _("Show tag tree")),
+            ("prune", _("Remove orphaned tags")),
+            ("mount", _("Mount virtual filesystem")),
+            ("umount", _("Unmount filesystem")),
         ]
     
     def _matches(self, query: str) -> list[str]:
@@ -328,7 +328,7 @@ class CommandPalette(ModalScreen[str]):
         return [ListItem(Label(f"{cmd:<15} {descs[cmd]}"), name=cmd) for cmd in self._matches(query)]
 
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="Type command...", id="cmd_input")
+        yield Input(placeholder=_("Type command..."), id="cmd_input")
         yield ListView(*self._items(), id="cmd_list")
 
     async def on_input_changed(self, event: Input.Changed):
@@ -459,7 +459,7 @@ class MeretApp(App):
         with Horizontal():
             # Left panel: Use SortedDirectoryTree from start!
             self.real_tree = SortedDirectoryTree(self.fs_root, sort_by=self.sort_by, reverse=self.sort_reverse)
-            self.real_tree.border_title = f"Real Filesystem ({self.fs_root})"
+            self.real_tree.border_title = _("Real Filesystem ({path})").format(path=self.fs_root)
             yield self.real_tree
             
             # Right panel: Virtual filesystem
@@ -499,8 +499,8 @@ class MeretApp(App):
     def _update_path_bar(self):
         """Update path display."""
         sel = str(self.selected_real) if self.selected_real else "-"
-        self.path_bar.update(f"DB: {self.db_path} | Selected: {sel}")
-    
+        self.path_bar.update(_("DB: {db} | Selected: {sel}").format(db=self.db_path, sel=sel))
+        
     def on_tree_node_selected(self, event: Tree.NodeSelected):
         """Handle virtual file selection - ALSO open on Enter."""
         if hasattr(event.node, 'data') and event.node.data:
@@ -558,17 +558,17 @@ class MeretApp(App):
         logger.info("palette: %s", cmd)
         action = actions.get(cmd)
         if action is None:
-            self.notify(f"'{cmd}' isn't available in the TUI yet", severity="warning")
+            self.notify(_("'{cmd}' isn't available in the TUI yet").format(cmd=cmd), severity="warning")
             return
         action()
     
     def action_scan(self):
         """Scan current directory."""
         if self.selected_real and self.selected_real.is_dir():
-            self.notify(f"Scanning {self.selected_real}...")
+            self.notify(_("Scanning {path}...").format(path=self.selected_real))
             self._run(["meret", "scan", str(self.selected_real), "--db", str(self.db_path)])
             self.virt_tree._load_tree()
-            self.notify("Scan complete!")
+            self.notify(_("Scan complete!"))
     
     def action_open_file(self):
         """Open selected file with default app."""
@@ -578,7 +578,7 @@ class MeretApp(App):
             else:
                 self._run(["xdg-open", str(self.selected_real)])
             logger.info("opened %s", self.selected_real)
-            self.notify(f"Opened {self.selected_real.name}")
+            self.notify(_("Opened {name}").format(name=self.selected_real.name))
             
         elif self.selected_virtual:
             try:
@@ -594,7 +594,7 @@ class MeretApp(App):
                     self._run(["xdg-open", str(real_path)])
 
                 logger.info("opened %s -> %s", self.selected_virtual, real_path)
-                self.notify(f"Opened {self.selected_virtual} → {real_path.name}")
+                self.notify(_("Opened {virtual} → {real}").format(virtual=self.selected_virtual, real=real_path.name))
 
             except Exception as e:
                 logger.exception("opening %s failed", self.selected_virtual)
@@ -603,7 +603,7 @@ class MeretApp(App):
     def action_tag(self):
         """Tag selected file."""
         if not self.selected_real or not self.selected_real.is_file():
-            self.notify("Select a real file first!", severity="error")
+            self.notify(_("Select a real file first!"), severity="error")
             return
         
         def on_tag(tag: str | None):
@@ -624,7 +624,7 @@ class MeretApp(App):
                     
                     repo.add_tag(file_id, tag)
                     logger.info("tagged %s with %r", self.selected_real, tag)
-                    self.notify(f"Tagged with '{tag}'")
+                    self.notify(_("Tagged with '{tag}'").format(tag=tag))
                     self.virt_tree._load_tree()
 
                 except Exception as e:
@@ -639,13 +639,13 @@ class MeretApp(App):
             if query:
                 def on_result(result: FileEntry | None):
                     if result:
-                        self.notify(f"Selected: {result.filename}")
+                        self.notify(_("Selected: {filename}").format(filename=result.filename))
                 
                 try:
                     repo = get_repo(self.db_path)
                     self.push_screen(SearchScreen(repo, query), on_result)
                 except DatabaseNotFound:
-                    self.notify("No database!", severity="error")
+                    self.notify(_("No database!"), severity="error")
         
         self.push_screen(InputDialog("Search (name or 'tag:xxx'):"), on_query)
     
@@ -654,9 +654,9 @@ class MeretApp(App):
         try:
             repo = get_repo(self.db_path)
             stats = repo.get_stats()
-            self.notify(f"Files: {stats['total_files']}, Tags: {stats['total_tags']}")
+            self.notify(_("Files: {files}, Tags: {tags}").format(files=stats["total_files"], tags=stats["total_tags"]))
         except DatabaseNotFound:
-            self.notify("No database!", severity="error")
+            self.notify(_("No database!"), severity="error")
     
     def action_tree(self):
         """The tag tree is the virtual panel: reload it and move focus there."""
@@ -668,11 +668,11 @@ class MeretApp(App):
         try:
             removed = get_repo(self.db_path).prune_orphan_tags()
         except DatabaseNotFound:
-            self.notify("No database!", severity="error")
+            self.notify(_("No database!"), severity="error")
             return
         logger.info("pruned %d unused tag(s)", removed)
         self.virt_tree._load_tree()
-        self.notify(f"Removed {removed} unused tag(s)")
+        self.notify(_("Removed {n} unused tag(s)").format(n=removed))
 
     def action_delete(self):
         """Delete the tag under the cursor in the virtual panel, after confirmation.
@@ -684,7 +684,7 @@ class MeretApp(App):
             vpath = self.virt_tree.cursor_node.data
         vpath = vpath or self.selected_virtual
         if not vpath:
-            self.notify("Select a tag folder in the virtual panel first", severity="warning")
+            self.notify(_("Select a tag folder in the virtual panel first"), severity="warning")
             return
 
         try:
@@ -694,7 +694,7 @@ class MeretApp(App):
             self.notify(f"Error: {e}", severity="error")
             return
         if not node.is_dir or node.tag_id is None:
-            self.notify("Select a tag folder (not a file or the root)", severity="warning")
+            self.notify(_("Select a tag folder (not a file or the root)"), severity="warning")
             return
 
         # the vpath shows sanitized names — delete by the tag's real path
@@ -713,7 +713,7 @@ class MeretApp(App):
             logger.info("deleted tag %r", path)
             self.selected_virtual = None
             self.virt_tree._load_tree()
-            self.notify(f"Deleted tag {path}")
+            self.notify(_("Deleted tag {path}").format(path=path))
 
         self.push_screen(
             ConfirmDialog(f"Delete tag '{path}'? Files stay; its subtags move up."), on_answer
@@ -763,14 +763,14 @@ class MeretApp(App):
     def action_select_drive(self):
         """Show drive selector (Windows only)."""
         if platform.system() != "Windows":
-            self.notify("Drive selection only available on Windows", severity="warning")
+            self.notify(_("Drive selection only available on Windows"), severity="warning")
             return
         
         def on_drive_selected(drive: Path | None):
             if drive:
                 self.fs_root = drive
                 self._refresh_fs_tree()
-                self.notify(f"Switched to {drive}")
+                self.notify(_("Switched to {drive}").format(drive=drive))
                 if hasattr(self, 'real_tree'):
                     self.real_tree.focus()
         
@@ -825,7 +825,7 @@ class MeretApp(App):
         def on_mountpoint(path: str | None):
             if path:
                 try:
-                    self.notify(f"Mounting at {path}...")
+                    self.notify(_("Mounting at {path}...").format(path=path))
                     # Import and call directly instead of subprocess
                     from meret.vfs.backends.mount import mount as do_mount
                     from meret.vfs import VirtualTree
@@ -845,12 +845,12 @@ class MeretApp(App):
                             )
                     
                     threading.Thread(target=mount_thread, daemon=True).start()
-                    self.notify(f"Mounting at {path}... (Ctrl+C in console to exit)")
+                    self.notify(_("Mounting at {path}... (Ctrl+C in console to exit)").format(path=path))
                     
                 except ImportError as e:
                     logger.warning("mount: no driver: %s", e)
-                    self.notify(f"Missing driver: {e}", severity="error")
-                    self.notify("Install: pip install fusepy (Linux/Mac) or winfspy (Windows)")
+                    self.notify(_("Missing driver: {error}").format(error=e), severity="error")
+                    self.notify(_("Install: pip install fusepy (Linux/Mac) or winfspy (Windows)"))
                 except Exception as e:
                     logger.exception("mount at %s failed", path)
                     self.notify(f"Error: {e}", severity="error")
@@ -864,7 +864,7 @@ class MeretApp(App):
             if path:
                 try:
                     self._run(["meret", "umount", path], check=True)
-                    self.notify(f"Unmounted {path}")
+                    self.notify(_("Unmounted {path}").format(path=path))
                 except Exception as e:
                     logger.exception("umount %s failed", path)
                     self.notify(f"Error: {e}", severity="error")

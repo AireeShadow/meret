@@ -811,3 +811,223 @@ msgstr "Выбрать диск"
 
 msgid "Search"
 msgstr "Поиск"
+
+# TUI - DriveSelector
+msgid "Select Drive:"
+msgstr "Выберите диск:"
+
+# TUI - FilePreview
+msgid "No selection"
+msgstr "Ничего не выбрано"
+
+msgid "Virtual: {path}\nUse 'o' to open real file"
+msgstr "Виртуальный: {path}\nНажмите 'o' чтобы открыть реальный файл"
+
+msgid "Size: {size}\nModified: {mtime}"
+msgstr "Размер: {size}\nИзменён: {mtime}"
+
+msgid "Cannot access file"
+msgstr "Нет доступа к файлу"
+
+# TUI - VirtualFileTree
+msgid "No database - run 'meret init'"
+msgstr "Нет базы данных — выполните 'meret init'"
+
+msgid "Error: {error}"
+msgstr "Ошибка: {error}"
+
+msgid "(empty)"
+msgstr "(пусто)"
+
+msgid "Error: empty vpath for {name}"
+msgstr "Ошибка: пустой vpath для {name}"
+
+# TUI - TagDialog
+msgid "Tag file: {name}"
+msgstr "Тег для файла: {name}"
+
+msgid "Enter tag (e.g., vacation/beach)"
+msgstr "Введите тег (например, путешествия/пляж)"
+
+msgid "Press Enter to confirm, Esc to cancel"
+msgstr "Enter — подтвердить, Esc — отменить"
+
+# TUI - SearchScreen
+msgid "Search: {query}"
+msgstr "Поиск: {query}"
+
+msgid "↑↓ to navigate, Enter to select, Esc to close"
+msgstr "↑↓ навигация, Enter — выбрать, Esc — закрыть"
+
+# TUI - ConfirmDialog
+msgid "y = yes, n / Esc = no"
+msgstr "y — да, n / Esc — нет"
+
+# TUI - CommandPalette
+msgid "Type command..."
+msgstr "Введите команду..."
+
+msgid "Scan directory for media"
+msgstr "Сканировать директорию на медиафайлы"
+
+msgid "Search files by tags/name"
+msgstr "Искать файлы по тегам/имени"
+
+msgid "Tag selected file"
+msgstr "Добавить тег к выбранному файлу"
+
+msgid "Remove tag from file"
+msgstr "Удалить тег с файла"
+
+msgid "Initialize new database"
+msgstr "Инициализировать новую базу данных"
+
+msgid "Edit configuration"
+msgstr "Редактировать конфигурацию"
+
+msgid "Show database statistics"
+msgstr "Показать статистику базы данных"
+
+msgid "Show tag tree"
+msgstr "Показать дерево тегов"
+
+msgid "Remove orphaned tags"
+msgstr "Удалить потерянные теги"
+
+msgid "Mount virtual filesystem"
+msgstr "Смонтировать виртуальную файловую систему"
+
+msgid "Unmount filesystem"
+msgstr "Размонтировать файловую систему"
+
+# TUI - MeretApp notifications
+msgid "Scanning {path}..."
+msgstr "Сканирование {path}..."
+
+msgid "Scan complete!"
+msgstr "Сканирование завершено!"
+
+msgid "Opened {name}"
+msgstr "Открыт {name}"
+
+msgid "Opened {virtual} → {real}"
+msgstr "Открыт {virtual} → {real}"
+
+msgid "Select a real file first!"
+msgstr "Сначала выберите реальный файл!"
+
+msgid "Tagged with '{tag}'"
+msgstr "Добавлен тег '{tag}'"
+
+msgid "Selected: {filename}"
+msgstr "Выбран: {filename}"
+
+msgid "No database!"
+msgstr "Нет базы данных!"
+
+msgid "Files: {files}, Tags: {tags}"
+msgstr "Файлов: {files}, Тегов: {tags}"
+
+msgid "Removed {n} unused tag(s)"
+msgstr "Удалено {n} неиспользуемых тегов"
+
+msgid "Select a tag folder in the virtual panel first"
+msgstr "Сначала выберите папку тега в виртуальной панели"
+
+msgid "Select a tag folder (not a file or the root)"
+msgstr "Выберите папку тега (не файл или корень)"
+
+msgid "Deleted tag {path}"
+msgstr "Удалён тег {path}"
+
+msgid "Drive selection only available on Windows"
+msgstr "Выбор диска доступен только в Windows"
+
+msgid "Switched to {drive}"
+msgstr "Переключено на {drive}"
+
+msgid "Mounting at {path}..."
+msgstr "Монтирование в {path}..."
+
+msgid "Mounting at {path}... (Ctrl+C in console to exit)"
+msgstr "Монтирование в {path}... (Ctrl+C в консоли для выхода)"
+
+msgid "Missing driver: {error}"
+msgstr "Отсутствует драйвер: {error}"
+
+msgid "Install: pip install fusepy (Linux/Mac) or winfspy (Windows)"
+msgstr "Установите: pip install fusepy (Linux/Mac) или winfspy (Windows)"
+
+msgid "Unmounted {path}"
+msgstr "Размонтировано {path}"
+
+msgid "'{cmd}' isn't available in the TUI yet"
+msgstr "'{cmd}' пока недоступно в TUI"
+
+# TUI - Border titles
+msgid "Virtual FS (Tags)"
+msgstr "Виртуальная ФС (Теги)"
+
+msgid "Real Filesystem ({path}) · {sort}"
+msgstr "Реальная файловая система ({path}) · {sort}"
+
+# TUI - SortedDirectoryTree border title
+msgid "Real Filesystem ({path})"
+msgstr "Реальная файловая система ({path})"
+
+# TUI - path bar
+msgid "DB: {db} | Selected: {sel}"
+msgstr "БД: {db} | Выбрано: {sel}"
+
+# TUI - parent directory
+msgid ".."
+msgstr ".."
+
+# TUI - BINDINGS (если не переведены)
+msgid "Quit"
+msgstr "Выход"
+
+msgid "Command"
+msgstr "Команда"
+
+msgid "Init DB"
+msgstr "Иниц. БД"
+
+msgid "Scan"
+msgstr "Скан"
+
+msgid "Tag"
+msgstr "Тег"
+
+msgid "Refresh"
+msgstr "Обновить"
+
+msgid "Config"
+msgstr "Конфиг"
+
+msgid "Delete tag"
+msgstr "Удалить тег"
+
+msgid "Home"
+msgstr "Домой"
+
+msgid "Up"
+msgstr "Вверх"
+
+msgid "Sort"
+msgstr "Сортировать"
+
+msgid "Mount"
+msgstr "Монтировать"
+
+msgid "Unmount"
+msgstr "Размонтировать"
+
+msgid "Select Drive"
+msgstr "Выбрать диск"
+
+msgid "Search"
+msgstr "Поиск"
+
+msgid "Help"
+msgstr "Помощь"

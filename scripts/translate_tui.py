@@ -1,182 +1,141 @@
 #!/usr/bin/env python3
-"""Auto-translate tui.py strings."""
+"""Fix remaining untranslated strings in tui.py."""
 
-import re
 from pathlib import Path
 
-def translate_tui():
+def fix_tui():
     tui_file = Path(__file__).parent.parent / "meret" / "cli" / "tui.py"
     content = tui_file.read_text(encoding="utf-8")
     
-    # Проверяем, что уже есть импорт _
+    # Проверяем, что есть импорт _
     if "from meret.core.locale import _" not in content:
-        # Добавляем импорт после существующих импортов
-        content = content.replace(
-            "from meret.vfs import IsADirectory, NotFound, VirtualTree",
-            "from meret.core.locale import _\nfrom meret.vfs import IsADirectory, NotFound, VirtualTree"
-        )
+        print("ERROR: Missing import of _ from meret.core.locale")
+        return
     
-    # Словарь замен: старая строка → новая
     replacements = {
+        # DriveSelector
+        'yield Label("Select Drive:")': 'yield Label(_("Select Drive:"))',
+        
         # FilePreview
-        'yield Label("Select a file to preview")': 'yield Label(_("Select a file to preview"))',
-        'self.border_title = "Preview"': 'self.border_title = _("Preview")',
-        'self.update("No selection")': 'self.update(_("No selection"))',
-        'self.update(f"Virtual: {node.vpath}\\nUse \'o\' to open real file")': 
-            'self.update(_("Virtual: {path}\\nUse \'o\' to open real file").format(path=node.vpath))',
-        'self.update(f"File: {real}\\nSize: {size} bytes")':
-            'self.update(_("File: {path}\\nSize: {size} bytes").format(path=real, size=size))',
-        'self.update("Cannot access file")': 'self.update(_("Cannot access file"))',
-        'self.update(f"Error: {e}")': 'self.update(_("Error: {error}").format(error=e))',
+        'super().__init__("Select a file to preview': 'super().__init__(_("Select a file to preview',
+        'self.update("[dim]No selection[/dim]")': 'self.update(_("[dim]No selection[/dim]"))',
+        'self.update(f"[cyan]Virtual:[/cyan] {path}\\n[dim]Use \'o\' to open real file[/dim]")':
+            'self.update(_("[cyan]Virtual:[/cyan] {path}\\n[dim]Use \'o\' to open real file[/dim]").format(path=path))',
+        'self.update(f"[green]{path.name}[/green]\\nSize: {size}\\nModified: {stat.st_mtime}")':
+            'self.update(_("[green]{name}[/green]\\nSize: {size}\\nModified: {mtime}").format(name=path.name, size=size, mtime=stat.st_mtime))',
+        'self.update("[red]Cannot access file[/red]")': 'self.update(_("[red]Cannot access file[/red]"))',
+        
+        # VirtualFileTree
+        'self.root.add_leaf("[dim]No database - run \'meret init\'[/dim]")':
+            'self.root.add_leaf(_("[dim]No database - run \'meret init\'[/dim]"))',
+        'self.root.add_leaf(f"[red]Error: {escape(str(e))}[/red] [dim](meret logs)[/dim]")':
+            'self.root.add_leaf(_("[red]Error: {error}[/red] [dim](meret logs)[/dim]").format(error=escape(str(e))))',
+        'node.add_leaf("[dim](empty)[/dim]")': 'node.add_leaf(_("[dim](empty)[/dim]"))',
+        'node.add_leaf(f"[red]Error: empty vpath for {entry.name}[/red]")':
+            'node.add_leaf(_("[red]Error: empty vpath for {name}[/red]").format(name=entry.name))',
         
         # TagDialog
-        'yield Label(f"Tag file: {self.filename}")': 'yield Label(_("Tag file: {filename}").format(filename=self.filename))',
-        'yield Input(placeholder="Enter tag (e.g., vacation/beach)")': 
-            'yield Input(placeholder=_("Enter tag (e.g., vacation/beach)"))',
-        'yield Label("Press Enter to confirm, Esc to cancel")': 
-            'yield Label(_("Press Enter to confirm, Esc to cancel"))',
+        'yield Label(f"Tag file: {self.file_path.name}")': 'yield Label(_("Tag file: {name}").format(name=self.file_path.name))',
+        'yield Input(placeholder="Enter tag (e.g., vacation/beach)", id="tag_input")':
+            'yield Input(placeholder=_("Enter tag (e.g., vacation/beach)"), id="tag_input")',
+        'yield Label("[dim]Press Enter to confirm, Esc to cancel[/dim]")':
+            'yield Label(_("[dim]Press Enter to confirm, Esc to cancel[/dim]"))',
         
-        # SearchDialog
-        'yield Label(f"Search: {self.query or \'(all files)\'}")':
-            'yield Label(_("Search: {query}").format(query=self.query or _("(all files)")))',
-        'yield Input(placeholder="Enter search query")': 'yield Input(placeholder=_("Enter search query"))',
-        'yield Label("↑↓ to navigate, Enter to select, Esc to close")':
-            'yield Label(_("↑↓ to navigate, Enter to select, Esc to close"))',
+        # SearchScreen
+        'yield Label(f"Search: {self.query}")': 'yield Label(_("Search: {query}").format(query=self.query))',
+        'yield Label("[dim]↑↓ to navigate, Enter to select, Esc to close[/dim]")':
+            'yield Label(_("[dim]↑↓ to navigate, Enter to select, Esc to close[/dim]"))',
         
         # ConfirmDialog
-        'yield Label("y = yes, n / Esc = no")': 'yield Label(_("y = yes, n / Esc = no"))',
+        'yield Label("[dim]y = yes, n / Esc = no[/dim]")':
+            'yield Label(_("[dim]y = yes, n / Esc = no[/dim]"))',
         
         # CommandPalette
-        '("Scan directory for media", "scan")': '(_("Scan directory for media"), "scan")',
-        '("Search files by tags/name", "search")': '(_("Search files by tags/name"), "search")',
-        '("Tag selected file", "tag")': '(_("Tag selected file"), "tag")',
-        '("Remove tag from file", "untag")': '(_("Remove tag from file"), "untag")',
-        '("Initialize new database", "init")': '(_("Initialize new database"), "init")',
-        '("Edit configuration", "config")': '(_("Edit configuration"), "config")',
-        '("Show database statistics", "stats")': '(_("Show database statistics"), "stats")',
-        '("Show tag tree", "tree")': '(_("Show tag tree"), "tree")',
-        '("Remove orphaned tags", "prune")': '(_("Remove orphaned tags"), "prune")',
-        '("Mount virtual filesystem", "mount")': '(_("Mount virtual filesystem"), "mount")',
-        '("Unmount filesystem", "umount")': '(_("Unmount filesystem"), "umount")',
-        'yield Input(placeholder="Type command...")': 'yield Input(placeholder=_("Type command..."))',
+        'yield Input(placeholder="Type command...", id="cmd_input")':
+            'yield Input(placeholder=_("Type command..."), id="cmd_input")',
         
-        # MeretApp bindings
-        'Binding("q", "Quit", "Quit")': 'Binding("q", _("Quit"), _("Quit"))',
-        'Binding(":", "Command", "Command")': 'Binding(":", _("Command"), _("Command"))',
-        'Binding("i", "Init DB", "Init DB")': 'Binding("i", _("Init DB"), _("Init DB"))',
-        'Binding("o", "Open", "Open")': 'Binding("o", _("Open"), _("Open"))',
-        'Binding("s", "Scan", "Scan")': 'Binding("s", _("Scan"), _("Scan"))',
-        'Binding("t", "Tag", "Tag")': 'Binding("t", _("Tag"), _("Tag"))',
-        'Binding("r", "Refresh", "Refresh")': 'Binding("r", _("Refresh"), _("Refresh"))',
-        'Binding("c", "Config", "Config")': 'Binding("c", _("Config"), _("Config"))',
-        'Binding("d", "Delete tag", "Delete tag")': 'Binding("d", _("Delete tag"), _("Delete tag"))',
-        'Binding("h", "Home", "Home")': 'Binding("h", _("Home"), _("Home"))',
-        'Binding("u", "Up", "Up")': 'Binding("u", _("Up"), _("Up"))',
-        'Binding("S", "Sort", "Sort")': 'Binding("S", _("Sort"), _("Sort"))',
-        'Binding("m", "Mount", "Mount")': 'Binding("m", _("Mount"), _("Mount"))',
-        'Binding("U", "Unmount", "Unmount")': 'Binding("U", _("Unmount"), _("Unmount"))',
-        'Binding("D", "Select Drive", "Select Drive")': 'Binding("D", _("Select Drive"), _("Select Drive"))',
-        'Binding("/", "Search", "Search")': 'Binding("/", _("Search"), _("Search"))',
-        'Binding("?", "Help", "Help")': 'Binding("?", _("Help"), _("Help"))',
+        # CommandPalette commands (кортежи)
+        '("scan", "Scan directory for media")': '("scan", _("Scan directory for media"))',
+        '("search", "Search files by tags/name")': '("search", _("Search files by tags/name"))',
+        '("tag", "Tag selected file")': '("tag", _("Tag selected file"))',
+        '("untag", "Remove tag from file")': '("untag", _("Remove tag from file"))',
+        '("init", "Initialize new database")': '("init", _("Initialize new database"))',
+        '("config", "Edit configuration")': '("config", _("Edit configuration"))',
+        '("stats", "Show database statistics")': '("stats", _("Show database statistics"))',
+        '("tree", "Show tag tree")': '("tree", _("Show tag tree"))',
+        '("prune", "Remove orphaned tags")': '("prune", _("Remove orphaned tags"))',
+        '("mount", "Mount virtual filesystem")': '("mount", _("Mount virtual filesystem"))',
+        '("umount", "Unmount filesystem")': '("umount", _("Unmount filesystem"))',
         
-        # MeretApp methods
-        'self.sort_by = "name"': 'self.sort_by = _("name")',
-        'Static("Loading...", id="left")': 'Static(_("Loading..."), id="left")',
-        'Static("Loading...", id="right")': 'Static(_("Loading..."), id="right")',
-        'self.title = "Meret TUI"': 'self.title = _("Meret TUI")',
-        'left.update("No database - run \'meret init\'")':
-            'left.update(_("No database - run \'meret init\'"))',
-        'left.update("Virtual FS (Tags)")': 'left.update(_("Virtual FS (Tags)"))',
-        'right.update(f"Real Filesystem ({Path.cwd()})")':
-            'right.update(_("Real Filesystem ({path})").format(path=Path.cwd()))',
+        # MeretApp notifications
+        'self.notify(f"Scanning {self.selected_real}...")':
+            'self.notify(_("Scanning {path}...").format(path=self.selected_real))',
+        'self.notify("Scan complete!")': 'self.notify(_("Scan complete!"))',
+        'self.notify(f"Opened {self.selected_real.name}")':
+            'self.notify(_("Opened {name}").format(name=self.selected_real.name))',
+        'self.notify(f"Opened {self.selected_virtual} → {real_path.name}")':
+            'self.notify(_("Opened {virtual} → {real}").format(virtual=self.selected_virtual, real=real_path.name))',
+        'self.notify("Select a real file first!", severity="error")':
+            'self.notify(_("Select a real file first!"), severity="error")',
+        'self.notify(f"Tagged with \'{tag}\'")': 'self.notify(_("Tagged with \'{tag}\'").format(tag=tag))',
+        'self.notify(f"Selected: {result.filename}")':
+            'self.notify(_("Selected: {filename}").format(filename=result.filename))',
+        'self.notify("No database!", severity="error")':
+            'self.notify(_("No database!"), severity="error")',
+        'self.notify(f"Files: {stats[\'total_files\']}, Tags: {stats[\'total_tags\']}")':
+            'self.notify(_("Files: {files}, Tags: {tags}").format(files=stats["total_files"], tags=stats["total_tags"]))',
+        'self.notify(f"Removed {removed} unused tag(s)")':
+            'self.notify(_("Removed {n} unused tag(s)").format(n=removed))',
+        'self.notify("Select a tag folder in the virtual panel first", severity="warning")':
+            'self.notify(_("Select a tag folder in the virtual panel first"), severity="warning")',
+        'self.notify("Select a tag folder (not a file or the root)", severity="warning")':
+            'self.notify(_("Select a tag folder (not a file or the root)"), severity="warning")',
+        'self.notify(f"Deleted tag {path}")': 'self.notify(_("Deleted tag {path}").format(path=path))',
+        'self.notify("Drive selection only available on Windows", severity="warning")':
+            'self.notify(_("Drive selection only available on Windows"), severity="warning")',
+        'self.notify(f"Switched to {drive}")': 'self.notify(_("Switched to {drive}").format(drive=drive))',
+        'self.notify(f"Mounting at {path}...")': 'self.notify(_("Mounting at {path}...").format(path=path))',
+        'self.notify(f"Mounting at {path}... (Ctrl+C in console to exit)")':
+            'self.notify(_("Mounting at {path}... (Ctrl+C in console to exit)").format(path=path))',
+        'self.notify(f"Missing driver: {e}", severity="error")':
+            'self.notify(_("Missing driver: {error}").format(error=e), severity="error")',
+        'self.notify("Install: pip install fusepy (Linux/Mac) or winfspy (Windows)")':
+            'self.notify(_("Install: pip install fusepy (Linux/Mac) or winfspy (Windows)"))',
+        'self.notify(f"Unmounted {path}")': 'self.notify(_("Unmounted {path}").format(path=path))',
+        'self.notify(f"\'{cmd}\' isn\'t available in the TUI yet", severity="warning")':
+            'self.notify(_("\'{cmd}\' isn\'t available in the TUI yet").format(cmd=cmd), severity="warning")',
         
-        # Notifications
-        'self.notify("Command: {cmd}".format(cmd=result))':
-            'self.notify(_("Command: {cmd}").format(cmd=result))',
-        'self.notify("Database initialized!")': 'self.notify(_("Database initialized!"))',
-        'self.notify("Opened file")': 'self.notify(_("Opened file"))',
-        'self.notify("Scanning...")': 'self.notify(_("Scanning..."))',
-        'self.notify("Tagged with \'{tag}\'".format(tag=result))':
-            'self.notify(_("Tagged with \'{tag}\'").format(tag=result))',
-        'TagDialog("selected file")': 'TagDialog(_("selected file"))',
-        'self.notify("Refreshed")': 'self.notify(_("Refreshed"))',
-        'self.notify("Configuration")': 'self.notify(_("Configuration"))',
-        'self.notify("Delete tag")': 'self.notify(_("Delete tag"))',
-        'self.notify("Home directory")': 'self.notify(_("Home directory"))',
-        'self.notify("Go up")': 'self.notify(_("Go up"))',
-        'modes = ["name", "size", "date"]': 'modes = [_("name"), _("size"), _("date")]',
-        'self.notify(f"Sort by: {self.sort_by}")':
-            'self.notify(_("Sort by: {mode}").format(mode=self.sort_by))',
-        'self.notify("Mounting...")': 'self.notify(_("Mounting..."))',
-        'self.notify("Unmounting...")': 'self.notify(_("Unmounting..."))',
-        'self.notify("Drive selection only available on Windows")':
-            'self.notify(_("Drive selection only available on Windows"))',
-        'self.notify("Select drive")': 'self.notify(_("Select drive"))',
-        'self.notify(f"Search: {result}")': 'self.notify(_("Search: {query}").format(query=result))',
+        # Border titles
+        'self.border_title = "Virtual FS (Tags)"': 'self.border_title = _("Virtual FS (Tags)")',
+        'self.real_tree.border_title=f"Real Filesystem ({self.fs_root}) · {self.sort_by}"':
+            'self.real_tree.border_title=_("Real Filesystem ({path}) · {sort}").format(path=self.fs_root, sort=self.sort_by)',
         
         # Help text
-        'title="Help"': 'title=_("Help")',
+        'help_text="""': 'help_text=_("""',
     }
     
     # Применяем замены
+    count = 0
     for old, new in replacements.items():
-        content = content.replace(old, new)
+        if old in content:
+            content = content.replace(old, new)
+            count += 1
     
-    # Многострочный help text
-    old_help = '''        help_text = (
-            "Navigation:\\n"
-            "  ↑/↓ Navigate\\n"
-            "  Enter Open file / expand folder\\n"
-            "  .. or u/Backspace Go to parent\\n"
-            "  h or ~ Go home\\n"
-            "  D Select drive (Windows)\\n"
-            "  S Cycle sort: name / size / date\\n"
-            "Commands:\\n"
-            "  q Quit\\n"
-            "  : Command palette\\n"
-            "  / Search\\n"
-            "  s Scan directory\\n"
-            "  t Tag selected file\\n"
-            "  d Delete tag\\n"
-            "  r Refresh\\n"
-            "  m/U Mount/Unmount\\n"
-            "  c Config\\n"
-            "  i Init DB"
-        )'''
+    # Закрывающие кавычки для help_text (только если мы открыли с _(""")
+    if 'help_text=_("""' in content and '"""' in content:
+        # Находим позицию после help_text и заменяем первые """ после него
+        idx = content.find('help_text=_("""')
+        if idx > 0:
+            # Ищем закрывающие """ после открывающих
+            start = idx + len('help_text=_("""')
+            end = content.find('"""', start)
+            if end > start:
+                # Заменяем """ на """)  — но осторожно, не трогаем другие
+                content = content[:end] + '""")' + content[end+3:]
     
-    new_help = '''        help_text = _(
-            "Navigation:\\n"
-            "  ↑/↓ Navigate\\n"
-            "  Enter Open file / expand folder\\n"
-            "  .. or u/Backspace Go to parent\\n"
-            "  h or ~ Go home\\n"
-            "  D Select drive (Windows)\\n"
-            "  S Cycle sort: name / size / date\\n"
-            "Commands:\\n"
-            "  q Quit\\n"
-            "  : Command palette\\n"
-            "  / Search\\n"
-            "  s Scan directory\\n"
-            "  t Tag selected file\\n"
-            "  d Delete tag\\n"
-            "  r Refresh\\n"
-            "  m/U Mount/Unmount\\n"
-            "  c Config\\n"
-            "  i Init DB"
-        )'''
-    
-    content = content.replace(old_help, new_help)
-    
-    # RuntimeError в импорте
-    content = content.replace(
-        '"Textual is required for the TUI. Install: pip install textual"',
-        '_("Textual is required for the TUI. Install: pip install textual")'
-    )
-    
-    # Сохраняем
     tui_file.write_text(content, encoding="utf-8")
-    print(f"✓ Translated {len(replacements)} strings in {tui_file}")
+    print(f"✓ Fixed {count} strings in {tui_file}")
 
 
 if __name__ == "__main__":
-    translate_tui()
+    fix_tui()
