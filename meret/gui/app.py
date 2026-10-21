@@ -2,7 +2,8 @@
 
 Qt objects live on the GUI thread only. Anything that touches SQLite or decodes
 an image goes through TaskRunner and comes back as a signal. The tag panel reads
-the same VirtualTree a mount would serve, so the two can never disagree.
+the same VirtualTree a mount would serve, so the two can never disagree, and the
+real filesystem panel is plain Qt - it only picks a path to scan or to tag.
 """
 
 import logging
@@ -10,10 +11,13 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
+from PySide6.QtCore import QDir, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QFileSystemModel,
+    QGroupBox,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -21,12 +25,17 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStatusBar,
     QStyle,
+    QToolBar,
+    QTreeView,
     QTreeWidget,
     QTreeWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
+from meret.core import tagpaths
 from meret.core.config import get_config
+from meret.core.indexer import Indexer
 from meret.core.locale import _
 from meret.core.sqlite_repo import SQLiteRepository
 from meret.gui.thumbnails import ThumbnailCache
@@ -112,6 +121,39 @@ class TagTree(QTreeWidget):
             self.tag_selected.emit(current.data(0, Qt.ItemDataRole.UserRole) or "/")
 
 
+class RealFsPanel(QTreeView):
+    """The real filesystem: where a folder to scan is picked.
+
+    Qt's own model, so nothing here needs a database connection or a pool thread.
+    """
+
+    path_activated = Signal(str)
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._model = QFileSystemModel(self)
+        self._model.setFilter(
+            QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot
+        )
+        self.setModel(self._model)
+        self.setHeaderHidden(True)
+        for column in (1, 2, 3):  # size, type, date - the name column is enough
+            self.hideColumn(column)
+        self.doubleClicked.connect(self._on_double)
+
+    def set_root(self, path: Path) -> None:
+        self.setRootIndex(self._model.setRootPath(str(path)))
+
+    def current_path(self) -> Optional[Path]:
+        index = self.currentIndex()
+        if not index.isValid():
+            return None
+        return Path(self._model.filePath(index))
+
+    def _on_double(self, index) -> None:
+        self.path_activated.emit(self._model.filePath(index))
+
+
 class MainWindow(QMainWindow):
     """Browse the tag tree, the files under one tag, and a preview."""
 
@@ -138,6 +180,7 @@ class MainWindow(QMainWindow):
 
         # Widgets next
         self._build_ui()
+        self._build_toolbar()
 
         self.setWindowTitle(_("meret"))
         self.resize(config.window_width, config.window_height)
@@ -149,6 +192,10 @@ class MainWindow(QMainWindow):
         self._poll.timeout.connect(self._check_version)
         self._poll.start()
 
+        # The tree has to be filled once by hand: reload() is otherwise only
+        # reached through the outside-change path, which leaves it empty on start
+        self.tags.reload()
+
         # First paint - nothing may come after this
         self.open_folder("/")
 
@@ -158,7 +205,20 @@ class MainWindow(QMainWindow):
         self.tags = TagTree(self._tree, self)
         self.tags.setMinimumWidth(180)
         self.tags.tag_selected.connect(self.open_folder)
-        splitter.addWidget(self.tags)
+
+        self.fs = RealFsPanel(self)
+        self.fs.path_activated.connect(self._on_real_activated)
+        self.fs.set_root(self._db_path.parent)
+
+        left = QSplitter(Qt.Orientation.Vertical, self)
+        tags_box = QGroupBox(_("Virtual FS (Tags)"), self)
+        QVBoxLayout(tags_box).addWidget(self.tags)
+        fs_box = QGroupBox(_("Real Filesystem"), self)
+        QVBoxLayout(fs_box).addWidget(self.fs)
+        left.addWidget(tags_box)
+        left.addWidget(fs_box)
+        left.setSizes([320, 320])
+        splitter.addWidget(left)
 
         self.preview = QLabel(_("Nothing selected"), self)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -187,7 +247,35 @@ class MainWindow(QMainWindow):
         bar.addPermanentWidget(self._status_label)
         self.setStatusBar(bar)
 
+    def _build_toolbar(self) -> None:
+        """The commands the TUI had, as buttons. Labels reuse the catalog."""
+        self.toolbar = QToolBar(_("Commands"), self)
+        self.toolbar.setMovable(False)
+        self.addToolBar(self.toolbar)
+
+        def add(label: str, handler, shortcut: str) -> None:
+            action = QAction(label, self)
+            action.setShortcut(shortcut)
+            action.triggered.connect(handler)
+            self.toolbar.addAction(action)
+
+        add(_("Refresh"), self._refresh, "F5")
+        add(_("Scan"), self._scan, "F6")
+        self.toolbar.addSeparator()
+        add(_("Tag selected file"), self._tag_selected, "Ctrl+T")
+        add(_("Remove tag from file"), self._untag_selected, "Ctrl+Shift+T")
+        add(_("Delete tag"), self._delete_tag, "Ctrl+D")
+        self.toolbar.addSeparator()
+        add(_("Open file"), self._open_selected, "Ctrl+O")
+        add(_("Quit"), self.close, "Ctrl+Q")
+
     # ---------- contents ----------
+
+    def _refresh(self) -> None:
+        """Re-read tags and the current folder after any write."""
+        self._tree.invalidate()
+        self.tags.reload()
+        self.open_folder(self._vpath)
 
     def open_folder(self, path: str) -> None:
         """Show a virtual folder: its subfolders and its files."""
@@ -204,13 +292,6 @@ class MainWindow(QMainWindow):
             on_failed=lambda error: self._show_error(self._vpath, error),
             args=(self._vpath,),
             generation=generation,
-        )
-
-    def _show_error(self, path: str, error: Exception) -> None:
-        """A listing that failed must be visible, never a silently empty grid."""
-        logger.warning("cannot list %s: %s", path, error)
-        self._status_label.setText(
-            _("Cannot open {path}: {error}").format(path=path, error=error)
         )
 
     def _show_nodes(self, nodes: List[Node], generation: int) -> None:
@@ -269,6 +350,102 @@ class MainWindow(QMainWindow):
         else:
             self._status_label.setText(_("No selection"))
 
+    def _show_error(self, path: str, error: Exception) -> None:
+        """A listing that failed must be visible, never a silently empty grid."""
+        logger.warning("cannot list %s: %s", path, error)
+        self._status_label.setText(
+            _("Cannot open {path}: {error}").format(path=path, error=error)
+        )
+
+    # ---------- commands ----------
+
+    def _target_files(self) -> List[tuple]:
+        """(file_id, path) for the grid selection, else the real-FS selection."""
+        chosen = [
+            (item.data(self.ROLE_FILE_ID), item.data(self.ROLE_SOURCE))
+            for item in self.grid.selectedItems()
+            if item.data(self.ROLE_FILE_ID) is not None
+        ]
+        if chosen:
+            return chosen
+
+        path = self.fs.current_path()
+        if path is None or path.is_dir():
+            return []
+        entry = self._repo.get_file_by_path(str(path))
+        return [(entry.id, entry.filepath)] if entry else []
+
+    def _tag_selected(self) -> None:
+        """Add a tag (a path creates missing parents) to the selected files."""
+        targets = self._target_files()
+        if not targets:
+            self._status_label.setText(_("Select a real file first!"))
+            return
+
+        name, accepted = QInputDialog.getText(
+            self, _("Tag"), _("Enter tag (e.g., vacation/beach)")
+        )
+        if not accepted or not name.strip():
+            return
+        for file_id, _path in targets:
+            self._repo.add_tag(file_id, name.strip())
+        self._refresh()
+
+    def _untag_selected(self) -> None:
+        """Remove a tag from the selected files."""
+        targets = self._target_files()
+        if not targets:
+            self._status_label.setText(_("Select a real file first!"))
+            return
+
+        name, accepted = QInputDialog.getText(
+            self, _("Remove tag from file"), _("Tag path")
+        )
+        if not accepted or not name.strip():
+            return
+        for file_id, _path in targets:
+            self._repo.remove_tag(file_id, name.strip())
+        self._refresh()
+
+    def _delete_tag(self) -> None:
+        """Delete the tag selected in the tree. Its children move up one level."""
+        item = self.tags.currentItem()
+        path = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+        if not path or path == "/":
+            self._status_label.setText(_("Select a tag folder in the virtual panel first"))
+            return
+
+        self._repo.delete_tag(path.lstrip("/"))
+        self._status_label.setText(_("Deleted tag {path}").format(path=path))
+        self._refresh()
+
+    def _scan(self) -> None:
+        """Index the folder picked in the real filesystem panel."""
+        target = self.fs.current_path()
+        if target is None:
+            self._status_label.setText(_("Select a real file first!"))
+            return
+
+        folder = target if target.is_dir() else target.parent
+        self._status_label.setText(_("Scanning {path}...").format(path=folder))
+        indexer = Indexer(self._repo, folder)
+        self._tasks.run(
+            indexer.run, on_done=self._on_scan_done, on_failed=self._on_scan_failed
+        )
+
+    def _on_scan_done(self, _stats: dict) -> None:
+        self._status_label.setText(_("Scan complete!"))
+        self._refresh()
+
+    def _on_scan_failed(self, error: Exception) -> None:
+        logger.warning("scan failed: %s", error)
+        self._status_label.setText(_("Error: {error}").format(error=error))
+
+    def _open_selected(self) -> None:
+        selected = self.grid.selectedItems()
+        if selected:
+            self._open_external(selected[0])
+
     # ---------- preview ----------
 
     def _show_preview(self) -> None:
@@ -318,6 +495,29 @@ class MainWindow(QMainWindow):
         if vpath:
             self.open_folder(vpath)
 
+    def _on_real_activated(self, path: str) -> None:
+        """A real file: jump to its first tag folder, or hand it to the system."""
+        target = Path(path)
+        if target.is_dir():
+            self._status_label.setText(_("Path: {path}").format(path=target))
+            return
+
+        entry = self._repo.get_file_by_path(str(target))
+        if entry is None:
+            self._status_label.setText(
+                _("File is not in the database: {path}").format(path=target)
+            )
+            return
+
+        if entry.labels:
+            known = tagpaths.name_to_path(self._repo.get_all_tags())
+            first = known.get(entry.labels[0].casefold())
+            if first:
+                self.tags.reload()
+                self.open_folder("/" + first)
+                return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
     # ---------- outside changes ----------
 
     def _check_version(self) -> None:
@@ -332,9 +532,7 @@ class MainWindow(QMainWindow):
         if not known:
             return  # the first reading is just a baseline
         logger.debug("data_version moved to %s, reloading", version)
-        self._tree.invalidate()
-        self.tags.reload()
-        self.open_folder(self._vpath)
+        self._refresh()
 
     def closeEvent(self, event) -> None:
         self._poll.stop()

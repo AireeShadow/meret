@@ -8,12 +8,13 @@ Each task carries a generation. A panel that re-asks (another tag, another
 folder) calls bump(); results from an older generation are dropped instead of
 overwriting fresher rows.
 
-Two lifetime rules keep this honest:
-- the pool must not delete the runnable: Python owns the wrapper and the signals
-  object the pool thread emits into. autoDelete is off, and TaskRunner holds
-  every in-flight task until its result has been delivered.
-- task signals carry the task itself, so the runner can compare generations and
-  the arity of signal and slot always matches.
+Lifetime rules, learned the hard way:
+- the pool must not delete the runnable, and Python must not collect it while a
+  pool thread is inside run(). Module-level _INFLIGHT is the safety net: it keeps
+  every task alive from start() until its result has been delivered, even if the
+  TaskRunner that queued it is already garbage.
+- a task keeps its runner alive, so a queued delivery still finds its receiver.
+- delivery is explicitly queued, so callbacks never run on a pool thread.
 """
 
 import logging
@@ -22,6 +23,11 @@ from typing import Any, Callable, Optional
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot
 
 logger = logging.getLogger(__name__)
+
+#: Tasks the pool is working on right now. A task may outlive its runner, and the
+#: pool thread emits into the task's signals object, so Python must not collect it
+#: mid-flight. Entries are removed when the result is delivered.
+_INFLIGHT: set["Task"] = set()
 
 
 class _TaskSignals(QObject):
@@ -51,8 +57,9 @@ class Task(QRunnable):
         self.generation = 0
         self.on_done: Optional[Callable[[Any], None]] = None
         self.on_failed: Optional[Callable[[Exception], None]] = None
+        self.runner: Optional["TaskRunner"] = None
         self.signals = _TaskSignals()
-        # Python keeps ownership: the runner references the task until delivery
+        # Python keeps ownership: _INFLIGHT references the task until delivery
         self.setAutoDelete(False)
 
     @Slot()
@@ -76,7 +83,7 @@ class TaskRunner(QObject):
         if max_threads > 0:
             self._pool.setMaxThreadCount(max_threads)
         self._generation = 0
-        # Strong references to tasks whose result has not been delivered yet
+        # Runner-scoped view of the same tasks, for clear() and shutdown()
         self._inflight: set[Task] = set()
 
     @property
@@ -103,10 +110,9 @@ class TaskRunner(QObject):
         task.generation = self._generation if generation is None else generation
         task.on_done = on_done
         task.on_failed = on_failed
+        task.runner = self
         # Explicitly queued: results must land on the runner's thread (the GUI
-        # thread), never on the pool thread that produced them. AutoConnection
-        # would be decided by Qt, and a DirectConnection here means widgets get
-        # touched from a pool thread - which works until it does not.
+        # thread), never on the pool thread that produced them
         task.signals.done.connect(
             self._deliver_done, Qt.ConnectionType.QueuedConnection
         )
@@ -114,6 +120,7 @@ class TaskRunner(QObject):
             self._deliver_failed, Qt.ConnectionType.QueuedConnection
         )
         self._inflight.add(task)
+        _INFLIGHT.add(task)
         self._pool.start(task)
         return task
 
@@ -125,7 +132,7 @@ class TaskRunner(QObject):
             elif task.on_done is not None:
                 task.on_done(result)
         finally:
-            self._inflight.discard(task)
+            self._release(task)
 
     @Slot(object, object)
     def _deliver_failed(self, task: Task, error: Exception) -> None:
@@ -135,14 +142,25 @@ class TaskRunner(QObject):
             if task.on_failed is not None:
                 task.on_failed(error)
             else:  # never let a failure disappear just because nobody listened
-                logger.warning("task %s failed: %s", getattr(task.fn, "__name__", task.fn), error)
+                logger.warning(
+                    "task %s failed: %s", getattr(task.fn, "__name__", task.fn), error
+                )
         finally:
-            self._inflight.discard(task)
+            self._release(task)
+
+    def _release(self, task: Task) -> None:
+        """The result is delivered: the task may be collected now."""
+        self._inflight.discard(task)
+        _INFLIGHT.discard(task)
+        task.runner = None
 
     def clear(self) -> None:
-        """Drop queued work. Running tasks finish on their own."""
+        """Drop queued work. Running tasks finish on their own.
+
+        Cleared-but-never-started tasks get no delivery, so they stay in
+        _INFLIGHT until the process ends - cheap, and it keeps them safe.
+        """
         self._pool.clear()
-        # Never-started tasks get no delivery, so nothing else references them
         self._inflight.clear()
 
     def wait(self, msecs: int = -1) -> bool:
