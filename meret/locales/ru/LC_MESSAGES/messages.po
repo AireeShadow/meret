@@ -1301,4 +1301,4 @@ msgid "Selected:"
 msgstr "Выбрано:"
 
 msgid "No such command '{cmd}'. Available: {available}"
-msgstr "Команда '{cmd} не найдена'. Доступные: {available}"
+msgstr "Команда '{cmd}' не найдена. Доступные: {available}"

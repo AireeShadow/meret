@@ -1,5 +1,6 @@
 """Translations: catalog loading, language detection, and the CLI in Russian."""
 
+import re
 import sys
 import ast
 import gettext
@@ -50,6 +51,25 @@ def _msgids_in_code():
 def _fields(text):
     return sorted({name for _, name, _, _ in string.Formatter().parse(text) if name is not None})
 
+def _plain(text: str) -> str:
+    """The error goes out in a Rich panel: drop the borders and squeeze whitespace."""
+    return re.sub(r"\s+", " ", text.replace("│", " ").replace("─", " "))
+
+
+def test_unknown_command_is_translated():
+    """The group builds this message itself: typer's own gettext would say English."""
+    res = runner.invoke(app, ["--lang", "ru", "scna"])
+    assert res.exit_code == 2
+    flat = _plain(res.output)
+    assert "Команда 'scna' не найдена" in flat
+    assert "scan" in flat  # the suggestion survives
+
+
+def test_unknown_command_without_a_close_match():
+    res = runner.invoke(app, ["--lang", "ru", "zzzzzz"])
+    assert res.exit_code == 2
+    assert "Доступные" in _plain(res.output)
+
 
 def test_code_has_translatable_strings():
     assert len(_msgids_in_code()) > 30
@@ -73,6 +93,13 @@ def test_every_msgid_is_translated_with_the_same_placeholders(language):
     assert not missing, "not in the catalog:\n" + "\n".join(missing)
     assert not broken, "placeholders differ:\n" + "\n".join(broken)
 
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_quoted_placeholders_stay_quoted(language):
+    """`'{cmd}'` must keep both quotes: a stray apostrophe reads as a typo."""
+    po = DEFAULT_LOCALE_DIR / language / "LC_MESSAGES" / "messages.po"
+    catalog = _parse_po(po.read_text(encoding="utf-8"))
+    bad = [f"{m!r} -> {t!r}" for m, t in catalog.items() if "'{cmd}'" in m and "'{cmd}'" not in t]
+    assert not bad, "\n".join(bad)
 
 def test_no_markup_in_msgids():
     """Markup belongs in the code: '[green]' in a msgid is a translator trap."""
@@ -359,8 +386,7 @@ def test_unknown_command_is_translated():
     res = runner.invoke(app, ["--lang", "ru", "scna"])
     assert res.exit_code == 2
     flat = res.output.replace("\n", " ")
-    assert "Нет такой команды" in flat
-    assert "scan" in flat  # the suggestion survives
+    assert "Команда 'scna' не найдена" in flat
 
 
 def test_unknown_command_without_a_close_match():
@@ -375,11 +401,12 @@ def test_app_uses_the_translated_group():
     assert app.info.cls is TranslatedGroup
 
 def test_unknown_command_message_text():
+    """The catalog wording, without the CLI in the way."""
     from meret.core.locale import set_locale, _
 
     set_locale("ru")
     msg = _("No such command '{cmd}'. Did you mean: {available}?").format(
         cmd="scna", available="scan"
     )
-    print(repr(msg))
-    assert "Команда не '{cmd}' найдена" in msg
+    # {cmd} is already substituted here — no braces left in the result
+    assert msg == "Команда 'scna' не найдена. Возможно, вы имели в виду: scan?"
