@@ -1,27 +1,38 @@
 """Running repository calls off the Qt event loop.
 
 Every SQLiteRepository call opens its own connection, so a call is safe from any
-thread — but it is not fast, and the event loop must never wait on it. TaskRunner
+thread - but it is not fast, and the event loop must never wait on it. TaskRunner
 runs a callable in a thread pool and hands the result back on the GUI thread.
 
 Each task carries a generation. A panel that re-asks (another tag, another
 folder) calls bump(); results from an older generation are dropped instead of
 overwriting fresher rows.
+
+Two lifetime rules keep this honest:
+- the pool must not delete the runnable: Python owns the wrapper and the signals
+  object the pool thread emits into. autoDelete is off, and TaskRunner holds
+  every in-flight task until its result has been delivered.
+- task signals carry the task itself, so the runner can compare generations and
+  the arity of signal and slot always matches.
 """
 
 import logging
 from typing import Any, Callable, Optional
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot
 
 logger = logging.getLogger(__name__)
 
 
 class _TaskSignals(QObject):
-    """Signals need a QObject; QRunnable is not one."""
+    """Signals need a QObject; QRunnable is not one.
 
-    done = Signal(object)
-    failed = Signal(object)
+    Both carry the task, so the receiver can check the generation and drop a
+    result that a newer request has already superseded.
+    """
+
+    done = Signal(object, object)    # task, result
+    failed = Signal(object, object)  # task, exception
 
 
 class Task(QRunnable):
@@ -41,7 +52,8 @@ class Task(QRunnable):
         self.on_done: Optional[Callable[[Any], None]] = None
         self.on_failed: Optional[Callable[[Exception], None]] = None
         self.signals = _TaskSignals()
-        self.setAutoDelete(True)
+        # Python keeps ownership: the runner references the task until delivery
+        self.setAutoDelete(False)
 
     @Slot()
     def run(self) -> None:
@@ -50,16 +62,13 @@ class Task(QRunnable):
         except Exception as e:
             # A worker must never take the app down: report it and carry on
             logger.debug("task %s failed: %s", getattr(self.fn, "__name__", self.fn), e)
-            self.signals.failed.emit(e)
+            self.signals.failed.emit(self, e)
         else:
-            self.signals.done.emit(result)
+            self.signals.done.emit(self, result)
 
 
 class TaskRunner(QObject):
     """Pool plus generation bookkeeping. Create one per window, on the GUI thread."""
-
-    _done = Signal(object, object)    # task, result
-    _failed = Signal(object, object)  # task, exception
 
     def __init__(self, parent: Optional[QObject] = None, max_threads: int = 0) -> None:
         super().__init__(parent)
@@ -67,9 +76,8 @@ class TaskRunner(QObject):
         if max_threads > 0:
             self._pool.setMaxThreadCount(max_threads)
         self._generation = 0
-        # The runner lives on the GUI thread, so both handlers are queued into it
-        self._done.connect(self._deliver_done)
-        self._failed.connect(self._deliver_failed)
+        # Strong references to tasks whose result has not been delivered yet
+        self._inflight: set[Task] = set()
 
     @property
     def generation(self) -> int:
@@ -95,30 +103,50 @@ class TaskRunner(QObject):
         task.generation = self._generation if generation is None else generation
         task.on_done = on_done
         task.on_failed = on_failed
-        # Bound methods of a QObject: the receiver thread is the runner's thread
-        task.signals.done.connect(self._done.emit)
-        task.signals.failed.connect(self._failed.emit)
+        # Explicitly queued: results must land on the runner's thread (the GUI
+        # thread), never on the pool thread that produced them. AutoConnection
+        # would be decided by Qt, and a DirectConnection here means widgets get
+        # touched from a pool thread - which works until it does not.
+        task.signals.done.connect(
+            self._deliver_done, Qt.ConnectionType.QueuedConnection
+        )
+        task.signals.failed.connect(
+            self._deliver_failed, Qt.ConnectionType.QueuedConnection
+        )
+        self._inflight.add(task)
         self._pool.start(task)
         return task
 
     @Slot(object, object)
     def _deliver_done(self, task: Task, result: Any) -> None:
-        if task.generation != self._generation or task.on_done is None:
-            return
-        task.on_done(result)
+        try:
+            if task.generation != self._generation:
+                logger.debug("dropping result from generation %s", task.generation)
+            elif task.on_done is not None:
+                task.on_done(result)
+        finally:
+            self._inflight.discard(task)
 
     @Slot(object, object)
     def _deliver_failed(self, task: Task, error: Exception) -> None:
-        if task.generation != self._generation or task.on_failed is None:
-            return
-        task.on_failed(error)
+        try:
+            if task.generation != self._generation:
+                return
+            if task.on_failed is not None:
+                task.on_failed(error)
+            else:  # never let a failure disappear just because nobody listened
+                logger.warning("task %s failed: %s", getattr(task.fn, "__name__", task.fn), error)
+        finally:
+            self._inflight.discard(task)
 
     def clear(self) -> None:
         """Drop queued work. Running tasks finish on their own."""
         self._pool.clear()
+        # Never-started tasks get no delivery, so nothing else references them
+        self._inflight.clear()
 
     def wait(self, msecs: int = -1) -> bool:
-        """Block until the pool is empty — for tests and shutdown."""
+        """Block until the pool is empty - for tests and shutdown."""
         return self._pool.waitForDone(msecs)
 
     def shutdown(self, msecs: int = 5000) -> None:

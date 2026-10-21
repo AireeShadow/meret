@@ -8,7 +8,7 @@ the same VirtualTree a mount would serve, so the two can never disagree.
 import logging
 import sys
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
@@ -20,20 +20,22 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QSplitter,
     QStatusBar,
+    QStyle,
     QTreeWidget,
     QTreeWidgetItem,
+    QWidget,
 )
 
-from meret.core.config import get_config, GUIConfig
+from meret.core.config import get_config
 from meret.core.locale import _
 from meret.core.sqlite_repo import SQLiteRepository
 from meret.gui.thumbnails import ThumbnailCache
 from meret.gui.workers import TaskRunner
-from meret.vfs.tree import VirtualTree
+from meret.vfs.tree import Node, VirtualTree
 
 logger = logging.getLogger(__name__)
 
-#: Thumbnails requested per round — a huge folder must not flood the pool queue.
+#: Thumbnails requested per round - a huge folder must not flood the pool queue.
 BATCH = 24
 #: How often the database's data_version is checked for outside changes.
 POLL_MS = 1500
@@ -77,7 +79,7 @@ class TagTree(QTreeWidget):
     tag_selected = Signal(str)
     FILLED = Qt.ItemDataRole.UserRole + 10
 
-    def __init__(self, tree: VirtualTree, parent: Optional[QTreeWidget] = None) -> None:
+    def __init__(self, tree: VirtualTree, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._tree = tree
         self.setHeaderHidden(True)
@@ -113,29 +115,39 @@ class TagTree(QTreeWidget):
 class MainWindow(QMainWindow):
     """Browse the tag tree, the files under one tag, and a preview."""
 
+    ROLE_VPATH = Qt.ItemDataRole.UserRole
     ROLE_SOURCE = Qt.ItemDataRole.UserRole + 1
     ROLE_MTIME = Qt.ItemDataRole.UserRole + 2
+    ROLE_FILE_ID = Qt.ItemDataRole.UserRole + 3
 
-    def __init__(self, repo, db_path) -> None:
-        super().__init__()
+    def __init__(self, repo, db_path, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
 
-        # State first: open_folder() is called on the last line of __init__
+        config = get_config().config.gui
+
+        # State first: the first paint happens on the last line of __init__
         self._repo = repo
         self._db_path = Path(db_path)
-        self._selection: set[str] = set()
-        self._current_path = "/"
         self._tree = VirtualTree(repo)
-        self._thumbnails = ThumbnailCache()
-        self._runner = TaskRunner()
-        self._config = GUIConfig()
+        self._thumbs = ThumbnailCache(size=config.thumbnail_size)
+        self._tasks = TaskRunner(self)
+        self._queue: List[tuple] = []
+        self._selection: set[str] = set()
+        self._vpath = "/"
+        self._version: Optional[int] = None
 
         # Widgets next
-        self.grid = QListWidget()
-        self._status_label = QLabel(_("No selection"))
-        self._build_layout()
+        self._build_ui()
 
         self.setWindowTitle(_("meret"))
-        self.resize(self._config.window_width, self._config.window_height)
+        self.resize(config.window_width, config.window_height)
+        _apply_theme(QApplication.instance(), config.theme)
+
+        # Outside changes: the tree is invalidated, never re-read per stat
+        self._poll = QTimer(self)
+        self._poll.setInterval(POLL_MS)
+        self._poll.timeout.connect(self._check_version)
+        self._poll.start()
 
         # First paint - nothing may come after this
         self.open_folder("/")
@@ -143,10 +155,15 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
 
-        self.tags = TagTree(self.tree, self)
+        self.tags = TagTree(self._tree, self)
         self.tags.setMinimumWidth(180)
         self.tags.tag_selected.connect(self.open_folder)
         splitter.addWidget(self.tags)
+
+        self.preview = QLabel(_("Nothing selected"), self)
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview.setWordWrap(True)
+        self.preview.setMinimumWidth(320)
 
         self.grid = QListWidget(self)
         self.grid.setViewMode(QListWidget.ViewMode.IconMode)
@@ -154,73 +171,81 @@ class MainWindow(QMainWindow):
         self.grid.setMovement(QListWidget.Movement.Static)
         self.grid.setUniformItemSizes(True)
         self.grid.setSpacing(6)
-        self.grid.setIconSize(QSize(self.thumbs.size, self.thumbs.size))
+        self.grid.setIconSize(QSize(self._thumbs.size, self._thumbs.size))
         self.grid.itemSelectionChanged.connect(self._show_preview)
         self.grid.itemDoubleClicked.connect(self._open_external)
+
         splitter.addWidget(self.grid)
-
-        self.preview = QLabel(_("Nothing selected"), self)
-        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setWordWrap(True)
-        self.preview.setMinimumWidth(320)
         splitter.addWidget(self.preview)
-
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 3)
         splitter.setStretchFactor(2, 2)
         self.setCentralWidget(splitter)
-        self.setStatusBar(QStatusBar(self))
+
+        self._status_label = QLabel(_("No selection"), self)
+        bar = QStatusBar(self)
+        bar.addPermanentWidget(self._status_label)
+        self.setStatusBar(bar)
 
     # ---------- contents ----------
 
     def open_folder(self, path: str) -> None:
-        """Fill the grid with the children of a virtual folder."""
-        self._current_path = path
+        """Show a virtual folder: its subfolders and its files."""
+        self._vpath = VirtualTree.normalize(path)
         self._selection.clear()
         self.grid.clear()
-
-        try:
-            names = self._tree.listdir(path)
-        except Exception as error:  # noqa: BLE001 - reported in the status bar
-            logger.debug("cannot list %s", path, exc_info=True)
-            self._status_label.setText(
-                _("Cannot open {path}: {error}").format(path=path, error=error)
-            )
-            return
-
-        for name in sorted(names):
-            child = f"{path.rstrip('/')}/{name}" if path != "/" else f"/{name}"
-            item = QListWidgetItem(name)
-            item.setData(Qt.ItemDataRole.UserRole, child)
-            self.grid.addItem(item)
-            self._schedule_thumbnail(child, item)
-
+        self._queue.clear()
         self._update_status()
 
-    def _show_nodes(self, nodes: List[Any]) -> None:
-        generation = self.tasks.generation
+        generation = self._tasks.bump()
+        self._tasks.run(
+            self._tree.listdir,
+            on_done=lambda nodes: self._show_nodes(nodes, generation),
+            on_failed=lambda error: self._show_error(self._vpath, error),
+            args=(self._vpath,),
+            generation=generation,
+        )
+
+    def _show_error(self, path: str, error: Exception) -> None:
+        """A listing that failed must be visible, never a silently empty grid."""
+        logger.warning("cannot list %s: %s", path, error)
+        self._status_label.setText(
+            _("Cannot open {path}: {error}").format(path=path, error=error)
+        )
+
+    def _show_nodes(self, nodes: List[Node], generation: int) -> None:
+        """Fill the grid: folders first, then files, thumbnails in batches."""
+        if generation != self._tasks.generation:
+            logger.debug("dropping stale listing for %s (gen %s)", self._vpath, generation)
+            return
+
         for node in nodes:
-            if node.is_dir or node.file_id is None or not node.source_path:
-                continue
             item = QListWidgetItem(node.name)
-            item.setData(Qt.ItemDataRole.UserRole, node.file_id)
+            item.setData(self.ROLE_VPATH, node.vpath)
+            if node.is_dir:
+                item.setIcon(self._folder_icon())
+                self.grid.addItem(item)
+                continue
+            item.setData(self.ROLE_FILE_ID, node.file_id)
             item.setData(self.ROLE_SOURCE, node.source_path)
             item.setData(self.ROLE_MTIME, node.mtime)
             item.setToolTip(f"{node.name}\n{node.source_path}")
             self.grid.addItem(item)
             self._queue.append((node.file_id, node.source_path, node.mtime, item))
 
-        self.statusBar().showMessage(f"{self.vpath} — {self.grid.count()}")
+        self._update_status()
         self._pump(generation)
 
     def _pump(self, generation: int) -> None:
         """Hand the pool one batch, then come back for the next."""
-        if generation != self.tasks.generation:
+        if generation != self._tasks.generation:
             return
         batch, self._queue = self._queue[:BATCH], self._queue[BATCH:]
         for file_id, source, mtime, item in batch:
-            self.tasks.run(
-                self.thumbs.load,
+            if file_id is None or not source:
+                continue
+            self._tasks.run(
+                self._thumbs.load,
                 on_done=lambda image, item=item: self._set_icon(item, image),
                 args=(Path(source),),
                 kwargs={"file_id": file_id, "mtime": mtime},
@@ -229,14 +254,30 @@ class MainWindow(QMainWindow):
         if self._queue:
             QTimer.singleShot(0, lambda: self._pump(generation))
 
-    # ---------- preview ----------
+    def _folder_icon(self) -> QIcon:
+        return self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)
 
     def _set_icon(self, item: QListWidgetItem, image) -> None:
         if image is not None and not image.isNull():
             item.setIcon(QIcon(QPixmap.fromImage(image)))
 
+    def _update_status(self) -> None:
+        """Refresh the status bar: current folder and how much is selected."""
+        self.statusBar().showMessage(f"{self._vpath} — {self.grid.count()}")
+        if self._selection:
+            self._status_label.setText(f"{_('Selected:')} {len(self._selection)}")
+        else:
+            self._status_label.setText(_("No selection"))
+
+    # ---------- preview ----------
+
     def _show_preview(self) -> None:
         selected = self.grid.selectedItems()
+        self._selection = {
+            vpath for vpath in (item.data(self.ROLE_VPATH) for item in selected) if vpath
+        }
+        self._update_status()
+
         if not selected:
             self.preview.setPixmap(QPixmap())
             self.preview.setText(_("Nothing selected"))
@@ -245,13 +286,16 @@ class MainWindow(QMainWindow):
         item = selected[0]
         source = item.data(self.ROLE_SOURCE)
         if not source:
+            self.preview.setPixmap(QPixmap())
+            self.preview.setText(item.text())
             return
-        self.tasks.run(
-            self.thumbs.load,
+
+        self._tasks.run(
+            self._thumbs.load,
             on_done=lambda image: self._set_preview(image, item.text()),
             args=(Path(source),),
             kwargs={
-                "file_id": item.data(Qt.ItemDataRole.UserRole),
+                "file_id": item.data(self.ROLE_FILE_ID),
                 "mtime": item.data(self.ROLE_MTIME) or 0.0,
                 "size": PREVIEW,
             },
@@ -265,15 +309,20 @@ class MainWindow(QMainWindow):
         self.preview.setPixmap(QPixmap.fromImage(image))
 
     def _open_external(self, item: QListWidgetItem) -> None:
+        """Open a file with the system handler, or descend into a folder."""
         source = item.data(self.ROLE_SOURCE)
         if source:
             QDesktopServices.openUrl(QUrl.fromLocalFile(source))
+            return
+        vpath = item.data(self.ROLE_VPATH)
+        if vpath:
+            self.open_folder(vpath)
 
     # ---------- outside changes ----------
 
     def _check_version(self) -> None:
         """Pick up tagging done by another process (the CLI, a mount, a scan)."""
-        self.tasks.run(self.repo.data_version, self._on_version)
+        self._tasks.run(self._repo.data_version, self._on_version)
 
     def _on_version(self, version: Optional[int]) -> None:
         if version is None or version == self._version:
@@ -283,13 +332,13 @@ class MainWindow(QMainWindow):
         if not known:
             return  # the first reading is just a baseline
         logger.debug("data_version moved to %s, reloading", version)
-        self.tree.invalidate()
+        self._tree.invalidate()
         self.tags.reload()
-        self.open_folder(self.vpath)
+        self.open_folder(self._vpath)
 
     def closeEvent(self, event) -> None:
         self._poll.stop()
-        self.tasks.shutdown()
+        self._tasks.shutdown()
         super().closeEvent(event)
 
 
@@ -304,4 +353,4 @@ def run_gui(db_path: Path, argv: Optional[List[str]] = None) -> int:
     try:
         return app.exec()
     finally:
-        window.tasks.shutdown()
+        window.close()

@@ -736,3 +736,6 @@ msgstr "Ничего не выбрано"
 
 msgid "Cannot open {path}: {error}"
 msgstr "Не удалось открыть {path}: {error}"
+
+msgid "meret"
+msgstr "meret"
