@@ -101,21 +101,33 @@ def system_language() -> str:
 # ---------- .po -> catalog ----------
 
 
-def _parse_po(text: str) -> Dict[str, str]:
+def _parse_po(text: str, source: str = "<po>") -> Dict[str, str]:
     """{key: translation} from .po text, keyed the way gettext expects in a .mo.
 
     Context: ``ctxt\\x04msgid``; plurals: ``msgid\\0msgid_plural`` -> forms joined
     by ``\\0``. Untranslated and fuzzy entries are skipped (as msgfmt does), the
     header (msgid "") is kept: it carries the charset and the plural rule.
+
+    A msgid defined twice (same msgctxt, plural or not) is an error for msgfmt;
+    here it is logged as a warning and the later definition wins.
     """
     catalog: Dict[str, str] = {}
     entry: Dict[str, Any] = {}
     field: Optional[str] = None
     fuzzy = False
+    defined: Dict[tuple, int] = {}  # (msgctxt, msgid) -> line of its first definition
 
     def flush() -> None:
         nonlocal entry, fuzzy
         if "msgid" in entry:
+            ident = (entry.get("msgctxt"), entry["msgid"])
+            if ident in defined:
+                logger.warning(
+                    "%s:%s: duplicate msgid %r (first defined at line %s), the later one wins",
+                    source, entry.get("_line"), entry["msgid"], defined[ident],
+                )
+            else:
+                defined[ident] = entry.get("_line")
             key = entry["msgid"]
             if "msgid_plural" in entry:
                 key += "\0" + entry["msgid_plural"]
@@ -163,6 +175,7 @@ def _parse_po(text: str) -> Dict[str, str]:
                 field = keyword
             else:
                 raise ValueError(f"line {number}: unknown keyword {keyword!r}")
+            entry.setdefault("_line", number)
             if isinstance(field, tuple):
                 entry.setdefault("msgstr", {})[field[1]] = ""
             else:
@@ -200,7 +213,7 @@ def _compile_mo(catalog: Dict[str, str]) -> bytes:
 
 def load_po(path: Path) -> gettext.GNUTranslations:
     """Read a .po file into a regular gettext translations object."""
-    catalog = _parse_po(path.read_text(encoding="utf-8"))
+    catalog = _parse_po(path.read_text(encoding="utf-8"), source=str(path))
     return gettext.GNUTranslations(io.BytesIO(_compile_mo(catalog)))
 
 

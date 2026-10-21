@@ -41,8 +41,14 @@ def _msgids_in_code():
                 continue
             args = [a.value for a in node.args if isinstance(a, ast.Constant)]
             where = f"{py.relative_to(MERET.parent)}:{node.lineno}"
+            context = next(
+                (k.value.value for k in node.keywords
+                 if k.arg == "context" and isinstance(k.value, ast.Constant)),
+                None,
+            )
             if node.func.id == "_" and args and isinstance(args[0], str):
-                found.append((args[0], where))
+                # keyed like the catalog: "ctxt\x04msgid" when there is a context
+                found.append((f"{context}\x04{args[0]}" if context else args[0], where))
             elif node.func.id == "ngettext" and len(args) >= 2:
                 found.append((f"{args[0]}\0{args[1]}", where))
     return found
@@ -105,6 +111,34 @@ def test_no_markup_in_msgids():
     """Markup belongs in the code: '[green]' in a msgid is a translator trap."""
     bad = [f"{w}  {m!r}" for m, w in _msgids_in_code() if "[/" in m or "[green" in m]
     assert not bad, "\n".join(bad)
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_catalog_has_no_duplicate_msgids(language, caplog):
+    """msgfmt rejects them, and here only the last copy counts — edits to an earlier
+    copy would silently do nothing."""
+    po = DEFAULT_LOCALE_DIR / language / "LC_MESSAGES" / "messages.po"
+    _parse_po(po.read_text(encoding="utf-8"), source=str(po))
+    dupes = [r.getMessage() for r in caplog.records if "duplicate msgid" in r.getMessage()]
+    assert not dupes, "\n".join(dupes)
+
+
+def test_duplicates_are_reported_and_the_later_wins(caplog):
+    text = 'msgid "a"\nmsgstr "1"\n\nmsgid "b"\nmsgstr "x"\n\nmsgid "a"\nmsgstr "2"\n'
+    assert _parse_po(text, source="t.po")["a"] == "2"
+    (record,) = [r for r in caplog.records if "duplicate msgid" in r.getMessage()]
+    assert "t.po:7" in record.getMessage() and "line 1" in record.getMessage()
+
+
+def test_same_msgid_in_another_context_is_not_a_duplicate(caplog):
+    text = (
+        'msgid "file"\nmsgid_plural "files"\nmsgstr[0] "f"\nmsgstr[1] "fs"\n\n'
+        'msgctxt "node type"\nmsgid "file"\nmsgstr "n"\n'
+    )
+    catalog = _parse_po(text)
+    assert catalog["node type\x04file"] == "n"
+    assert catalog["file\0files"] == "f\0fs"
+    assert not [r for r in caplog.records if "duplicate msgid" in r.getMessage()]
 
 
 # ---------- .po parsing and loading ----------

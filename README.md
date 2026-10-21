@@ -6,7 +6,7 @@ command line, or mounted as a read-only drive.
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
 - [FFmpeg](https://ffmpeg.org/)'s `ffprobe` on `PATH` for video and audio metadata
   (images are read with Pillow)
 - For mounting: [WinFsp](https://winfsp.dev/) on Windows, FUSE on Linux/macOS
@@ -14,16 +14,13 @@ command line, or mounted as a read-only drive.
 ## Installation
 
 ```bash
-pip install -e .                 # core: CLI, scanning, tags, search
-pip install -e ".[tui]"          # + terminal UI (Textual)
-pip install -e ".[config]"       # + tomli-w, needed by `meret config set`
-pip install -e ".[vfs-win]"      # + mount on Windows (winfspy; WinFsp itself separately)
-pip install -e ".[vfs-fuse]"     # + mount on Linux/macOS (fusepy)
-pip install -e ".[vfs-fsspec]"   # + meret:// protocol for fsspec
-pip install -e ".[dev]"          # + pytest, ruff, black, mypy
+pip install -e .          # everything: CLI, TUI, scanning, tags, search, mounts
+pip install -e ".[dev]"   # + pytest, ruff, black, mypy
 ```
 
-Extras combine: `pip install -e ".[tui,config,vfs-win]"`.
+Textual, fsspec and `tomli-w` are regular dependencies; the mount driver is picked
+by platform marker (`fusepy` elsewhere, `winfspy` on Windows). There is a `gui`
+extra with PySide6 — see [GUI](#gui).
 
 ## Quick start
 
@@ -47,9 +44,9 @@ meret config set paths.default_db ~/Media/meret.db
 ### Which database is used
 
 Every command takes `--db` / `-d`: a directory containing `meret.db`, or a path to
-a `.db` file. Without it, meret uses `paths.default_db` from the config, otherwise
-`./meret.db`. Only `meret init` creates a database (`--force` recreates it);
-`meret where` shows which one a command would use.
+a `.db` file. Without it, meret uses `$MERET_DB`, then `paths.default_db` from the
+config, otherwise `./meret.db`. Only `meret init` creates a database (`--force`
+recreates it); `meret where` shows which one a command would use.
 
 ## Scanning
 
@@ -178,11 +175,23 @@ A mount started with `m` lives in the TUI's process: `U` can't find it, and it e
 when the TUI exits. For a mount you can stop on its own, run `meret mount` in a
 separate terminal.
 
+## GUI
+
+Not wired up yet — targeted at 0.7. Install the extra now to have PySide6 ready:
+
+```bash
+pip install -e ".[gui]"
+```
+
+`meret/gui` will hold the Qt code; `core`, `vfs` and `cli` stay importable without
+PySide6, and the GUI will not depend on `cli`. The tag panel reuses
+`meret.vfs.tree.VirtualTree`, so the GUI shows exactly what a mount would.
+
 ## Configuration
 
 ```bash
 meret config path                          # where the file is
-meret config show                          # everything, as JSON
+meret config show                          # everything, as TOML
 meret config get paths.default_db
 meret config set paths.default_db ~/Media/meret.db
 meret config edit                          # open in your editor
@@ -193,18 +202,17 @@ The file is `config.toml` in your user config folder:
 
 | OS | Location |
 |----|----------|
-| Windows | `%LOCALAPPDATA%\meret\meret\config.toml` |
+| Windows | `%LOCALAPPDATA%\meret\config.toml` |
 | Linux | `~/.config/meret/config.toml` |
 | macOS | `~/Library/Application Support/meret/config.toml` |
 
 Currently `paths.default_db` and `locale.language` are used. The `scan` and `gui`
 sections (and `locale.date_format`) are stored but not read yet — use `scan`'s flags
-instead. `config set` needs the `[config]` extra (without `tomli-w` it can't write
-TOML).
+instead.
 
 ## Language
 
-Command output is available in English and Russian.
+Command output, the help texts and the TUI are available in English and Russian.
 
 ```bash
 meret --lang ru scan ~/Media             # this run only (-l ru)
@@ -216,6 +224,12 @@ The first match wins: `--lang`, then `locale.language` in the config, then the
 system language (`LANGUAGE`/`LC_ALL`/`LANG`, else the Windows display language),
 then English. An unknown language falls back to English. `--lang` goes before the
 command name.
+
+`--lang` is read from `sys.argv` while `meret/cli/app.py` is being imported, because
+Typer freezes every `help=` string the moment the decorators run. A stray
+`app = typer.Typer(...)` later in that module would drop `cls=TranslatedGroup` and
+silently un-translate the "no such command" error —
+`tests/test_locale_catalog.py::test_app_uses_the_translated_group` guards that.
 
 ### Translating
 
@@ -230,8 +244,15 @@ console.print(f"[green]✓ {msg}[/green]")
 ```
 
 `python scripts/extract_strings.py` lists every translatable string in
-`meret/locales/messages.pot`, and `tests/test_locale_catalog.py` fails if a message in
-the code is missing from a catalog or a translation changes its `{placeholders}`.
+`meret/locales/messages.pot`.
+
+Typer's own messages come from the stdlib gettext, not from these catalogs, so the
+group in `meret/cli/app.py` replaces `resolve_command` and builds the message
+itself.
+
+`tests/test_locale_catalog.py` fails if a message in the code is missing from a
+catalog, if a translation drops or renames a `{placeholder}`, or if a quoted
+`'{cmd}'` loses a quote.
 
 ## Logging and debugging
 
@@ -262,18 +283,20 @@ traceback.
 ## Development
 
 ```bash
-pip install -e .
+pip install -e ".[dev]"
 pytest
+ruff check .
 ```
 
 | Package | Contents |
 |---------|----------|
-| `meret/core` | models, SQLite repository and schema, scanner, metadata extractors, tag paths, config, logging |
+| `meret/core` | models, SQLite repository and schema, scanner, metadata extractors, tag paths, config, locale, logging |
 | `meret/vfs` | the virtual tree (tags → folders); backends: mount (WinFsp/FUSE) and fsspec |
 | `meret/cli` | the Typer CLI, virtual-FS commands, the Textual TUI |
 
 `core` doesn't import `vfs` or `cli`, and the virtual tree has no third-party
-dependencies (`tests/vfs/test_architecture.py` checks both).
+dependencies (`tests/vfs/test_architecture.py` checks both). The GUI adds a third
+rule in `tests/gui/test_architecture.py`: Qt stays in `meret/gui`.
 
 ## Milestones
 

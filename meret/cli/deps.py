@@ -50,24 +50,33 @@ class DatabaseNotFound(Exception):
         _console.print()
 
 
+def _db_file(given: Path | str) -> Path:
+    """A directory means <dir>/meret.db; anything else is the .db file itself."""
+    p = Path(given).expanduser()  # before is_dir(): "~/Media" is a directory too
+    return (p / DB_NAME if p.is_dir() else p).resolve()
+
+
 def resolve_db_path(path: Optional[Path] = None) -> Path:
     """
-    Resolve database path from CLI arg or config.
+    Resolve database path from CLI arg, environment or config.
 
     Priority:
-    1. Explicit path argument
-    2. Config paths.default_db
-    3. Current directory / .meret.db
+    1. Explicit path argument (--db, or init's PATH)
+    2. $MERET_DB
+    3. Config paths.default_db
+    4. Current directory / meret.db
     """
     if path is not None:
-        p = Path(path)
-        if p.is_dir():
-            result = p / "meret.db"
-            logger.debug("db path from argument (directory) -> %s", result)
-            return result
-        result = p.expanduser().resolve()
-        logger.debug("db path from argument -> %s", result)
-        return result
+        resolved = _db_file(path)
+        logger.debug("db path from argument %s -> %s", path, resolved)
+        return resolved
+
+    # An env var is a deliberate choice, so it beats the config
+    env_path = os.environ.get(ENV_DB_PATH)
+    if env_path:
+        resolved = _db_file(env_path)
+        logger.debug("db path from $%s -> %s", ENV_DB_PATH, resolved)
+        return resolved
 
     # Try config
     config = get_config()

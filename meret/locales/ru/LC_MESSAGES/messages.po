@@ -519,9 +519,6 @@ msgstr "Сбросить конфигурацию к значениям по у�
 msgid "Show configuration file path."
 msgstr "Показать путь к файлу конфигурации."
 
-msgid "Database not found"
-msgstr "База данных не найдена"
-
 msgid "looked here:"
 msgstr "искали здесь:"
 
@@ -578,7 +575,7 @@ msgid "Preview"
 msgstr "Предпросмотр"
 
 msgid "No selection"
-msgstr "Ничего не выбрано"
+msgstr "Нет выделения"
 
 msgid "Virtual: {path}\nUse 'o' to open real file"
 msgstr "Виртуальный: {path}\nНажмите 'o' чтобы открыть реальный файл"
@@ -599,7 +596,7 @@ msgid "Enter tag (e.g., vacation/beach)"
 msgstr "Введите тег (например, путешествия/пляж)"
 
 msgid "Press Enter to confirm, Esc to cancel"
-msgstr "Enter — подтвердить, Esc — отменить"
+msgstr "Нажмите Enter для подтверждения, Esc для отмены"
 
 msgid "Search: {query}"
 msgstr "Поиск: {query}"
@@ -643,9 +640,6 @@ msgstr "Показать дерево тегов"
 msgid "Remove orphaned tags"
 msgstr "Удалить потерянные теги"
 
-msgid "Mount virtual filesystem"
-msgstr "Смонтировать виртуальную файловую систему"
-
 msgid "Unmount filesystem"
 msgstr "Размонтировать файловую систему"
 
@@ -678,9 +672,6 @@ msgstr "Добавлен тег '{tag}'"
 
 msgid "Refreshed"
 msgstr "Обновлено"
-
-msgid "Configuration"
-msgstr "Конфигурация"
 
 msgid "Delete tag"
 msgstr "Удалить тег"
@@ -715,18 +706,11 @@ msgstr "Выбор диска доступен только в Windows"
 msgid "Select drive"
 msgstr "Выбрать диск"
 
-msgid "Search: {query}"
-msgstr "Поиск: {query}"
-
 msgid "Command: {cmd}"
 msgstr "Команда: {cmd}"
 
 msgid "Command"
 msgstr "Команда"
-
-
-msgid "Help"
-msgstr "Помощь"
 
 msgid "Navigation:\n"
 "  ↑/↓ Navigate\n"
@@ -771,9 +755,6 @@ msgstr "Для TUI требуется Textual. Установите: pip install
 msgid "Quit"
 msgstr "Выход"
 
-msgid "Command"
-msgstr "Команда"
-
 msgid "Init DB"
 msgstr "Иниц. БД"
 
@@ -781,19 +762,10 @@ msgid "Open"
 msgstr "Открыть"
 
 msgid "Scan"
-msgstr "Сканировать"
-
-msgid "Tag"
-msgstr "Тег"
-
-msgid "Refresh"
-msgstr "Обновить"
+msgstr "Скан"
 
 msgid "Config"
 msgstr "Конфиг"
-
-msgid "Delete tag"
-msgstr "Удалить тег"
 
 msgid "Home"
 msgstr "Домой"
@@ -802,13 +774,10 @@ msgid "Up"
 msgstr "Вверх"
 
 msgid "Sort"
-msgstr "Сортировка"
+msgstr "Сортировать"
 
 msgid "Mount"
 msgstr "Монтировать"
-
-msgid "Unmount"
-msgstr "Размонтировать"
 
 msgid "Select Drive"
 msgstr "Выбрать диск"
@@ -821,25 +790,10 @@ msgid "Select Drive:"
 msgstr "Выберите диск:"
 
 # TUI - FilePreview
-msgid "No selection"
-msgstr "Ничего не выбрано"
-
-msgid "Virtual: {path}\nUse 'o' to open real file"
-msgstr "Виртуальный: {path}\nНажмите 'o' чтобы открыть реальный файл"
-
 msgid "Size: {size}\nModified: {mtime}"
 msgstr "Размер: {size}\nИзменён: {mtime}"
 
-msgid "Cannot access file"
-msgstr "Нет доступа к файлу"
-
 # TUI - VirtualFileTree
-msgid "No database - run 'meret init'"
-msgstr "Нет базы данных — выполните 'meret init'"
-
-msgid "Error: {error}"
-msgstr "Ошибка: {error}"
-
 msgid "(empty)"
 msgstr "(пусто)"
 
@@ -849,60 +803,6 @@ msgstr "Ошибка: пустой vpath для {name}"
 # TUI - TagDialog
 msgid "Tag file: {name}"
 msgstr "Тег для файла: {name}"
-
-msgid "Enter tag (e.g., vacation/beach)"
-msgstr "Введите тег (например, путешествия/пляж)"
-
-msgid "Press Enter to confirm, Esc to cancel"
-msgstr "Enter — подтвердить, Esc — отменить"
-
-# TUI - SearchScreen
-msgid "Search: {query}"
-msgstr "Поиск: {query}"
-
-msgid "↑↓ to navigate, Enter to select, Esc to close"
-msgstr "↑↓ навигация, Enter — выбрать, Esc — закрыть"
-
-# TUI - ConfirmDialog
-msgid "y = yes, n / Esc = no"
-msgstr "y — да, n / Esc — нет"
-
-# TUI - CommandPalette
-msgid "Type command..."
-msgstr "Введите команду..."
-
-msgid "Scan directory for media"
-msgstr "Сканировать директорию на медиафайлы"
-
-msgid "Search files by tags/name"
-msgstr "Искать файлы по тегам/имени"
-
-msgid "Tag selected file"
-msgstr "Добавить тег к выбранному файлу"
-
-msgid "Remove tag from file"
-msgstr "Удалить тег с файла"
-
-msgid "Initialize new database"
-msgstr "Инициализировать новую базу данных"
-
-msgid "Edit configuration"
-msgstr "Редактировать конфигурацию"
-
-msgid "Show database statistics"
-msgstr "Показать статистику базы данных"
-
-msgid "Show tag tree"
-msgstr "Показать дерево тегов"
-
-msgid "Remove orphaned tags"
-msgstr "Удалить потерянные теги"
-
-msgid "Mount virtual filesystem"
-msgstr "Смонтировать виртуальную файловую систему"
-
-msgid "Unmount filesystem"
-msgstr "Размонтировать файловую систему"
 
 # TUI - MeretApp notifications
 msgid "Scanning {path}..."
@@ -919,9 +819,6 @@ msgstr "Открыт {virtual} → {real}"
 
 msgid "Select a real file first!"
 msgstr "Сначала выберите реальный файл!"
-
-msgid "Tagged with '{tag}'"
-msgstr "Добавлен тег '{tag}'"
 
 msgid "Selected: {filename}"
 msgstr "Выбран: {filename}"
@@ -943,9 +840,6 @@ msgstr "Выберите папку тега (не файл или корень)
 
 msgid "Deleted tag {path}"
 msgstr "Удалён тег {path}"
-
-msgid "Drive selection only available on Windows"
-msgstr "Выбор диска доступен только в Windows"
 
 msgid "Switched to {drive}"
 msgstr "Переключено на {drive}"
@@ -969,15 +863,8 @@ msgid "'{cmd}' isn't available in the TUI yet"
 msgstr "'{cmd}' пока недоступно в TUI"
 
 # TUI - Border titles
-msgid "Virtual FS (Tags)"
-msgstr "Виртуальная ФС (Теги)"
-
 msgid "Real Filesystem ({path}) · {sort}"
-msgstr "Реальная файловая система ({path}) · {sort}"
-
-# TUI - SortedDirectoryTree border title
-msgid "Real Filesystem ({path})"
-msgstr "Реальная файловая система ({path})"
+msgstr "Файлы ({path}) · {sort}"
 
 # TUI - path bar
 msgid "DB: {db} | Selected: {sel}"
@@ -987,59 +874,7 @@ msgstr "БД: {db} | Выбрано: {sel}"
 msgid ".."
 msgstr ".."
 
-# TUI - BINDINGS (если не переведены)
-msgid "Quit"
-msgstr "Выход"
-
-msgid "Command"
-msgstr "Команда"
-
-msgid "Init DB"
-msgstr "Иниц. БД"
-
-msgid "Scan"
-msgstr "Скан"
-
-msgid "Tag"
-msgstr "Тег"
-
-msgid "Refresh"
-msgstr "Обновить"
-
-msgid "Config"
-msgstr "Конфиг"
-
-msgid "Delete tag"
-msgstr "Удалить тег"
-
-msgid "Home"
-msgstr "Домой"
-
-msgid "Up"
-msgstr "Вверх"
-
-msgid "Sort"
-msgstr "Сортировать"
-
-msgid "Mount"
-msgstr "Монтировать"
-
-msgid "Unmount"
-msgstr "Размонтировать"
-
-msgid "Select Drive"
-msgstr "Выбрать диск"
-
-msgid "Search"
-msgstr "Поиск"
-
-msgid "Help"
-msgstr "Помощь"
-
 # Dialog buttons
-msgid "Cancel"
-msgstr "Отмена"
-
 msgid "OK"
 msgstr "ОК"
 
@@ -1048,16 +883,6 @@ msgstr "Закрыть"
 
 msgid "Select"
 msgstr "Выбрать"
-
-msgid "Yes"
-msgstr "Да"
-
-msgid "No"
-msgstr "Нет"
-
-# Border titles
-msgid "Real Filesystem ({path}) · {sort}"
-msgstr "Файлы ({path}) · {sort}"
 
 # Typer option helps
 msgid "Database directory or path to a .db file"
@@ -1116,12 +941,6 @@ msgstr "Команда '{cmd}' не найдена. Возможно, вы им�
 msgid "Down"
 msgstr "Вниз"
 
-msgid "No selection"
-msgstr "Нет выделения"
-
-msgid "Press Enter to confirm, Esc to cancel"
-msgstr "Нажмите Enter для подтверждения, Esc для отмены"
-
 msgid "Up/Down to navigate, Enter to select, Esc to close"
 msgstr "↑↓ для навигации, Enter для выбора, Esc для закрытия"
 
@@ -1163,12 +982,6 @@ msgstr "Нет базы данных — выполните meret init"
 
 msgid "empty"
 msgstr "пусто"
-
-msgid "Error: empty vpath for {name}"
-msgstr "Ошибка: пустой vpath для {name}"
-
-msgid "Error: {error}"
-msgstr "Ошибка: {error}"
 
 msgid "meret logs"
 msgstr "meret logs"
@@ -1234,6 +1047,7 @@ msgstr "Виртуальный путь"
 msgid "directory (tag)"
 msgstr "директория (тег)"
 
+msgctxt "node type"
 msgid "file"
 msgstr "файл"
 
@@ -1290,9 +1104,6 @@ msgstr "Путь тега"
 
 msgid "Path of the tag to move"
 msgstr "Путь перемещаемого тега"
-
-msgid "directory (tag)"
-msgstr "директория (тег)"
 
 msgid "DB:"
 msgstr "БД:"

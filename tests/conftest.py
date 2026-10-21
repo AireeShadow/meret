@@ -26,6 +26,7 @@ def english_and_isolated_config(tmp_path_factory, monkeypatch):
     path = tmp_path_factory.mktemp("config") / "config.toml"
     monkeypatch.setattr(config_module, "_config_instance", config_module.ConfigManager(path))
     monkeypatch.setenv("LANGUAGE", "en")  # first thing system_language() looks at
+    monkeypatch.delenv("MERET_DB", raising=False)  # a developer's own default db
     monkeypatch.setattr(locale_module, "_locale_manager", None)
 
 

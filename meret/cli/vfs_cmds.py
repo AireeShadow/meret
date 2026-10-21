@@ -126,7 +126,7 @@ def stat_cmd(
     
     table = Table(show_header=False, box=None)
     table.add_row(_("path"), node.vpath)
-    table.add_row(_("type"), f"[blue]{_('directory (tag)')}[/blue]" if node.is_dir else _("file"))
+    table.add_row(_("type"), f"[blue]{_('directory (tag)')}[/blue]" if node.is_dir else _("file", context="node type"))
     if node.size:
         table.add_row(_("size"), _human(node.size))
     if node.source_path:
