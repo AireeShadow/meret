@@ -1,5 +1,6 @@
 """Translations: catalog loading, language detection, and the CLI in Russian."""
 
+import sys
 import ast
 import gettext
 import string
@@ -17,6 +18,7 @@ from meret.core.locale import (
     _parse_po,
     load_po,
     system_language,
+    get_locale
 )
 
 MERET = Path(__file__).resolve().parents[1] / "meret"
@@ -290,3 +292,94 @@ def test_tui_dialog_buttons_in_catalog():
     for btn, expected in buttons.items():
         assert f'msgid "{btn}"' in po_content, f"Button '{btn}' not in .po"
         assert expected in po_content, f"Translation '{expected}' for '{btn}' not found"
+
+# ---------- --lang is honoured before the commands are built ----------
+
+
+def test_lang_flag_from_argv_is_applied(monkeypatch):
+    import meret.cli.app as app_module
+
+    monkeypatch.setattr(sys, "argv", ["meret", "--lang=ru", "where"])
+    app_module._apply_language_from_argv()
+    assert get_locale().language == "ru"
+
+
+@pytest.mark.parametrize("flag", [["--lang", "ru"], ["-l", "ru"], ["--lang=ru"]])
+def test_every_spelling_of_lang_is_understood(monkeypatch, flag):
+    import meret.cli.app as app_module
+
+    monkeypatch.setattr(sys, "argv", ["meret", *flag, "where"])
+    app_module._apply_language_from_argv()
+    assert get_locale().language == "ru"
+
+
+def test_lang_flag_beats_the_config(monkeypatch):
+    import meret.cli.app as app_module
+    from meret.core.config import get_config
+
+    get_config().set("locale.language", "en")
+    monkeypatch.setattr(sys, "argv", ["meret", "--lang", "ru", "where"])
+    app_module._apply_language_from_argv()
+    assert get_locale().language == "ru"
+
+
+def test_without_lang_the_config_decides(monkeypatch):
+    import meret.cli.app as app_module
+    from meret.core.config import get_config
+
+    get_config().set("locale.language", "ru")
+    monkeypatch.setattr(sys, "argv", ["meret", "where"])
+    app_module._apply_language_from_argv()
+    assert get_locale().language == "ru"
+
+
+def test_without_lang_and_with_auto_the_system_decides(monkeypatch):
+    """LANGUAGE=en comes from the autouse fixture, so this stays deterministic."""
+    import meret.cli.app as app_module
+
+    monkeypatch.setattr(sys, "argv", ["meret", "where"])
+    app_module._apply_language_from_argv()
+    assert get_locale().language == "en"
+
+
+def test_dangling_lang_flag_is_not_a_crash(monkeypatch):
+    """`meret where --lang` — typer complains about the value, we must not blow up."""
+    import meret.cli.app as app_module
+
+    monkeypatch.setattr(sys, "argv", ["meret", "where", "--lang"])
+    app_module._apply_language_from_argv()
+    assert get_locale().language == "en"
+
+
+# ---------- an unknown command is translated ----------
+
+
+def test_unknown_command_is_translated():
+    """The group builds this message itself: typer's own gettext would say English."""
+    res = runner.invoke(app, ["--lang", "ru", "scna"])
+    assert res.exit_code == 2
+    flat = res.output.replace("\n", " ")
+    assert "Нет такой команды" in flat
+    assert "scan" in flat  # the suggestion survives
+
+
+def test_unknown_command_without_a_close_match():
+    res = runner.invoke(app, ["--lang", "ru", "zzzzzz"])
+    assert res.exit_code == 2
+    assert "Доступные" in res.output.replace("\n", " ")
+
+def test_app_uses_the_translated_group():
+    """A stray `app = typer.Typer(...)` below would silently drop cls=TranslatedGroup."""
+    from meret.cli.app import TranslatedGroup, app
+
+    assert app.info.cls is TranslatedGroup
+
+def test_unknown_command_message_text():
+    from meret.core.locale import set_locale, _
+
+    set_locale("ru")
+    msg = _("No such command '{cmd}'. Did you mean: {available}?").format(
+        cmd="scna", available="scan"
+    )
+    print(repr(msg))
+    assert "Команда не '{cmd}' найдена" in msg

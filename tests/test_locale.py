@@ -79,7 +79,7 @@ class TestLocaleManager:
         # Second call should use cache
         result2 = loc.translate("Test")
         assert result1 == result2
-        assert "Test" in loc._cache
+        assert (None, "Test") in loc._cache
     
     def test_translate_with_context(self):
         loc = LocaleManager(language="en")

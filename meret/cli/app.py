@@ -1,17 +1,20 @@
 """Meret CLI with full localization support."""
 
-import os
 import logging
+import os
 import sys
 from collections import deque
+from difflib import get_close_matches
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
+import click
 import typer
 from rich.console import Console
 from rich.table import Table
 from rich.tree import Tree
 from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
+from typer.core import TyperGroup
 
 from meret.core import tagpaths
 from meret.core.locale import _, ngettext, set_locale, get_locale
@@ -30,28 +33,97 @@ from meret import __version__
 from meret.cli.deps import get_repo, resolve_db_path
 
 
-import click
-from meret.core.locale import _
+def _language_in(args: Sequence[str]) -> Optional[str]:
+    """The value of --lang / -l / --lang= in an argument list, if present."""
+    for index, arg in enumerate(args):
+        if arg in ("--lang", "-l") and index + 1 < len(args):
+            return args[index + 1]
+        if arg.startswith("--lang="):
+            return arg.split("=", 1)[1]
+    return None
 
-class TranslatedTyper(typer.Typer):
-    """Typer with translated error messages."""
-    
-    def command_not_found(self, ctx: click.Context, cmd_name: str) -> None:
-        available = ", ".join(sorted(self.list_commands(ctx)))
-        message = _("No such command '{cmd}'. Did you mean: {available}?").format(
-            cmd=cmd_name, available=available
+
+def _apply_language_from_argv(argv: Optional[List[str]] = None) -> None:
+    """Honour --lang before any command is built.
+
+    Typer freezes every `help=` string the moment the decorators run, which is at
+    import time, long before the callback could set the locale. Without this,
+    `meret --lang ru --help` prints English. Without --lang the config decides,
+    and set_locale("auto") falls through to the system language.
+    """
+    args = sys.argv[1:] if argv is None else list(argv)
+    set_locale(_language_in(args) or get_config().get("locale.language"))
+
+
+def _looks_like_an_option(name: str) -> bool:
+    """`--db`, `-d`: the group got an option where it expected a command."""
+    return bool(name) and not name[0].isalnum()
+
+
+class TranslatedGroup(TyperGroup):
+    """Typer group whose 'no such command' error is translated.
+
+    There is no `command_not_found` hook to override: the message is raised from
+    `resolve_command` and built with the stdlib gettext, not meret's catalogs, so
+    that is the method replaced here.
+    """
+
+    def resolve_command(self, ctx: click.Context, args):
+        # The group callback has not run yet, so --lang has to be applied here
+        self._apply_language(ctx, args)
+
+        cmd_name = args[0]
+        cmd = self.get_command(ctx, cmd_name)
+
+        if cmd is None and ctx.token_normalize_func is not None:
+            cmd_name = ctx.token_normalize_func(cmd_name)
+            cmd = self.get_command(ctx, cmd_name)
+
+        if cmd is None and not ctx.resilient_parsing:
+            if _looks_like_an_option(cmd_name):
+                # `meret --db` with no command: let the parser name the real problem
+                self.parse_args(ctx, args)
+            ctx.fail(self._unknown_command(ctx, args[0]))
+
+        return cmd_name if cmd else None, cmd, args[1:]
+
+    def _apply_language(self, ctx: click.Context, args: Sequence[str]) -> None:
+        """Apply --lang straight away.
+
+        `resolve_command` runs before the group callback, so a translated error
+        would otherwise be built with the previous locale. The parsed params are
+        the normal source of the value; the raw args are a fallback.
+        """
+        language = (getattr(ctx, "params", None) or {}).get("language")
+        if not language:
+            language = _language_in(args)
+        if language:
+            set_locale(language)
+
+    def _unknown_command(self, ctx: click.Context, name: str) -> str:
+        """The message, with suggestions when the typo is close to a real command."""
+        available = sorted(self.list_commands(ctx))
+        matches = get_close_matches(name, available) if available else []
+        if matches:
+            return _("No such command '{cmd}'. Did you mean: {available}?").format(
+                cmd=name, available=", ".join(matches)
+            )
+        return _("No such command '{cmd}'. Available: {available}").format(
+            cmd=name, available=", ".join(available) or "—"
         )
-        raise click.UsageError(message, ctx)
 
-app = TranslatedTyper(help=_("Meret — tagged media file system"), no_args_is_help=True)
+
+# Must run before the first @app.command, which freezes its help= right here
+_apply_language_from_argv()
+
+app = typer.Typer(cls=TranslatedGroup, no_args_is_help=True)
 
 console = Console()
 logger = logging.getLogger(__name__)
 
-DB_OPTION = typer.Option(None, "--db", "-d", help="Database directory or path to a .db file")
-
-
-app = typer.Typer(help="Meret — tagged media file system", no_args_is_help=True)
+DB_OPTION = typer.Option(
+    None, "--db", "-d", help=_("Database directory or path to a .db file")
+)
 
 
 @app.callback()
