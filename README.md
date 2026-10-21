@@ -215,8 +215,7 @@ meret config set locale.language auto    # follow the system (the default)
 The first match wins: `--lang`, then `locale.language` in the config, then the
 system language (`LANGUAGE`/`LC_ALL`/`LANG`, else the Windows display language),
 then English. An unknown language falls back to English. `--lang` goes before the
-command name. Not translated yet: help texts, the "database not found" hint, the
-virtual-FS commands (`ls`, `open`, `stat`, `mount`, `umount`) and the TUI.
+command name.
 
 ### Translating
 
@@ -263,7 +262,7 @@ traceback.
 ## Development
 
 ```bash
-pip install -e ".[dev,tui]"
+pip install -e .
 pytest
 ```
 
@@ -275,6 +274,17 @@ pytest
 
 `core` doesn't import `vfs` or `cli`, and the virtual tree has no third-party
 dependencies (`tests/vfs/test_architecture.py` checks both).
+
+## Milestones
+
+0.7 - GUI
+0.6 - localization
+0.5 - TUI
+0.4 - QoL and bugfixes
+0.3 - tag hierarchy
+0.2 - virtual file system
+0.1 - cli, total restructuring
+0.0 - basic code
 
 ## License
 

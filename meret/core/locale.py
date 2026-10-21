@@ -119,7 +119,9 @@ def _parse_po(text: str) -> Dict[str, str]:
             key = entry["msgid"]
             if "msgid_plural" in entry:
                 key += "\0" + entry["msgid_plural"]
-                forms = [entry.get("msgstr", {})[i] for i in sorted(entry.get("msgstr", {}))]
+                forms_map = entry.get("msgstr", {})
+                highest = max(forms_map) if forms_map else 0
+                forms = [forms_map.get(i, "") for i in range(highest + 1)]
                 value = "\0".join(forms)
                 translated = any(forms)
             else:
@@ -225,7 +227,7 @@ class LocaleManager:
         self._domain = domain
         self._config = self._resolve_config(language)
         self._translation = self._load_translation()
-        self._cache: Dict[str, str] = {}
+        self._cache: Dict[tuple, str] = {}
 
     def _resolve_config(self, language: Optional[str]) -> LocaleConfig:
         """Explicit language, or the system's (None or "auto")."""
@@ -279,17 +281,16 @@ class LocaleManager:
         Returns:
             Translated text or original if no translation found
         """
-        cache_key = f"{context}:{message}" if context else message
-
-        if cache_key not in self._cache:
+        cache_key = (context, message)
+        cached = self._cache.get(cache_key)
+        if cached is None:
             if context:
                 # pgettext-style with context
-                result = self._translation.pgettext(context, message)
+                cached = self._translation.pgettext(context, message)
             else:
-                result = self._translation.gettext(message)
-            self._cache[cache_key] = result
-
-        return self._cache[cache_key]
+                cached = self._translation.gettext(message)
+            self._cache[cache_key] = cached
+        return cached
 
     def translate_plural(
         self,
@@ -316,8 +317,13 @@ class LocaleManager:
         else:
             template = self._translation.ngettext(singular, plural, n)
 
-        # Replace {n} placeholder if present
-        return template.format(n=n)
+        if "{n}" not in template:
+            return template
+        try:
+            return template.format(n=n)
+        except (KeyError, IndexError):
+            logger.debug("plural template %r has stray braces, leaving as is", template)
+            return template
 
     def format_number(
         self,
@@ -391,15 +397,30 @@ class LocaleManager:
         }
 
 
+def _config_language() -> Optional[str]:
+    """The locale.language from the config, or None when it is unset or "auto"."""
+    try:
+        from meret.core.config import get_config
+
+        value = get_config().get("locale.language")
+    except Exception as e:
+        # A broken or absent config must never break translations
+        logger.debug("config language unavailable: %s", e)
+        return None
+    if not value or value.strip().lower() == "auto":
+        return None
+    return value
+
+
 # Global instance (lazy-loaded)
 _locale_manager: Optional[LocaleManager] = None
 
 
 def get_locale(language: Optional[str] = None) -> LocaleManager:
-    """Get or create global locale manager."""
+    """Get or create the global locale manager: explicit language, config, system."""
     global _locale_manager
     if _locale_manager is None or language is not None:
-        _locale_manager = LocaleManager(language)
+        _locale_manager = LocaleManager(language if language is not None else _config_language())
     return _locale_manager
 
 
@@ -419,13 +440,3 @@ def _(message: str, context: Optional[str] = None) -> str:
 def ngettext(singular: str, plural: str, n: int, context: Optional[str] = None) -> str:
     """Shorthand for plural translation."""
     return get_locale().translate_plural(singular, plural, n, context)
-
-try:
-    from meret.core.config import get_config
-    _cfg = get_config()
-    _lang = _cfg.get("locale.language")
-    if _lang and _lang != "auto":
-        # Create global instance with config language
-        _locale_manager = LocaleManager(_lang)
-except Exception:
-    pass
