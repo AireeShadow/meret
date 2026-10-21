@@ -7,7 +7,7 @@ import pytest
 
 from meret.core.locale import set_locale, _
 
-MERET = Path(__file__).resolve().parents[1] / "meret"
+MERET = Path(__file__).resolve().parents[2] / "meret"
 TUI_FILE = MERET / "cli" / "tui.py"
 
 

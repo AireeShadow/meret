@@ -6,6 +6,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from pathlib import Path
+
+MERET = Path(__file__).resolve().parents[2] / "meret"
+
 from meret.cli.app import app
 
 

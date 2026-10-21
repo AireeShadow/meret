@@ -22,7 +22,7 @@ from meret.core.locale import (
     get_locale
 )
 
-MERET = Path(__file__).resolve().parents[1] / "meret"
+MERET = Path(__file__).resolve().parents[2] / "meret"
 LANGUAGES = sorted(p.parent.parent.name for p in DEFAULT_LOCALE_DIR.glob("*/LC_MESSAGES/*.po"))
 UNITS = {"B", "KB", "MB", "GB", "TB"}
 

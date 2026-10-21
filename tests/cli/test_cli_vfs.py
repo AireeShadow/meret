@@ -8,6 +8,10 @@ from meret.cli.app import app
 from meret.core.models import FileEntry, FileType
 from meret.core.sqlite_repo import SQLiteRepository
 
+from pathlib import Path
+
+MERET = Path(__file__).resolve().parents[2] / "meret"
+
 runner = CliRunner()
 
 

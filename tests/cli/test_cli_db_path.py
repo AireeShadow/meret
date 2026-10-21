@@ -6,6 +6,10 @@ from typer.testing import CliRunner
 from meret.cli.app import app
 from meret.cli.deps import DB_NAME, DatabaseNotFound, get_repo, resolve_db_path
 
+from pathlib import Path
+
+MERET = Path(__file__).resolve().parents[2] / "meret"
+
 runner = CliRunner()
 
 

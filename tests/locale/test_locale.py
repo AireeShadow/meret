@@ -18,6 +18,7 @@ from meret.core.locale import (
     ngettext,
 )
 
+MERET = Path(__file__).resolve().parents[2] / "meret"
 
 class TestLocaleConfig:
     """Tests for LocaleConfig dataclass."""
