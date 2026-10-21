@@ -24,6 +24,7 @@ from meret.core.locale import (
 
 MERET = Path(__file__).resolve().parents[1] / "meret"
 LANGUAGES = sorted(p.parent.parent.name for p in DEFAULT_LOCALE_DIR.glob("*/LC_MESSAGES/*.po"))
+UNITS = {"B", "KB", "MB", "GB", "TB"}
 
 runner = CliRunner()
 
@@ -32,13 +33,22 @@ runner = CliRunner()
 
 
 def _msgids_in_code():
-    """(msgid, where) for each _("...") / ngettext("...", "...") with literal text."""
+    """(key, where) for each translatable call with literal text.
+
+    Covers _()/translate() and ngettext()/translate_plural(), so strings reached
+    through self.translate() inside LocaleManager count too. Keys are shaped like
+    the catalog: "ctxt\\x04msgid" for a context, "singular\\0plural" for plurals.
+    """
     found = []
     for py in MERET.rglob("*.py"):
         tree = ast.parse(py.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            if not isinstance(node, ast.Call):
                 continue
+            name = (
+                node.func.id if isinstance(node.func, ast.Name)
+                else getattr(node.func, "attr", "")
+            )
             args = [a.value for a in node.args if isinstance(a, ast.Constant)]
             where = f"{py.relative_to(MERET.parent)}:{node.lineno}"
             context = next(
@@ -46,36 +56,15 @@ def _msgids_in_code():
                  if k.arg == "context" and isinstance(k.value, ast.Constant)),
                 None,
             )
-            if node.func.id == "_" and args and isinstance(args[0], str):
-                # keyed like the catalog: "ctxt\x04msgid" when there is a context
+            if name in ("_", "translate") and args and isinstance(args[0], str):
                 found.append((f"{context}\x04{args[0]}" if context else args[0], where))
-            elif node.func.id == "ngettext" and len(args) >= 2:
+            elif name in ("ngettext", "translate_plural") and len(args) >= 2:
                 found.append((f"{args[0]}\0{args[1]}", where))
     return found
 
 
 def _fields(text):
     return sorted({name for _, name, _, _ in string.Formatter().parse(text) if name is not None})
-
-def _plain(text: str) -> str:
-    """The error goes out in a Rich panel: drop the borders and squeeze whitespace."""
-    return re.sub(r"\s+", " ", text.replace("│", " ").replace("─", " "))
-
-
-def test_unknown_command_is_translated():
-    """The group builds this message itself: typer's own gettext would say English."""
-    res = runner.invoke(app, ["--lang", "ru", "scna"])
-    assert res.exit_code == 2
-    flat = _plain(res.output)
-    assert "Команда 'scna' не найдена" in flat
-    assert "scan" in flat  # the suggestion survives
-
-
-def test_unknown_command_without_a_close_match():
-    res = runner.invoke(app, ["--lang", "ru", "zzzzzz"])
-    assert res.exit_code == 2
-    assert "Доступные" in _plain(res.output)
-
 
 def test_code_has_translatable_strings():
     assert len(_msgids_in_code()) > 30
@@ -121,6 +110,25 @@ def test_catalog_has_no_duplicate_msgids(language, caplog):
     _parse_po(po.read_text(encoding="utf-8"), source=str(po))
     dupes = [r.getMessage() for r in caplog.records if "duplicate msgid" in r.getMessage()]
     assert not dupes, "\n".join(dupes)
+
+def test_an_untranslated_duplicate_does_not_shadow_the_translated_one(caplog):
+    """`later wins` must not mean an empty copy wins over a real translation."""
+    text = 'msgid "a"\nmsgstr "1"\n\nmsgid "a"\nmsgstr ""\n'
+    assert _parse_po(text, source="t.po")["a"] == "1"
+    assert "duplicate msgid" in caplog.text
+
+#: format_file_size reaches these through self.translate(), not _()
+
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_catalog_has_no_unused_msgids(language):
+    """A msgid nothing asks for is a leftover — or a typo in the code."""
+    po = DEFAULT_LOCALE_DIR / language / "LC_MESSAGES" / "messages.po"
+    catalog = _parse_po(po.read_text(encoding="utf-8"))
+    used = {m for m, _ in _msgids_in_code()} | UNITS | {""}
+    unused = sorted(k for k in catalog if k not in used)
+    assert not unused, "asked for by no _()/ngettext():\n" + "\n".join(map(repr, unused))
 
 
 def test_duplicates_are_reported_and_the_later_wins(caplog):
@@ -328,7 +336,7 @@ def test_tui_bindings_in_catalog():
         "Quit", "Config", "Init DB", "Open", "Scan", "Tag",
         "Refresh", "Delete tag", "Home", "Up", "Sort",
         "Mount", "Unmount", "Select Drive", "Search", "Help",
-        "Cancel", "OK", "Yes", "No", "Close", "Select",
+        "Cancel", "OK", "Yes", "No", "Close", "Select", "Command",
     ]
     
     missing = [b for b in bindings if b not in catalog]
@@ -414,20 +422,6 @@ def test_dangling_lang_flag_is_not_a_crash(monkeypatch):
 
 # ---------- an unknown command is translated ----------
 
-
-def test_unknown_command_is_translated():
-    """The group builds this message itself: typer's own gettext would say English."""
-    res = runner.invoke(app, ["--lang", "ru", "scna"])
-    assert res.exit_code == 2
-    flat = res.output.replace("\n", " ")
-    assert "Команда 'scna' не найдена" in flat
-
-
-def test_unknown_command_without_a_close_match():
-    res = runner.invoke(app, ["--lang", "ru", "zzzzzz"])
-    assert res.exit_code == 2
-    assert "Доступные" in res.output.replace("\n", " ")
-
 def test_app_uses_the_translated_group():
     """A stray `app = typer.Typer(...)` below would silently drop cls=TranslatedGroup."""
     from meret.cli.app import TranslatedGroup, app
@@ -444,3 +438,22 @@ def test_unknown_command_message_text():
     )
     # {cmd} is already substituted here — no braces left in the result
     assert msg == "Команда 'scna' не найдена. Возможно, вы имели в виду: scan?"
+
+def _plain(text: str) -> str:
+    """The error goes out in a Rich panel: drop the borders and squeeze whitespace."""
+    return re.sub(r"\s+", " ", text.replace("│", " ").replace("─", " "))
+
+
+def test_unknown_command_is_translated():
+    """The group builds this message itself: typer's own gettext would say English."""
+    res = runner.invoke(app, ["--lang", "ru", "scna"])
+    assert res.exit_code == 2
+    flat = _plain(res.output)
+    assert "Команда 'scna' не найдена" in flat
+    assert "scan" in flat  # the suggestion survives
+
+
+def test_unknown_command_without_a_close_match():
+    res = runner.invoke(app, ["--lang", "ru", "zzzzzz"])
+    assert res.exit_code == 2
+    assert "Доступные" in _plain(res.output)

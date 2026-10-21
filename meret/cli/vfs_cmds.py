@@ -1,9 +1,11 @@
 """CLI commands for the virtual FS: ls / open / stat."""
 
 import os
+import sys
+import signal
 import platform
 import subprocess
-import signal
+
 from pathlib import Path
 from typing import Optional
 
@@ -31,10 +33,9 @@ def _human(size: int) -> str:
 
 def _open_external(path: Path) -> None:
     """Opens a file with the system's default application."""
-    system = platform.system()
-    if system == _("Windows"):
+    if sys.platform == "win32":
         os.startfile(path)
-    elif system == _("Darwin"):
+    elif sys.platform == "darwin":
         subprocess.run(["open", str(path)], check=False)
     else:
         subprocess.run(["xdg-open", str(path)], check=False)

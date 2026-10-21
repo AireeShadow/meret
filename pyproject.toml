@@ -7,14 +7,14 @@ license = {text = "GPL-3.0"}
 requires-python = ">=3.11"
 dependencies = [
     # Core
-    "typer[all]>=0.9.0",
+    "typer>=0.12.0",
     "rich>=15.0.0",
     "pydantic>=2.0.0",
     "Pillow>=10.0.0",
     "platformdirs>=3.0",
     # All features now mandatory
     "fsspec>=2023.0.0",
-    "tomli>=2.0.0; python_version<'3.11'",
+    "tomli>=2.0.0",
     "tomli-w>=1.0.0",
     "Textual>=8.2.0",
     # Platform-specific mount drivers (only install where needed)
@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "black", "ruff", "mypy"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "black", "ruff", "mypy", "pytest-qt>=4.2"]
 gui = ["PySide6>=6.6.0"]
 
 [project.scripts]

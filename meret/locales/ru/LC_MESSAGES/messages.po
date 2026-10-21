@@ -15,32 +15,14 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
-#: meret/cli/app.py:53
-msgid "meret {version}: {command} | argv={argv} cwd={cwd} log={log}"
-msgstr "meret {version}: {command} | argv={argv} cwd={cwd} log={log}"
-
-# Database commands
-msgid "Database created"
-msgstr "База данных создана"
-
-msgid "Database already exists"
-msgstr "База данных уже существует"
-
 msgid "Database not found"
 msgstr "База данных не найдена"
-
-msgid "Which database meret sees"
-msgstr "Какую базу данных видит meret"
 
 msgid "exists"
 msgstr "существует"
 
 msgid "missing"
 msgstr "отсутствует"
-
-# Scanning
-msgid "Scanning"
-msgstr "Сканирование"
 
 msgid "Finding files"
 msgstr "Поиск файлов"
@@ -51,39 +33,11 @@ msgstr "Чтение метаданных"
 msgid "Writing to database"
 msgstr "Запись в базу данных"
 
-msgid "No such path"
-msgstr "Путь не существует"
-
-msgid "New"
-msgstr "Новых"
-
-msgid "updated"
-msgstr "обновлено"
-
-msgid "skipped"
-msgstr "пропущено"
-
-msgid "errors"
-msgstr "ошибок"
-
 msgid "Interrupted by user"
 msgstr "Прервано пользователем"
 
-msgid "New files"
-msgstr "Новые файлы"
-
-msgid "dry run"
-msgstr "пробный запуск"
-
-# Search
-msgid "Search by name and/or tags"
-msgstr "Поиск по имени и/или тегам"
-
 msgid "Nothing found"
 msgstr "Ничего не найдено"
-
-msgid "Found"
-msgstr "Найдено"
 
 msgid "File"
 msgstr "Файл"
@@ -97,103 +51,18 @@ msgstr "Рейтинг"
 msgid "Tags"
 msgstr "Теги"
 
-# File types
-msgid "image"
-msgstr "изображение"
-
-msgid "video"
-msgstr "видео"
-
-msgid "audio"
-msgstr "аудио"
-
-msgid "unknown"
-msgstr "неизвестно"
-
 # Tag operations
 msgid "Tag"
 msgstr "Тег"
 
-msgid "Tags added"
-msgstr "Теги добавлены"
-
-msgid "Tags removed"
-msgstr "Теги удалены"
-
-msgid "Tag created"
-msgstr "Тег создан"
-
-msgid "Tag deleted"
-msgstr "Тег удалён"
-
-msgid "Tag moved"
-msgstr "Тег перемещён"
-
-msgid "to root"
-msgstr "в корень"
-
-msgid "No such tag"
-msgstr "Тег не найден"
-
-msgid "would create a cycle"
-msgstr "создаст цикл"
-
-msgid "Failed"
-msgstr "Ошибка"
-
 msgid "Empty path"
 msgstr "Пустой путь"
-
-msgid "Pruned"
-msgstr "Очищено"
-
-msgid "orphan tags"
-msgstr "потерянных тегов"
-
-msgid "Tag hierarchy"
-msgstr "Иерархия тегов"
 
 msgid "No tags yet"
 msgstr "Пока нет тегов"
 
-msgid "All tags"
-msgstr "Все теги"
-
-# File operations
-msgid "File is not in the database"
-msgstr "Файл отсутствует в базе данных"
-
 msgid "Open file"
 msgstr "Открыть файл"
-
-msgid "File path"
-msgstr "Путь к файлу"
-
-msgid "File size"
-msgstr "Размер файла"
-
-msgid "Modified"
-msgstr "Изменён"
-
-msgid "Created"
-msgstr "Создан"
-
-# Stats
-msgid "Statistics"
-msgstr "Статистика"
-
-msgid "Total files"
-msgstr "Всего файлов"
-
-msgid "Total tags"
-msgstr "Всего тегов"
-
-msgid "Files per type"
-msgstr "Файлов по типам"
-
-# Config
-msgid "Configuration"
-msgstr "Конфигурация"
 
 msgid "Config file"
 msgstr "Файл конфигурации"
@@ -201,75 +70,12 @@ msgstr "Файл конфигурации"
 msgid "Configuration reset to defaults"
 msgstr "Конфигурация сброшена к значениям по умолчанию"
 
-msgid "Key not found"
-msgstr "Ключ не найден"
-
-msgid "Value set"
-msgstr "Значение установлено"
-
-msgid "Failed to set"
-msgstr "Не удалось установить"
-
-# TUI
-msgid "Launch interactive TUI"
-msgstr "Запустить интерактивный TUI"
-
-msgid "TUI Error"
-msgstr "Ошибка TUI"
-
-msgid "details in log"
-msgstr "подробности в логе"
-
 # VFS / Mount
 msgid "Mount virtual filesystem"
 msgstr "Смонтировать виртуальную файловую систему"
 
 msgid "Unmount"
 msgstr "Размонтировать"
-
-msgid "mounted at"
-msgstr "смонтировано в"
-
-msgid "unmounted"
-msgstr "размонтировано"
-
-msgid "Not mounted"
-msgstr "Не смонтировано"
-
-# Logging
-msgid "Log file location"
-msgstr "Расположение файла лога"
-
-msgid "Last {n} lines"
-msgstr "Последние {n} строк"
-
-# Errors / Warnings
-msgid "Error"
-msgstr "Ошибка"
-
-msgid "Warning"
-msgstr "Предупреждение"
-
-msgid "Success"
-msgstr "Успех"
-
-msgid "Info"
-msgstr "Информация"
-
-msgid "Debug"
-msgstr "Отладка"
-
-msgid "What to do"
-msgstr "Что делать"
-
-msgid "create a database"
-msgstr "создать базу данных"
-
-msgid "pass the path explicitly"
-msgstr "указать путь явно"
-
-msgid "set the environment variable"
-msgstr "установить переменную окружения"
 
 # Common UI elements
 msgid "Yes"
@@ -281,23 +87,8 @@ msgstr "Нет"
 msgid "Cancel"
 msgstr "Отмена"
 
-msgid "Confirm"
-msgstr "Подтвердить"
-
-msgid "Save"
-msgstr "Сохранить"
-
-msgid "Delete"
-msgstr "Удалить"
-
-msgid "Edit"
-msgstr "Редактировать"
-
 msgid "Refresh"
 msgstr "Обновить"
-
-msgid "Exit"
-msgstr "Выход"
 
 msgid "Help"
 msgstr "Помощь"
@@ -317,43 +108,6 @@ msgstr "ГБ"
 
 msgid "TB"
 msgstr "ТБ"
-
-# Plural forms
-msgid "file"
-msgid_plural "files"
-msgstr[0] "файл"
-msgstr[1] "файла"
-msgstr[2] "файлов"
-
-msgid "tag"
-msgid_plural "tags"
-msgstr[0] "тег"
-msgstr[1] "тега"
-msgstr[2] "тегов"
-
-msgid "item"
-msgid_plural "items"
-msgstr[0] "элемент"
-msgstr[1] "элемента"
-msgstr[2] "элементов"
-
-msgid "second"
-msgid_plural "seconds"
-msgstr[0] "секунда"
-msgstr[1] "секунды"
-msgstr[2] "секунд"
-
-msgid "minute"
-msgid_plural "minutes"
-msgstr[0] "минута"
-msgstr[1] "минуты"
-msgstr[2] "минут"
-
-msgid "hour"
-msgid_plural "hours"
-msgstr[0] "час"
-msgstr[1] "часа"
-msgstr[2] "часов"
 
 # CLI output (meret/cli/app.py): whole sentences, markup stays in the code
 
@@ -537,36 +291,6 @@ msgstr "или установить переменную окружения:"
 msgid "database not found"
 msgstr "база данных не найдена"
 
-msgid "No such command '{cmd}'."
-msgstr "Команда '{cmd}' не найдена."
-
-msgid "Did you mean"
-msgstr "Возможно, вы имели в виду"
-
-msgid "Usage:"
-msgstr "Использование:"
-
-msgid "Try"
-msgstr "Попробуйте"
-
-msgid "for help."
-msgstr "для справки."
-
-msgid "Usage: {usage}"
-msgstr "Использование: {usage}"
-
-msgid "Try '{command}' for help."
-msgstr "Выполните '{command}' для справы."
-
-msgid "Error: {message}"
-msgstr "Ошибка: {message}"
-
-msgid "No such command '{command}'."
-msgstr "Команда '{command}' не найдена."
-
-msgid "Did you mean:"
-msgstr "Возможно, вы имели в виду:"
-
 # TUI strings
 msgid "Select a file to preview"
 msgstr "Выберите файл для предпросмотра"
@@ -577,20 +301,11 @@ msgstr "Предпросмотр"
 msgid "No selection"
 msgstr "Нет выделения"
 
-msgid "Virtual: {path}\nUse 'o' to open real file"
-msgstr "Виртуальный: {path}\nНажмите 'o' чтобы открыть реальный файл"
-
 msgid "Cannot access file"
 msgstr "Нет доступа к файлу"
 
 msgid "Error: {error}"
 msgstr "Ошибка: {error}"
-
-msgid "File: {path}\nSize: {size} bytes"
-msgstr "Файл: {path}\nРазмер: {size} байт"
-
-msgid "Tag file: {filename}"
-msgstr "Тег для файла: {filename}"
 
 msgid "Enter tag (e.g., vacation/beach)"
 msgstr "Введите тег (например, путешествия/пляж)"
@@ -600,18 +315,6 @@ msgstr "Нажмите Enter для подтверждения, Esc для от�
 
 msgid "Search: {query}"
 msgstr "Поиск: {query}"
-
-msgid "(all files)"
-msgstr "(все файлы)"
-
-msgid "↑↓ to navigate, Enter to select, Esc to close"
-msgstr "↑↓ навигация, Enter — выбрать, Esc — закрыть"
-
-msgid "y = yes, n / Esc = no"
-msgstr "y — да, n / Esc — нет"
-
-msgid "Type command..."
-msgstr "Введите команду..."
 
 msgid "Scan directory for media"
 msgstr "Сканировать директорию на медиафайлы"
@@ -643,29 +346,14 @@ msgstr "Удалить потерянные теги"
 msgid "Unmount filesystem"
 msgstr "Размонтировать файловую систему"
 
-msgid "Loading..."
-msgstr "Загрузка..."
-
-msgid "No database - run 'meret init'"
-msgstr "Нет базы данных — выполните 'meret init'"
-
 msgid "Virtual FS (Tags)"
 msgstr "Виртуальная ФС (Теги)"
 
 msgid "Real Filesystem ({path})"
 msgstr "Реальная файловая система ({path})"
 
-msgid "Meret TUI"
-msgstr "Meret TUI"
-
 msgid "Database initialized!"
 msgstr "База данных инициализирована!"
-
-msgid "Opened file"
-msgstr "Файл открыт"
-
-msgid "Scanning..."
-msgstr "Сканирование..."
 
 msgid "Tagged with '{tag}'"
 msgstr "Добавлен тег '{tag}'"
@@ -675,12 +363,6 @@ msgstr "Обновлено"
 
 msgid "Delete tag"
 msgstr "Удалить тег"
-
-msgid "Home directory"
-msgstr "Домашняя директория"
-
-msgid "Go up"
-msgstr "Вверх"
 
 msgid "name"
 msgstr "имя"
@@ -694,72 +376,17 @@ msgstr "дата"
 msgid "Sort by: {mode}"
 msgstr "Сортировка: {mode}"
 
-msgid "Mounting..."
-msgstr "Монтирование..."
-
-msgid "Unmounting..."
-msgstr "Размонтирование..."
-
 msgid "Drive selection only available on Windows"
 msgstr "Выбор диска доступен только в Windows"
 
 msgid "Select drive"
 msgstr "Выбрать диск"
 
-msgid "Command: {cmd}"
-msgstr "Команда: {cmd}"
-
-msgid "Command"
-msgstr "Команда"
-
-msgid "Navigation:\n"
-"  ↑/↓ Navigate\n"
-"  Enter Open file / expand folder\n"
-"  .. or u/Backspace Go to parent\n"
-"  h or ~ Go home\n"
-"  D Select drive (Windows)\n"
-"  S Cycle sort: name / size / date\n"
-"Commands:\n"
-"  q Quit\n"
-"  : Command palette\n"
-"  / Search\n"
-"  s Scan directory\n"
-"  t Tag selected file\n"
-"  d Delete tag\n"
-"  r Refresh\n"
-"  m/U Mount/Unmount\n"
-"  c Config\n"
-"  i Init DB"
-msgstr "Навигация:\n"
-"  ↑/↓ Навигация\n"
-"  Enter Открыть файл / развернуть папку\n"
-"  .. или u/Backspace В родительскую директорию\n"
-"  h или ~ Домой\n"
-"  D Выбрать диск (Windows)\n"
-"  S Сменить сортировку: имя / размер / дата\n"
-"Команды:\n"
-"  q Выход\n"
-"  : Палитра команд\n"
-"  / Поиск\n"
-"  s Сканировать директорию\n"
-"  t Тег для выбранного файла\n"
-"  d Удалить тег\n"
-"  r Обновить\n"
-"  m/U Монтировать/Размонтировать\n"
-"  c Конфигурация\n"
-"  i Инициализировать БД"
-
-msgid "Textual is required for the TUI. Install: pip install textual"
-msgstr "Для TUI требуется Textual. Установите: pip install textual"
-
 msgid "Quit"
 msgstr "Выход"
 
 msgid "Init DB"
 msgstr "Иниц. БД"
-
-msgid "Open"
-msgstr "Открыть"
 
 msgid "Scan"
 msgstr "Скан"
@@ -788,14 +415,6 @@ msgstr "Поиск"
 # TUI - DriveSelector
 msgid "Select Drive:"
 msgstr "Выберите диск:"
-
-# TUI - FilePreview
-msgid "Size: {size}\nModified: {mtime}"
-msgstr "Размер: {size}\nИзменён: {mtime}"
-
-# TUI - VirtualFileTree
-msgid "(empty)"
-msgstr "(пусто)"
 
 msgid "Error: empty vpath for {name}"
 msgstr "Ошибка: пустой vpath для {name}"
@@ -862,27 +481,12 @@ msgstr "Размонтировано {path}"
 msgid "'{cmd}' isn't available in the TUI yet"
 msgstr "'{cmd}' пока недоступно в TUI"
 
-# TUI - Border titles
-msgid "Real Filesystem ({path}) · {sort}"
-msgstr "Файлы ({path}) · {sort}"
-
-# TUI - path bar
-msgid "DB: {db} | Selected: {sel}"
-msgstr "БД: {db} | Выбрано: {sel}"
-
-# TUI - parent directory
-msgid ".."
-msgstr ".."
-
 # Dialog buttons
 msgid "OK"
 msgstr "ОК"
 
 msgid "Close"
 msgstr "Закрыть"
-
-msgid "Select"
-msgstr "Выбрать"
 
 # Typer option helps
 msgid "Database directory or path to a .db file"
@@ -1001,10 +605,6 @@ msgstr "Виртуальный:"
 msgid "Command..."
 msgstr "Команда..."
 
-# VFS cmds
-msgid "Windows"
-msgstr "Windows"
-
 msgid "List the contents of a virtual directory (tags = folders)."
 msgstr "Показать содержимое виртуальной директории (теги = папки)."
 
@@ -1025,9 +625,6 @@ msgstr "Смонтировать теги как диск/директорию (
 
 msgid "Unmount: find the mount process and terminate it."
 msgstr "Размонтировать: найти процесс монтирования и завершить его."
-
-msgid "Darwin"
-msgstr "Darwin"
 
 msgid "Virtual path, e.g. /travel"
 msgstr "Виртуальный путь, например /travel"
@@ -1113,3 +710,12 @@ msgstr "Выбрано:"
 
 msgid "No such command '{cmd}'. Available: {available}"
 msgstr "Команда '{cmd}' не найдена. Доступные: {available}"
+
+msgid "Open"
+msgstr "Открыть"
+
+msgid "Select"
+msgstr "Выбрать"
+
+msgid "Command"
+msgstr "Команда"

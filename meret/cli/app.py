@@ -133,7 +133,7 @@ def main(
     log_level: Optional[str] = typer.Option(None, "--log-level"),
     language: Optional[str] = typer.Option(
         None, "--lang", "-l",
-        help="Language: en, ru, … (default: config locale.language, else the system's)",
+        help=_("Language: en, ru, … (default: config locale.language, else the system's)"),
     ),
 ):
     """Meret — tagged media file system."""

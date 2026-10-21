@@ -109,7 +109,8 @@ def _parse_po(text: str, source: str = "<po>") -> Dict[str, str]:
     header (msgid "") is kept: it carries the charset and the plural rule.
 
     A msgid defined twice (same msgctxt, plural or not) is an error for msgfmt;
-    here it is logged as a warning and the later definition wins.
+    here it is logged as a warning, and the last translatable copy wins — so an
+    empty or fuzzy copy cannot shadow a real translation.
     """
     catalog: Dict[str, str] = {}
     entry: Dict[str, Any] = {}
@@ -118,33 +119,42 @@ def _parse_po(text: str, source: str = "<po>") -> Dict[str, str]:
     defined: Dict[tuple, int] = {}  # (msgctxt, msgid) -> line of its first definition
 
     def flush() -> None:
+        """Write the entry being built out, if it is translatable."""
         nonlocal entry, fuzzy
-        if "msgid" in entry:
-            ident = (entry.get("msgctxt"), entry["msgid"])
-            if ident in defined:
-                logger.warning(
-                    "%s:%s: duplicate msgid %r (first defined at line %s), the later one wins",
-                    source, entry.get("_line"), entry["msgid"], defined[ident],
-                )
-            else:
-                defined[ident] = entry.get("_line")
-            key = entry["msgid"]
-            if "msgid_plural" in entry:
-                key += "\0" + entry["msgid_plural"]
-                forms_map = entry.get("msgstr", {})
-                highest = max(forms_map) if forms_map else 0
-                forms = [forms_map.get(i, "") for i in range(highest + 1)]
-                value = "\0".join(forms)
-                translated = any(forms)
-            else:
-                value = entry.get("msgstr", {}).get(0, "")
-                translated = bool(value)
-            if "msgctxt" in entry:
-                key = entry["msgctxt"] + "\x04" + key
-            is_header = entry["msgid"] == "" and "msgctxt" not in entry
-            if is_header or (translated and not fuzzy):
-                catalog[key] = value
-        entry, fuzzy = {}, False
+        # Take the entry and its fuzzy flag away first: the checks below must see
+        # their contents, not the reset state
+        item, was_fuzzy, entry, fuzzy = entry, fuzzy, {}, False
+        if "msgid" not in item:
+            return
+
+        is_header = item["msgid"] == "" and "msgctxt" not in item
+        key = item["msgid"]
+        if "msgid_plural" in item:
+            key += "\0" + item["msgid_plural"]
+            forms = item.get("msgstr", {})
+            values = [forms.get(i, "") for i in range(max(forms, default=0) + 1)]
+            value = "\0".join(values)
+            translated = any(values)
+        else:
+            value = item.get("msgstr", {}).get(0, "")
+            translated = bool(value)
+
+        # msgfmt reports every repeated msgid; here the last translatable copy wins
+        ident = (item.get("msgctxt"), item["msgid"])
+        if ident in defined:
+            logger.warning(
+                "%s:%s: duplicate msgid %r (first defined at line %s)",
+                source, item.get("_line"), item["msgid"], defined[ident],
+            )
+        else:
+            defined[ident] = item.get("_line")
+
+        if not (is_header or (translated and not was_fuzzy)):
+            return
+
+        if "msgctxt" in item:
+            key = item["msgctxt"] + "\x04" + key
+        catalog[key] = value
 
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
@@ -176,6 +186,7 @@ def _parse_po(text: str, source: str = "<po>") -> Dict[str, str]:
             else:
                 raise ValueError(f"line {number}: unknown keyword {keyword!r}")
             entry.setdefault("_line", number)
+            # msgstr is a dict of plural form -> text; everything else is a string
             if isinstance(field, tuple):
                 entry.setdefault("msgstr", {})[field[1]] = ""
             else:
@@ -187,6 +198,7 @@ def _parse_po(text: str, source: str = "<po>") -> Dict[str, str]:
         else:
             entry[field] += chunk
     flush()
+    logger.debug("%s: parsed %d entries", source, len(catalog))
     return catalog
 
 

@@ -216,8 +216,8 @@ class SearchScreen(ModalScreen[list[FileEntry]]):
     """Search results screen."""
     
     BINDINGS = [
-        Binding("escape", "dismiss", "Close"),
-        Binding("enter", "select", "Select"),
+        Binding("escape", "dismiss", _("Close")),
+        Binding("enter", "select", _("Select")),
     ]
     
     def __init__(self, repo, query: str):
@@ -421,9 +421,9 @@ class MeretApp(App):
     
     BINDINGS = [
         Binding("q", "quit", _("Quit")),
-        Binding(":", "command_palette", "Command"),
+        Binding(":", "command_palette", _("Command")),
         Binding("i", "init_db", _("Init DB")),
-        Binding("enter", "open_file", "Open"),
+        Binding("enter", "open_file", _("Open")),
         Binding("s", "scan", _("Scan")),
         Binding("t", "tag", _("Tag")),
         Binding("r", "refresh", _("Refresh")),
