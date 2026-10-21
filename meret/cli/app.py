@@ -676,6 +676,23 @@ def tui(
         )
         raise typer.Exit(1)
 
+@app.command("gui", help=_("Launch the graphical interface."))
+def gui(db_path: Optional[Path] = DB_OPTION):
+    """Launch the graphical interface."""
+    try:
+        from meret.gui.app import run_gui
+    except ImportError as e:
+        console.print(f"[red]{_('The GUI needs PySide6: {error}').format(error=e)}[/red]")
+        console.print("[dim]pip install 'meret[gui]'[/dim]")
+        raise typer.Exit(1)
+
+    target = resolve_db_path(db_path)
+    if not target.exists():
+        console.print(f"[yellow]{_('No database here: {path}').format(path=target)}[/yellow]")
+
+    disable_console_logging()  # a GUI has no console to log to
+    raise typer.Exit(run_gui(target))
+
 
 # ls / open / stat / mount / umount register themselves
 from meret.cli import vfs_cmds  # noqa: E402,F401

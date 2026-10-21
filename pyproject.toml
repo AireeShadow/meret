@@ -19,11 +19,15 @@ dependencies = [
     "Textual>=8.2.0",
     # Platform-specific mount drivers (only install where needed)
     "fusepy>=1.0.0; sys_platform != 'win32'",
-    "winfspy>=2.0.0; sys_platform == 'win32'",
+    "winfspy>=0.8.0; sys_platform == 'win32'",
 ]
 
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "black", "ruff", "mypy", "pytest-qt>=4.2"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "pytest-qt>=4.2", "black", "ruff", "mypy"]
 gui = ["PySide6>=6.6.0"]
 
 [project.scripts]

@@ -719,3 +719,20 @@ msgstr "Выбрать"
 
 msgid "Command"
 msgstr "Команда"
+
+# GUI
+
+msgid "Launch the graphical interface."
+msgstr "Запустить графический интерфейс."
+
+msgid "The GUI needs PySide6: {error}"
+msgstr "Для GUI нужен PySide6: {error}"
+
+msgid "No database here: {path}"
+msgstr "Здесь нет базы данных: {path}"
+
+msgid "Nothing selected"
+msgstr "Ничего не выбрано"
+
+msgid "Cannot open {path}: {error}"
+msgstr "Не удалось открыть {path}: {error}"
