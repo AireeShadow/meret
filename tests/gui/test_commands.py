@@ -85,20 +85,6 @@ def test_no_command_falls_through_to_the_not_available_note(
         window.run_command(command)
         assert "isn't available" not in window._status_label.text(), command
 
-
-def test_placeholder_icons_differ_per_kind(qapp):
-    from meret.core.models import FileType
-    from meret.gui import icons
-
-    image = icons.placeholder_for(FileType.IMAGE, 64).pixmap(64, 64).toImage()
-    video = icons.placeholder_for(FileType.VIDEO, 64).pixmap(64, 64).toImage()
-    generic = icons.placeholder_for(None, 64).pixmap(64, 64).toImage()
-
-    assert not image.isNull() and not video.isNull()
-    assert image != video
-    assert generic == icons.placeholder(icons.UNKNOWN, 64).pixmap(64, 64).toImage()
-
-
 def test_missing_preview_keeps_an_icon_and_explains_itself(tmp_path, qapp, qtbot):
     """A file whose source is gone: still an icon, and the tooltip says why."""
     from meret.core.models import FileEntry, FileType

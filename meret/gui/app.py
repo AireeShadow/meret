@@ -278,6 +278,10 @@ class MainWindow(QMainWindow):
         self._sort_index = 0
         self._actions: Dict[str, QAction] = {}
 
+        # The palette before the icons: they are tinted with its WindowText colour,
+        # so a dark theme must be in place or every icon renders black
+        _apply_theme(QApplication.instance(), config.theme)
+
         # Widgets next
         self._build_ui()
         self._build_actions()
@@ -285,7 +289,6 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(_("meret"))
         self.resize(config.window_width, config.window_height)
-        _apply_theme(QApplication.instance(), config.theme)
 
         # Outside changes: the tree is invalidated, never re-read per stat
         self._poll = QTimer(self)
