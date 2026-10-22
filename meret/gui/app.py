@@ -47,7 +47,13 @@ from meret.core.locale import _
 from meret.core.models import FileEntry, FileType
 from meret.core.sqlite_repo import SQLiteRepository
 from meret.gui import icons
-from meret.gui.commands import SHORTCUTS, CommandPalette, command_table, short_label
+from meret.gui.commands import (
+    SHORTCUTS,
+    CommandPalette,
+    command_table,
+    menu_table,
+    short_label,
+)
 from meret.gui.thumbnails import Reason, Thumbnail, ThumbnailCache
 from meret.gui.workers import TaskRunner
 from meret.vfs.tree import Node, VirtualTree
@@ -363,6 +369,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_actions()
         self._build_toolbar()
+        self._build_menus()
 
         self.setWindowTitle(_("meret"))
         self.resize(config.window_width, config.window_height)
@@ -453,6 +460,9 @@ class MainWindow(QMainWindow):
             self.addAction(action)
             self._actions[command] = action
 
+        # macOS lifts Quit into the application menu; elsewhere the role is ignored
+        self._actions["quit"].setMenuRole(QAction.MenuRole.QuitRole)
+
     def _build_toolbar(self) -> None:
         """Every command as a button. The glyph is the label, the tooltip the name.
 
@@ -471,6 +481,21 @@ class MainWindow(QMainWindow):
                 self.toolbar.addSeparator()
             else:
                 self.toolbar.addAction(self._actions[command])
+
+    def _build_menus(self) -> None:
+        """The usual menus, holding the very actions the toolbar shows.
+
+        Not copies: the same QAction, so one command has one shortcut, one icon and
+        one enabled state wherever it appears - and no way for the two to drift.
+        """
+        bar = self.menuBar()
+        for title, commands in menu_table():
+            menu = bar.addMenu(title)
+            for command in commands:
+                if command is None:
+                    menu.addSeparator()
+                else:
+                    menu.addAction(self._actions[command])
 
     # ---------- commands from the palette ----------
 

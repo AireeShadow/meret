@@ -757,3 +757,9 @@ msgstr "Нет превью: файл не читается"
 
 msgid "'{cmd}' isn't available in the GUI yet"
 msgstr "'{cmd}' пока недоступно в GUI"
+
+msgid "Edit"
+msgstr "Правка"
+
+msgid "View"
+msgstr "Вид"

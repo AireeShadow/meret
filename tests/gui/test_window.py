@@ -178,3 +178,50 @@ def test_thumbnails_are_batched_and_the_queue_refills_on_completion(tmp_path, qa
 
     assert len(submitted) == BATCH * 2
     assert window._queue == []
+
+@pytest.fixture
+def menu_window(tmp_path, qapp, qtbot):
+    """A window on an empty repository: the menus and the toolbar, nothing else."""
+    from meret.core.sqlite_repo import SQLiteRepository
+    from meret.gui.app import MainWindow
+
+    repo = SQLiteRepository(str(tmp_path / "meret.db"))
+    main = MainWindow(repo, tmp_path / "meret.db")
+    qtbot.addWidget(main)
+    return main
+
+
+def _menu_entries(window) -> list:
+    """Every menu entry, without separators."""
+    return [
+        action
+        for top in window.menuBar().actions()
+        for action in top.menu().actions()
+        if not action.isSeparator()
+    ]
+
+
+def test_the_menu_bar_has_the_usual_menus(menu_window):
+    from meret.gui.commands import menu_table
+
+    assert [top.text() for top in menu_window.menuBar().actions()] == [
+        title for title, _commands in menu_table()
+    ]
+
+
+def test_the_menu_bar_lists_every_command_once(menu_window):
+    from meret.gui.commands import command_table, short_label
+
+    entries = _menu_entries(menu_window)
+
+    assert len(entries) == len(command_table())
+    assert {action.iconText() for action in entries} == {
+        short_label(command) for command, _ in command_table()
+    }
+
+
+def test_a_menu_entry_is_the_very_same_action_as_the_toolbar(menu_window):
+    """A copy would carry a second shortcut and drift away from the button."""
+    in_toolbar = {a for a in menu_window.toolbar.actions() if not a.isSeparator()}
+
+    assert set(_menu_entries(menu_window)) == in_toolbar

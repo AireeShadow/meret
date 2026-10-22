@@ -74,6 +74,33 @@ def command_table() -> List[Tuple[str, str]]:
         ("quit", _("Quit")),
     ]
 
+def menu_table() -> List[Tuple[str, Tuple[Optional[str], ...]]]:
+    """(menu, commands) - the menu bar: the same commands as the toolbar, grouped.
+
+    A function, not a constant, for the same reason as command_table(): the menu
+    titles have to be translated on call, not at import time. None is a separator.
+    """
+    return [
+        (
+            _("File"),
+            (
+                "refresh",
+                "scan",
+                "search",
+                None,
+                "init_db",
+                "config",
+                None,
+                "mount",
+                "umount",
+                None,
+                "quit",
+            ),
+        ),
+        (_("Edit"), ("tag", "untag", "delete")),
+        (_("View"), ("sort_files", "stats", "tree", "prune")),
+        (_("Help"), ("command_palette", "help")),
+    ]
 
 def short_label(command: str) -> str:
     """Text for a toolbar button. Falls back to the full description."""

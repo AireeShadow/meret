@@ -220,3 +220,11 @@ def test_palette_rows_separate_key_name_and_description(qapp):
 
         assert item.text().startswith(f"{key} "), item.text()
         assert f" {descriptions[command]}" in item.text(), item.text()
+
+def test_menu_table_covers_every_command_once():
+    """A menu that forgets a command, or lists it twice, is the whole point of this."""
+    from meret.gui.commands import command_table, menu_table
+
+    listed = [command for _title, commands in menu_table() for command in commands if command]
+
+    assert sorted(listed) == sorted(command for command, _ in command_table())
