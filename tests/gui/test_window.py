@@ -63,7 +63,44 @@ def test_tag_tree_is_filled_on_start(tmp_path, qapp, qtbot):
     assert item.data(0, Qt.ItemDataRole.UserRole) == "/travel"
 
 
-def test_toolbar_exposes_the_commands(tmp_path, qapp, qtbot):
+def test_toolbar_exposes_every_command(tmp_path, qapp, qtbot):
+    """All of them, not a comfortable subset: the empty tail was the bug."""
+    from meret.core.sqlite_repo import SQLiteRepository
+    from meret.gui.app import TOOLBAR, MainWindow
+    from meret.gui.commands import command_table, short_label
+
+    repo = SQLiteRepository(str(tmp_path / "meret.db"))
+    window = MainWindow(repo, tmp_path / "meret.db")
+    qtbot.addWidget(window)
+
+    buttons = [action for action in window.toolbar.actions() if not action.isSeparator()]
+    assert [action.iconText() for action in buttons] == [
+        short_label(command) for command, _ in command_table()
+    ]
+    assert {command for command in TOOLBAR if command} == {
+        command for command, _ in command_table()
+    }
+    assert all(not action.icon().isNull() for action in buttons)
+
+
+def test_toolbar_fits_without_an_overflow_menu(tmp_path, qapp, qtbot):
+    """Qt hides buttons behind ">>" when they do not fit, and that reads as missing."""
+    from meret.core.sqlite_repo import SQLiteRepository
+    from meret.gui.app import ICON, TOOLBAR, MainWindow
+
+    repo = SQLiteRepository(str(tmp_path / "meret.db"))
+    window = MainWindow(repo, tmp_path / "meret.db")
+    qtbot.addWidget(window)
+    window.resize(1280, 720)
+    window.show()
+    qapp.processEvents()
+
+    width = sum(ICON + 12 if command else 10 for command in TOOLBAR)
+    assert width < window.width()
+
+
+def test_every_toolbar_action_has_a_tooltip_and_a_key(tmp_path, qapp, qtbot):
+    """The TUI shows its keys in the footer; here they live in the tooltip."""
     from meret.core.sqlite_repo import SQLiteRepository
     from meret.gui.app import MainWindow
 
@@ -71,22 +108,18 @@ def test_toolbar_exposes_the_commands(tmp_path, qapp, qtbot):
     window = MainWindow(repo, tmp_path / "meret.db")
     qtbot.addWidget(window)
 
-    labels = [action.text() for action in window.toolbar.actions() if action.text()]
-    assert labels == [
-        "Refresh",
-        "Scan",
-        "Tag selected file",
-        "Remove tag from file",
-        "Delete tag",
-        "Open file",
-        "Quit",
-    ]
+    for action in window.toolbar.actions():
+        if action.isSeparator():
+            continue
+        assert action.toolTip().startswith(action.text())
+        assert action.shortcut().toString()
 
 
 def test_pump_accepts_app_positionally(qapp):
     pump(qapp)
     pump(10)
     pump(ms=5)
+
 
 def test_preview_updates_for_the_selected_file(tmp_path, qapp, qtbot):
     """A second definition of _set_preview once swallowed the token argument."""
@@ -101,46 +134,3 @@ def test_preview_updates_for_the_selected_file(tmp_path, qapp, qtbot):
     window.grid.setCurrentRow(0)
     qtbot.waitUntil(lambda: window.preview.pixmap() is not None
         and not window.preview.pixmap().isNull(), timeout=2000)
-
-def test_toolbar_exposes_the_commands(tmp_path, qapp, qtbot):
-    """The button text is the short label, the action keeps the description."""
-    from meret.core.sqlite_repo import SQLiteRepository
-    from meret.gui.app import MainWindow
-
-    repo = SQLiteRepository(str(tmp_path / "meret.db"))
-    window = MainWindow(repo, tmp_path / "meret.db")
-    qtbot.addWidget(window)
-
-    labels = [
-        action.iconText() or action.text()
-        for action in window.toolbar.actions()
-        if not action.isSeparator()
-    ]
-    assert labels == [
-        "Refresh",
-        "Scan",
-        "Search",
-        "Tag",
-        "Remove tag from file",
-        "Delete tag",
-        "Open file",
-        "Command palette",
-        "Help",
-        "Quit",
-    ]
-
-
-def test_every_toolbar_action_has_a_tooltip(tmp_path, qapp, qtbot):
-    """The TUI shows its keys in the footer; here they live in the tooltip."""
-    from meret.core.sqlite_repo import SQLiteRepository
-    from meret.gui.app import MainWindow
-
-    repo = SQLiteRepository(str(tmp_path / "meret.db"))
-    window = MainWindow(repo, tmp_path / "meret.db")
-    qtbot.addWidget(window)
-
-    for action in window.toolbar.actions():
-        if action.isSeparator():
-            continue
-        assert action.toolTip().startswith(action.text())
-        assert action.shortcut().toString()

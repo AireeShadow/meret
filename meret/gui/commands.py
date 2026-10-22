@@ -25,6 +25,9 @@ from meret.core.locale import _
 logger = logging.getLogger(__name__)
 
 #: Qt keys, the counterpart of the TUI's bindings. An empty entry has no key.
+#: Qt keys, the counterpart of the TUI's bindings. Every command has one: a
+#: command reachable only from the palette is a command with no key, and the TUI
+#: binds every action.
 SHORTCUTS: Dict[str, str] = {
     "refresh": "F5",
     "scan": "F6",
@@ -42,8 +45,8 @@ SHORTCUTS: Dict[str, str] = {
     "stats": "Alt+I",
     "tree": "Alt+L",
     "prune": "Alt+P",
-    "mount": "",
-    "umount": "",
+    "mount": "Alt+M",
+    "umount": "Alt+U",
     "command_palette": ":",
     "help": "F1",
     "quit": "Ctrl+Q",
@@ -134,7 +137,19 @@ class CommandPalette(QDialog):
         self._list.itemActivated.connect(self._accept_item)
         self._list.itemDoubleClicked.connect(self._accept_item)
         self._refill("")
+        self._fit()
         self._input.setFocus()
+
+    def _fit(self) -> None:
+        """Grow until every command is visible at once.
+
+        A palette you have to scroll looks like a palette with missing commands,
+        and the whole point of it is to show what exists.
+        """
+        rows = max(self._list.count(), 1)
+        row = self._list.sizeHintForRow(0) or 22
+        self._list.setMinimumHeight(rows * row + 4)
+        self.resize(560, min(780, rows * row + self._input.sizeHint().height() + 96))
 
     # ---------- filling ----------
 

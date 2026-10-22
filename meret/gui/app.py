@@ -60,7 +60,12 @@ POLL_MS = 1500
 #: Preview size, in pixels.
 PREVIEW = 512
 
-#: Toolbar buttons, in order. None is a separator. Everything else is one key away.
+#: Toolbar icon size. Small enough that all 21 commands fit without Qt hiding any
+#: behind its ">>" overflow button, which reads as missing commands.
+ICON = 28
+
+#: Toolbar buttons, in order. None is a separator. This is every command: a panel
+#: that hides half of them is not "one to one with the TUI".
 TOOLBAR: tuple = (
     "refresh",
     "scan",
@@ -71,6 +76,19 @@ TOOLBAR: tuple = (
     "delete",
     None,
     "open_file",
+    "home",
+    "up",
+    "sort_files",
+    "select_drive",
+    None,
+    "init_db",
+    "config",
+    "stats",
+    "tree",
+    "prune",
+    None,
+    "mount",
+    "umount",
     None,
     "command_palette",
     "help",
@@ -331,15 +349,17 @@ class MainWindow(QMainWindow):
         self.setStatusBar(bar)
 
     def _build_actions(self) -> None:
-        """One QAction per command, with its key. The window owns every one.
+        """One QAction per command, with its key and its glyph.
 
-        They are window actions, not toolbar actions, so a command that has no
-        button is still reachable by its shortcut - the palette is for discovery.
+        They are window actions, not toolbar actions, so a command whose button is
+        in the overflow menu is still reachable by its shortcut - and the palette
+        is for discovery.
         """
         for command, description in command_table():
             shortcut = SHORTCUTS.get(command, "")
             action = QAction(description, self)
-            action.setIconText(short_label(command))  # the button text
+            action.setIcon(icons.command_icon(command, ICON))
+            action.setIconText(short_label(command))  # the button text, if shown
             if shortcut:
                 action.setShortcut(shortcut)
                 action.setToolTip(f"{description} ({shortcut})")
@@ -352,11 +372,16 @@ class MainWindow(QMainWindow):
             self._actions[command] = action
 
     def _build_toolbar(self) -> None:
-        """Buttons for the frequent commands. The rest is a key or a palette away."""
+        """Every command as a button. The glyph is the label, the tooltip the name.
+
+        Twenty-one buttons with text do not fit a 1280px window: Qt would push the
+        tail into a ">>" menu. Icons only, with the description and the key in the
+        tooltip. Switch to ToolButtonTextBesideIcon for words instead.
+        """
         self.toolbar = QToolBar(_("Commands"), self)
         self.toolbar.setMovable(False)
-        # The actions carry no icons: without this Qt reserves icon-sized buttons
-        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.toolbar.setIconSize(QSize(ICON, ICON))
         self.addToolBar(self.toolbar)
 
         for command in TOOLBAR:

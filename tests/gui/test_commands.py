@@ -50,21 +50,13 @@ def test_matches_orders_exact_then_prefix_then_anywhere():
     assert matches("un")[0] == "untag"
 
 
-def test_every_command_has_an_action_with_a_tooltip(tmp_path, qapp, qtbot):
-    """A command without a QAction is a command without a key."""
-    from meret.core.sqlite_repo import SQLiteRepository
-    from meret.gui.app import MainWindow
-    from meret.gui.commands import command_table
+def test_every_command_has_a_key_and_a_label():
+    """An empty key is allowed nowhere: the TUI binds every action it offers."""
+    from meret.gui.commands import SHORTCUTS, command_table, short_label
 
-    repo = SQLiteRepository(str(tmp_path / "meret.db"))
-    window = MainWindow(repo, tmp_path / "meret.db")
-    qtbot.addWidget(window)
-
-    for command, description in command_table():
-        action = window._actions[command]
-        assert action.text() == description
-        assert action.toolTip().startswith(description)
-        assert action in window.actions()
+    for command, _description in command_table():
+        assert SHORTCUTS[command], command
+        assert short_label(command)
 
 
 def test_no_command_falls_through_to_the_not_available_note(
@@ -174,5 +166,21 @@ def test_sort_uses_the_views_own_slot(tmp_path, qapp, qtbot):
 
     window._sort()  # must not raise
 
-    assert landed == [(1, Qt.SortOrder.DescendingOrder)]
+    # With sorting enabled, Qt sorts through the header signal *and* directly once
+    # the indicator matches, so the model sees the same call twice. Assert the set,
+    # not the count: a future Qt may collapse the two.
+    assert landed
+    assert set(landed) == {(1, Qt.SortOrder.DescendingOrder)}
     assert window.fs.header().sortIndicatorSection() == 1
+
+def test_palette_shows_every_command_without_scrolling(qapp):
+    """A palette you must scroll looks like a palette with missing commands."""
+    from meret.gui.commands import CommandPalette, command_table
+
+    palette = CommandPalette()
+    palette.show()
+    qapp.processEvents()
+
+    assert palette._list.count() == len(command_table())
+    row = palette._list.sizeHintForRow(0) or 22
+    assert palette._list.viewport().height() >= row * palette._list.count()
