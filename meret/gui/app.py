@@ -159,42 +159,87 @@ def _reason_text(reason: str) -> str:
 class TagTree(QTreeWidget):
     """The tag hierarchy as folders, straight out of the virtual tree.
 
-    Children are read only when a row is expanded: a library with thousands of
-    tags must not cost a query per tag on startup.
+    Children are read only when a row is expanded - and off the GUI thread:
+    listdir can rebuild the whole snapshot in the repository, so a synchronous
+    call on a library with thousands of tags freezes the window mid-click.
+
+    The tree keeps its own generation, so a listing still on its way when the tree
+    is rebuilt never touches a row that is already gone.
     """
 
     tag_selected = Signal(str)
     FILLED = Qt.ItemDataRole.UserRole + 10
     ROLE_TAG_ID = Qt.ItemDataRole.UserRole + 11
+    LOADING = Qt.ItemDataRole.UserRole + 12
 
-    def __init__(self, tree: VirtualTree, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, tree: VirtualTree, tasks: TaskRunner, parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
         self._tree = tree
+        self._tasks = tasks
+        self._generation = 0
         self.setHeaderHidden(True)
         self.itemExpanded.connect(self._on_expanded)
         self.currentItemChanged.connect(self._on_current)
 
     def reload(self) -> None:
-        """Rebuild from the root."""
+        """Rebuild from the root. Anything in flight for the old rows is dropped."""
+        self._generation += 1
         self.clear()
-        self._add(self.invisibleRootItem(), "/")
+        self._fill(self.invisibleRootItem(), "/", self._generation)
 
-    def _add(self, parent: QTreeWidgetItem, vpath: str) -> None:
-        for node in self._tree.listdir(vpath):
+    def _fill(self, item: QTreeWidgetItem, vpath: str, generation: int) -> None:
+        """Queue a listing for `item`; the row fills itself when it lands.
+
+        Sticky: the folder generation is bumped on every navigation, and a tag
+        listing must not be dropped just because the grid re-read a folder.
+        """
+        item.setData(0, self.LOADING, True)
+        self._tasks.run(
+            self._tree.listdir,
+            on_done=lambda nodes, item=item, gen=generation: self._filled(
+                item, nodes, gen
+            ),
+            on_failed=lambda error, item=item, gen=generation: self._failed(
+                item, error, gen
+            ),
+            args=(vpath,),
+            sticky=True,
+        )
+
+    def _filled(self, item: QTreeWidgetItem, nodes: List[Node], generation: int) -> None:
+        """Replace the placeholder with the real subfolders."""
+        if generation != self._generation:
+            return  # the tree was rebuilt; this row is gone
+        item.takeChildren()
+        for node in nodes:
             if not node.is_dir:
                 continue
-            item = QTreeWidgetItem([node.name])
-            item.setData(0, Qt.ItemDataRole.UserRole, node.vpath)
-            item.setData(0, self.ROLE_TAG_ID, node.tag_id)
-            parent.addChild(item)
-            item.addChild(QTreeWidgetItem([""]))
+            child = QTreeWidgetItem([node.name])
+            child.setData(0, Qt.ItemDataRole.UserRole, node.vpath)
+            child.setData(0, self.ROLE_TAG_ID, node.tag_id)
+            item.addChild(child)
+            child.addChild(QTreeWidgetItem([""]))
+        item.setData(0, self.LOADING, False)
+        item.setData(0, self.FILLED, True)
+
+    def _failed(self, item: QTreeWidgetItem, error: Exception, generation: int) -> None:
+        """A row that failed must say so, never look empty."""
+        if generation != self._generation:
+            return
+        logger.warning("tag tree: cannot list: %s", error)
+        item.takeChildren()
+        item.addChild(QTreeWidgetItem([str(error)]))
+        item.setData(0, self.LOADING, False)
+        item.setData(0, self.FILLED, True)
 
     def _on_expanded(self, item: QTreeWidgetItem) -> None:
-        if item.data(0, self.FILLED):
+        if item.data(0, self.FILLED) or item.data(0, self.LOADING):
             return
         item.takeChildren()
-        self._add(item, item.data(0, Qt.ItemDataRole.UserRole))
-        item.setData(0, self.FILLED, True)
+        item.addChild(QTreeWidgetItem(["…"]))
+        self._fill(item, item.data(0, Qt.ItemDataRole.UserRole), self._generation)
 
     def _on_current(self, current: Optional[QTreeWidgetItem], _previous) -> None:
         if current is not None:
@@ -306,7 +351,7 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
 
-        self.tags = TagTree(self._tree, self)
+        self.tags = TagTree(self._tree, self._tasks, self)
         self.tags.setMinimumWidth(180)
         self.tags.tag_selected.connect(self.open_folder)
 
@@ -799,17 +844,17 @@ class MainWindow(QMainWindow):
         if not accepted or not point.strip():
             return
         self._status_label.setText(_("Mounting at {path}...").format(path=point.strip()))
-        self._spawn_cli("mount", point.strip())
+        self._spawn(self._cli("mount", point.strip()))
 
     def _umount(self) -> None:
-        """Stop the mount process. `meret umount` takes no --db, only the point."""
+        """Stop the mount process. It takes no --db, only the mount point."""
         point, accepted = QInputDialog.getText(
             self, _("Unmount"), _("Mount point, e.g. M: or K:\\tags")
         )
         if not accepted or not point.strip():
             return
         point = point.strip()
-        self._run_cli("umount", point)
+        self._run(self._cli("umount", point, with_db=False))
         self._status_label.setText(_("Unmounted {path}").format(path=point))
 
     def _spawn_cli(self, *args: str) -> None:
@@ -825,6 +870,38 @@ class MainWindow(QMainWindow):
     def _run_cli(self, *args: str) -> None:
         """Run the CLI and wait - for a command that ends on its own."""
         command = ["meret", *args]
+        logger.info("run: %s", command)
+        try:
+            done = subprocess.run(command, capture_output=True, text=True)
+        except OSError as e:
+            logger.warning("cannot run %s: %s", command, e)
+            self._status_label.setText(_("Error: {error}").format(error=e))
+            return
+        if done.returncode != 0:
+            logger.warning("exit %s: %s", done.returncode, (done.stderr or "").strip())
+
+    def _cli(self, *args: str, with_db: bool = True) -> List[str]:
+        """A `meret` command line.
+
+        `with_db=False` for `umount`: it finds the mount process by the mount point
+        alone, so `umount_cmd` declares no --db and typer rejects an unknown option.
+        """
+        command = ["meret", *args]
+        if with_db:
+            command += ["--db", str(self._db_path)]
+        return command
+
+    def _spawn(self, command: List[str]) -> None:
+        """Run without waiting - a mount lives until it is unmounted."""
+        logger.info("run: %s", command)
+        try:
+            subprocess.Popen(command)
+        except OSError as e:
+            logger.warning("cannot run %s: %s", command, e)
+            self._status_label.setText(_("Error: {error}").format(error=e))
+
+    def _run(self, command: List[str]) -> None:
+        """Run and wait - for a command that ends on its own."""
         logger.info("run: %s", command)
         try:
             done = subprocess.run(command, capture_output=True, text=True)
@@ -891,10 +968,13 @@ class MainWindow(QMainWindow):
     def _help(self) -> None:
         """Every command with its key: the TUI's footer, as a dialog."""
         descriptions = dict(command_table())
+        # Width from the data: "Ctrl+Shift+T" is longer than any fixed 12, and a
+        # hardcoded column glues it to the description
+        key_width = max((len(key) for key in SHORTCUTS.values()), default=1) + 2
 
         def line(name: str) -> str:
             key = SHORTCUTS.get(name) or "—"
-            return f"    {key:<12}{descriptions[name]}"
+            return f"    {key:<{key_width}}{descriptions[name]}"
 
         lines = [f"{_('Navigation')}:", *(line(name) for name in NAVIGATION_COMMANDS)]
         lines.append("")

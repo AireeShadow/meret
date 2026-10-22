@@ -100,6 +100,17 @@ def matches(query: str) -> List[str]:
     ]
     return sorted(hits, key=lambda command: (command != query, not command.startswith(query)))
 
+def _column_widths() -> Tuple[int, int]:
+    """Palette column widths, taken from the data instead of hardcoded.
+
+    A fixed width glues the columns the moment a key or a name outgrows it:
+    "Ctrl+Shift+T" is 13 characters and "command_palette" is 15, so a hardcoded
+    11/15 leaves no space before the description.
+    """
+    keys = max((len(key) for key in SHORTCUTS.values()), default=1)
+    names = max((len(command) for command, _ in command_table()), default=1)
+    return keys + 2, names + 2
+
 
 class CommandPalette(QDialog):
     """Type-to-filter command list, opened with ':' exactly like in the TUI.
@@ -156,10 +167,13 @@ class CommandPalette(QDialog):
     def _refill(self, query: str) -> None:
         """Rebuild the list for the typed text and keep the first row current."""
         descriptions = dict(command_table())
+        key_width, name_width = _column_widths()
         self._list.clear()
         for command in matches(query):
             key = SHORTCUTS.get(command) or "—"
-            item = QListWidgetItem(f"{key:<11}{command:<15}{descriptions[command]}")
+            item = QListWidgetItem(
+                f"{key:<{key_width}}{command:<{name_width}}{descriptions[command]}"
+            )
             item.setData(Qt.ItemDataRole.UserRole, command)
             self._list.addItem(item)
         self._list.setCurrentRow(0 if self._list.count() else -1)

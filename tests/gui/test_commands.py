@@ -170,3 +170,20 @@ def test_palette_shows_every_command_without_scrolling(qapp):
     assert palette._list.count() == len(command_table())
     row = palette._list.sizeHintForRow(0) or 22
     assert palette._list.viewport().height() >= row * palette._list.count()
+
+def test_palette_rows_separate_key_name_and_description(qapp):
+    """Same trap as the help: 'command_palette' is exactly as wide as the column."""
+    from PySide6.QtCore import Qt
+
+    from meret.gui.commands import CommandPalette, SHORTCUTS, command_table
+
+    palette = CommandPalette()
+    descriptions = dict(command_table())
+
+    for row in range(palette._list.count()):
+        item = palette._list.item(row)
+        command = item.data(Qt.ItemDataRole.UserRole)
+        key = SHORTCUTS.get(command) or "—"
+
+        assert item.text().startswith(f"{key} "), item.text()
+        assert f" {descriptions[command]}" in item.text(), item.text()
