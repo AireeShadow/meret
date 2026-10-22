@@ -87,3 +87,17 @@ def test_pump_accepts_app_positionally(qapp):
     pump(qapp)
     pump(10)
     pump(ms=5)
+
+def test_preview_updates_for_the_selected_file(tmp_path, qapp, qtbot):
+    """A second definition of _set_preview once swallowed the token argument."""
+    from meret.gui.app import MainWindow
+
+    repo = _repo_with_one_photo(tmp_path)
+    window = MainWindow(repo, tmp_path / "meret.db")
+    qtbot.addWidget(window)
+
+    window.open_folder("/travel")
+    qtbot.waitUntil(lambda: window.grid.count() == 1, timeout=2000)
+    window.grid.setCurrentRow(0)
+    qtbot.waitUntil(lambda: window.preview.pixmap() is not None
+        and not window.preview.pixmap().isNull(), timeout=2000)

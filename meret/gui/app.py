@@ -173,7 +173,11 @@ class MainWindow(QMainWindow):
         self._repo = repo
         self._db_path = Path(db_path)
         self._tree = VirtualTree(repo)
-        self._thumbs = ThumbnailCache(size=config.thumbnail_size)
+        # The scope keeps two databases from sharing thumbnail keys: a file id is
+        # only unique inside one of them
+        self._thumbs = ThumbnailCache(
+            size=config.thumbnail_size, scope=str(self._db_path)
+        )
         self._tasks = TaskRunner(self)
         self._queue: List[tuple] = []
         self._selection: set[str] = set()
@@ -501,13 +505,6 @@ class MainWindow(QMainWindow):
     def _set_preview(self, image, name: str, token: int) -> None:
         if token != self._preview_token:
             return  # a newer selection has already painted
-        if image is None or image.isNull():
-            self.preview.setPixmap(QPixmap())
-            self.preview.setText(name)
-            return
-        self.preview.setPixmap(QPixmap.fromImage(image))
-
-    def _set_preview(self, image, name: str) -> None:
         if image is None or image.isNull():
             self.preview.setPixmap(QPixmap())
             self.preview.setText(name)
