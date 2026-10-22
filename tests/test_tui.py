@@ -135,36 +135,83 @@ class TestVirtualFileTree:
         # Assert correct vpath was used
         assert "/test" in called_with, f"Expected '/test' in {called_with}"
 
+@pytest_asyncio.fixture
+async def host_pilot():
+    """A running, empty app to build widgets inside.
+
+    A Textual widget built outside a running app hands its async watcher to
+    call_next(); nothing drains that queue, so the coroutine is collected
+    unawaited - which is what the "never awaited" RuntimeWarning is about. Mount
+    the widget and the queue is drained like in production.
+    """
+    from textual.app import App
+
+    async with App().run_test() as pilot:
+        yield pilot
 
 class TestSortedDirectoryTree:
-    """Tests for SortedDirectoryTree with sorting capabilities."""
-    
-    def test_sort_by_name(self, tmp_path: Path):
-        """Tree sorts entries by name."""
-        # Create test files
+    """Tests for SortedDirectoryTree with sorting capabilities.
+
+    Every tree here is mounted in a running app - see host_pilot for why a bare
+    widget is not enough.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sort_by_name(self, tmp_path: Path, host_pilot):
+        """Tree sorts entries by name, and the root really loads."""
         (tmp_path / "zebra.txt").write_text("z")
         (tmp_path / "alpha.txt").write_text("a")
         (tmp_path / "beta.txt").write_text("b")
-        
+
         tree = SortedDirectoryTree(tmp_path, sort_by="name")
-        
-        # Check that entries would be sorted
-        # Note: actual sorting happens in _populate_node
+        await host_pilot.app.mount(tree)
+        await _wait_for(host_pilot, lambda: len(tree.root.children) > 3)
+
         assert tree.sort_by == "name"
         assert tree.reverse is False
-    
-    def test_sort_by_size(self, tmp_path: Path):
+        assert [str(child.label) for child in tree.root.children] == [
+            "..",
+            "alpha.txt",
+            "beta.txt",
+            "zebra.txt",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_sort_by_size(self, tmp_path: Path, host_pilot):
         """Tree can sort by size."""
         (tmp_path / "small.txt").write_text("x")
         (tmp_path / "large.txt").write_text("x" * 100)
-        
+
         tree = SortedDirectoryTree(tmp_path, sort_by="size")
+        await host_pilot.app.mount(tree)
+        await _wait_for(host_pilot, lambda: len(tree.root.children) > 2)
+
         assert tree.sort_by == "size"
-    
-    def test_reverse_sort(self, tmp_path: Path):
+        assert [str(child.label) for child in tree.root.children][-1] == "large.txt"
+
+    @pytest.mark.asyncio
+    async def test_reverse_sort(self, tmp_path: Path, host_pilot):
         """Tree supports reverse sorting."""
+        (tmp_path / "a.txt").write_text("a")
+
         tree = SortedDirectoryTree(tmp_path, sort_by="name", reverse=True)
+        await host_pilot.app.mount(tree)
+        await _wait_for(host_pilot, lambda: len(tree.root.children) > 1)
+
         assert tree.reverse is True
+
+    @pytest.mark.asyncio
+    async def test_mounted_tree_finishes_its_watcher(self, tmp_path: Path, host_pilot):
+        """The root loads: the async watcher was awaited and nothing leaked."""
+        (tmp_path / "alpha.txt").write_text("a")
+
+        tree = SortedDirectoryTree(tmp_path)
+        await host_pilot.app.mount(tree)
+        await _wait_for(host_pilot, lambda: len(tree.root.children) > 1)
+
+        labels = [str(child.label) for child in tree.root.children]
+        assert labels[0] == ".."  # the parent row is always first
+        assert "alpha.txt" in labels
 
 
 class TestDriveSelector:

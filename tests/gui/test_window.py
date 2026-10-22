@@ -101,3 +101,46 @@ def test_preview_updates_for_the_selected_file(tmp_path, qapp, qtbot):
     window.grid.setCurrentRow(0)
     qtbot.waitUntil(lambda: window.preview.pixmap() is not None
         and not window.preview.pixmap().isNull(), timeout=2000)
+
+def test_toolbar_exposes_the_commands(tmp_path, qapp, qtbot):
+    """The button text is the short label, the action keeps the description."""
+    from meret.core.sqlite_repo import SQLiteRepository
+    from meret.gui.app import MainWindow
+
+    repo = SQLiteRepository(str(tmp_path / "meret.db"))
+    window = MainWindow(repo, tmp_path / "meret.db")
+    qtbot.addWidget(window)
+
+    labels = [
+        action.iconText() or action.text()
+        for action in window.toolbar.actions()
+        if not action.isSeparator()
+    ]
+    assert labels == [
+        "Refresh",
+        "Scan",
+        "Search",
+        "Tag",
+        "Remove tag from file",
+        "Delete tag",
+        "Open file",
+        "Command palette",
+        "Help",
+        "Quit",
+    ]
+
+
+def test_every_toolbar_action_has_a_tooltip(tmp_path, qapp, qtbot):
+    """The TUI shows its keys in the footer; here they live in the tooltip."""
+    from meret.core.sqlite_repo import SQLiteRepository
+    from meret.gui.app import MainWindow
+
+    repo = SQLiteRepository(str(tmp_path / "meret.db"))
+    window = MainWindow(repo, tmp_path / "meret.db")
+    qtbot.addWidget(window)
+
+    for action in window.toolbar.actions():
+        if action.isSeparator():
+            continue
+        assert action.toolTip().startswith(action.text())
+        assert action.shortcut().toString()

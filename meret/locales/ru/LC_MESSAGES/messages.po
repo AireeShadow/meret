@@ -742,3 +742,18 @@ msgstr "meret"
 
 msgid "Real Filesystem"
 msgstr "Реальная файловая система"
+
+msgid "No preview: ffmpeg is not installed"
+msgstr "Нет превью: ffmpeg не установлен"
+
+msgid "No preview: no frame could be read"
+msgstr "Нет превью: не удалось прочитать кадр"
+
+msgid "No preview for this file type"
+msgstr "Для этого типа файлов превью нет"
+
+msgid "No preview: the file could not be read"
+msgstr "Нет превью: файл не читается"
+
+msgid "'{cmd}' isn't available in the GUI yet"
+msgstr "'{cmd}' пока недоступно в GUI"

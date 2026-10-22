@@ -4,17 +4,22 @@ Qt objects live on the GUI thread only. Anything that touches SQLite or decodes
 an image goes through TaskRunner and comes back as a signal. The tag panel reads
 the same VirtualTree a mount would serve, so the two can never disagree, and the
 real filesystem panel is plain Qt - it only picks a path to scan or to tag.
+
+Mounting and unmounting shell out to `meret mount` / `meret umount` instead of
+importing a backend, so opening a window never drags FUSE or WinFsp in.
 """
 
 import logging
+import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QDir, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileSystemModel,
     QGroupBox,
     QInputDialog,
@@ -22,6 +27,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QSplitter,
     QStatusBar,
     QStyle,
@@ -37,8 +43,11 @@ from meret.core import tagpaths
 from meret.core.config import get_config
 from meret.core.indexer import Indexer
 from meret.core.locale import _
+from meret.core.models import FileEntry, FileType
 from meret.core.sqlite_repo import SQLiteRepository
-from meret.gui.thumbnails import ThumbnailCache
+from meret.gui import icons
+from meret.gui.commands import SHORTCUTS, CommandPalette, command_table, short_label
+from meret.gui.thumbnails import Reason, Thumbnail, ThumbnailCache
 from meret.gui.workers import TaskRunner
 from meret.vfs.tree import Node, VirtualTree
 
@@ -50,6 +59,27 @@ BATCH = 24
 POLL_MS = 1500
 #: Preview size, in pixels.
 PREVIEW = 512
+
+#: Toolbar buttons, in order. None is a separator. Everything else is one key away.
+TOOLBAR: tuple = (
+    "refresh",
+    "scan",
+    "search",
+    None,
+    "tag",
+    "untag",
+    "delete",
+    None,
+    "open_file",
+    None,
+    "command_palette",
+    "help",
+    None,
+    "quit",
+)
+
+#: The help dialog groups these under Navigation, as the TUI's help does.
+NAVIGATION_COMMANDS = ("home", "up", "sort_files", "select_drive", "open_file")
 
 _DARK_PALETTE = {
     "Window": "#1e1f22",
@@ -95,6 +125,17 @@ def _apply_theme(app: Optional[QApplication], theme: str) -> None:
             QColor(colour),
         )
     app.setPalette(palette)
+
+
+def _reason_text(reason: str) -> str:
+    """Translated tooltip for a missing preview. Resolved at call time."""
+    table = {
+        Reason.NO_TOOL: _("No preview: ffmpeg is not installed"),
+        Reason.NO_FRAME: _("No preview: no frame could be read"),
+        Reason.UNREADABLE: _("No preview: the file could not be read"),
+        Reason.NO_DECODER: _("No preview for this file type"),
+    }
+    return table.get(reason, "")
 
 
 class TagTree(QTreeWidget):
@@ -146,24 +187,36 @@ class RealFsPanel(QTreeView):
     """The real filesystem: where a folder to scan is picked.
 
     Qt's own model, so nothing here needs a database connection or a pool thread.
+    The root is remembered by hand: the Up action has to know where it is.
     """
 
     path_activated = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._root = Path.home()
         self._model = QFileSystemModel(self)
         self._model.setFilter(
             QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot
         )
         self.setModel(self._model)
         self.setHeaderHidden(True)
+        # Sortable, even though the hidden header cannot be clicked: sortByColumn
+        # needs the view in the sorting mode to keep the indicator and the model
+        # in step
+        self.setSortingEnabled(True)
         for column in (1, 2, 3):  # size, type, date - the name column is enough
             self.hideColumn(column)
         self.doubleClicked.connect(self._on_double)
 
     def set_root(self, path: Path) -> None:
+        """Point the panel at `path` and remember it."""
+        self._root = Path(path)
         self.setRootIndex(self._model.setRootPath(str(path)))
+
+    def root_path(self) -> Path:
+        """Where the panel is rooted right now."""
+        return self._root
 
     def current_path(self) -> Optional[Path]:
         index = self.currentIndex()
@@ -201,11 +254,15 @@ class MainWindow(QMainWindow):
         self._queue: List[tuple] = []
         self._selection: set[str] = set()
         self._vpath = "/"
+        self._search: Optional[str] = None
         self._version: Optional[int] = None
         self._preview_token = 0
+        self._sort_index = 0
+        self._actions: Dict[str, QAction] = {}
 
         # Widgets next
         self._build_ui()
+        self._build_actions()
         self._build_toolbar()
 
         self.setWindowTitle(_("meret"))
@@ -273,41 +330,101 @@ class MainWindow(QMainWindow):
         bar.addPermanentWidget(self._status_label)
         self.setStatusBar(bar)
 
+    def _build_actions(self) -> None:
+        """One QAction per command, with its key. The window owns every one.
+
+        They are window actions, not toolbar actions, so a command that has no
+        button is still reachable by its shortcut - the palette is for discovery.
+        """
+        for command, description in command_table():
+            shortcut = SHORTCUTS.get(command, "")
+            action = QAction(description, self)
+            action.setIconText(short_label(command))  # the button text
+            if shortcut:
+                action.setShortcut(shortcut)
+                action.setToolTip(f"{description} ({shortcut})")
+            else:
+                action.setToolTip(description)
+            action.triggered.connect(
+                lambda _checked=False, name=command: self.run_command(name)
+            )
+            self.addAction(action)
+            self._actions[command] = action
+
     def _build_toolbar(self) -> None:
-        """The commands the TUI had, as buttons. Labels reuse the catalog."""
+        """Buttons for the frequent commands. The rest is a key or a palette away."""
         self.toolbar = QToolBar(_("Commands"), self)
         self.toolbar.setMovable(False)
         # The actions carry no icons: without this Qt reserves icon-sized buttons
         self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.addToolBar(self.toolbar)
 
-        def add(label: str, handler, shortcut: str) -> None:
-            action = QAction(label, self)
-            action.setShortcut(shortcut)
-            action.triggered.connect(handler)
-            self.toolbar.addAction(action)
+        for command in TOOLBAR:
+            if command is None:
+                self.toolbar.addSeparator()
+            else:
+                self.toolbar.addAction(self._actions[command])
 
-        add(_("Refresh"), self._refresh, "F5")
-        add(_("Scan"), self._scan, "F6")
-        self.toolbar.addSeparator()
-        add(_("Tag selected file"), self._tag_selected, "Ctrl+T")
-        add(_("Remove tag from file"), self._untag_selected, "Ctrl+Shift+T")
-        add(_("Delete tag"), self._delete_tag, "Ctrl+D")
-        self.toolbar.addSeparator()
-        add(_("Open file"), self._open_selected, "Ctrl+O")
-        add(_("Quit"), self.close, "Ctrl+Q")
+    # ---------- commands from the palette ----------
+
+    def _command_palette(self) -> None:
+        """The TUI's ':' palette, with the same commands and descriptions."""
+        dialog = CommandPalette(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        command = dialog.chosen()
+        if command:
+            self.run_command(command)
+
+    def run_command(self, cmd: str) -> None:
+        """Run a command. The table is the TUI's bindings and palette, plus untag."""
+        logger.info("palette: %s", cmd)
+        handlers = {
+            "refresh": self._refresh,
+            "scan": self._scan,
+            "search": self._search_query,
+            "tag": self._tag_selected,
+            "untag": self._untag_selected,
+            "delete": self._delete_tag,
+            "open_file": self._open_selected,
+            "home": self._go_home,
+            "up": self._go_up,
+            "sort_files": self._sort,
+            "select_drive": self._select_drive,
+            "init_db": self._init_db,
+            "config": self._edit_config,
+            "stats": self._stats,
+            "tree": self._show_tree,
+            "prune": self._prune,
+            "mount": self._mount,
+            "umount": self._umount,
+            "command_palette": self._command_palette,
+            "help": self._help,
+            "quit": self.close,
+        }
+        handler = handlers.get(cmd)
+        if handler is None:
+            self._status_label.setText(
+                _("'{cmd}' isn't available in the GUI yet").format(cmd=cmd)
+            )
+            return
+        handler()
 
     # ---------- contents ----------
 
     def _refresh(self) -> None:
-        """Re-read tags and the current folder after any write."""
+        """Re-read tags and the current view after any write."""
         self._tree.invalidate()
         self.tags.reload()
+        if self._search is not None:
+            self._run_search(self._search)
+            return
         self.open_folder(self._vpath)
 
     def open_folder(self, path: str) -> None:
         """Show a virtual folder: its subfolders and its files."""
         self._vpath = VirtualTree.normalize(path)
+        self._search = None
         self._selection.clear()
         # The preview belongs to the folder: a decode still on its way must not
         # paint over the emptied grid once the listing below has cleared it
@@ -332,21 +449,45 @@ class MainWindow(QMainWindow):
             return
 
         for node in nodes:
-            item = QListWidgetItem(node.name)
-            item.setData(self.ROLE_VPATH, node.vpath)
             if node.is_dir:
+                item = QListWidgetItem(node.name)
+                item.setData(self.ROLE_VPATH, node.vpath)
                 item.setIcon(self._folder_icon())
+                item.setToolTip(node.vpath)
                 self.grid.addItem(item)
                 continue
-            item.setData(self.ROLE_FILE_ID, node.file_id)
-            item.setData(self.ROLE_SOURCE, node.source_path)
-            item.setData(self.ROLE_MTIME, node.mtime)
-            item.setToolTip(f"{node.name}\n{node.source_path}")
-            self.grid.addItem(item)
+            item = self._add_file_item(
+                node.name,
+                node.source_path,
+                node.file_id,
+                node.mtime,
+                node.file_type,
+                node.vpath,
+            )
             self._queue.append((node.file_id, node.source_path, node.mtime, item))
 
         self._update_status()
         self._pump(generation)
+
+    def _add_file_item(
+        self,
+        name: str,
+        source: Optional[str],
+        file_id: Optional[int],
+        mtime: float,
+        file_type: Optional[FileType],
+        vpath: Optional[str] = None,
+    ) -> QListWidgetItem:
+        """One grid row for a file: a placeholder icon now, a thumbnail later."""
+        item = QListWidgetItem(name)
+        item.setData(self.ROLE_VPATH, vpath)
+        item.setData(self.ROLE_SOURCE, source)
+        item.setData(self.ROLE_FILE_ID, file_id)
+        item.setData(self.ROLE_MTIME, mtime)
+        item.setIcon(self._placeholder_icon(file_type))
+        item.setToolTip(self._file_tooltip(item))
+        self.grid.addItem(item)
+        return item
 
     def _pump(self, generation: int) -> None:
         """Hand the pool one batch, then come back for the next."""
@@ -357,8 +498,8 @@ class MainWindow(QMainWindow):
             if file_id is None or not source:
                 continue
             self._tasks.run(
-                self._thumbs.load,
-                on_done=lambda image, item=item: self._set_icon(item, image),
+                self._thumbs.load_result,
+                on_done=lambda result, item=item: self._set_icon(item, result),
                 args=(Path(source),),
                 kwargs={"file_id": file_id, "mtime": mtime},
                 generation=generation,
@@ -369,13 +510,35 @@ class MainWindow(QMainWindow):
     def _folder_icon(self) -> QIcon:
         return self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)
 
-    def _set_icon(self, item: QListWidgetItem, image) -> None:
-        if image is not None and not image.isNull():
-            item.setIcon(QIcon(QPixmap.fromImage(image)))
+    def _placeholder_icon(self, file_type: Optional[FileType]) -> QIcon:
+        """Type icon shown until a thumbnail lands - and when it never does."""
+        return icons.placeholder_for(file_type, self._thumbs.size)
+
+    def _file_tooltip(self, item: QListWidgetItem, reason: str = "") -> str:
+        """Name, real path, and - when there is no preview - why."""
+        lines = [item.text()]
+        source = item.data(self.ROLE_SOURCE)
+        if source:
+            lines.append(str(source))
+        if reason:
+            lines.append(reason)
+        return "\n".join(lines)
+
+    def _set_icon(self, item: QListWidgetItem, result: Thumbnail) -> None:
+        """A decoded thumbnail replaces the placeholder; a failure explains itself."""
+        if result.ok:
+            item.setIcon(QIcon(QPixmap.fromImage(result.image)))
+            item.setToolTip(self._file_tooltip(item))
+            return
+        item.setToolTip(self._file_tooltip(item, _reason_text(result.reason)))
 
     def _update_status(self) -> None:
-        """Refresh the status bar: current folder and how much is selected."""
-        self.statusBar().showMessage(f"{self._vpath} — {self.grid.count()}")
+        """Refresh the status bar: current view and how much is selected."""
+        if self._search is not None:
+            where = _("Search: {query}").format(query=self._search)
+        else:
+            where = self._vpath
+        self.statusBar().showMessage(f"{where} — {self.grid.count()}")
         if self._selection:
             self._status_label.setText(f"{_('Selected:')} {len(self._selection)}")
         else:
@@ -497,17 +660,234 @@ class MainWindow(QMainWindow):
         self._version = None
         self._poll.start()
 
+    def _search_query(self) -> None:
+        """Ask for a query: a name, or `tag:travel` - the TUI's own rule."""
+        query, accepted = QInputDialog.getText(
+            self, _("Search"), _("Text in the file name")
+        )
+        if not accepted or not query.strip():
+            return
+        self._run_search(query.strip())
+
+    def _run_search(self, query: str) -> None:
+        """Search off the event loop and show the hits in the grid."""
+        self._search = query
+        self._selection.clear()
+        self._preview_token += 1
+        self.grid.clear()
+        self._queue.clear()
+        self._update_status()
+
+        if query.startswith("tag:"):
+            tag = query[4:]
+            work = lambda: self._repo.search_by_tags([tag])  # noqa: E731
+        else:
+            work = lambda: self._repo.search_by_name(query)  # noqa: E731
+
+        generation = self._tasks.bump()
+        self._tasks.run(
+            work,
+            on_done=lambda files: self._show_files(files, generation),
+            on_failed=lambda error: self._show_error(query, error),
+            generation=generation,
+        )
+
+    def _show_files(self, files: List[FileEntry], generation: int) -> None:
+        """Fill the grid from search results instead of a folder listing."""
+        if generation != self._tasks.generation:
+            return
+        for entry in files:
+            mtime = self._entry_mtime(entry)
+            item = self._add_file_item(
+                entry.filename, entry.filepath, entry.id, mtime, entry.type
+            )
+            self._queue.append((entry.id, entry.filepath, mtime, item))
+        self._update_status()
+        self._pump(generation)
+
+    @staticmethod
+    def _entry_mtime(entry: FileEntry) -> float:
+        """mtime from the indexed metadata - no stat on the GUI thread."""
+        try:
+            return float((entry.metadata or {}).get("modified_at") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
     def _open_selected(self) -> None:
         selected = self.grid.selectedItems()
         if selected:
             self._open_external(selected[0])
+
+    def _init_db(self) -> None:
+        """The window's repository is the database: make sure it is on disk."""
+        if not self._db_path.exists():
+            SQLiteRepository(str(self._db_path))
+        self._version = None
+        self._refresh()
+        self._status_label.setText(_("Database initialized!"))
+
+    def _edit_config(self) -> None:
+        """Open the config file in the system's editor, creating it if needed."""
+        manager = get_config()
+        if not manager.config_path.exists():
+            manager.save()  # defaults, so the editor has something to show
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(manager.config_path)))
+        self._status_label.setText(_("Opened {path}").format(path=manager.config_path))
+
+    def _stats(self) -> None:
+        """Database statistics, read off the event loop."""
+        self._tasks.run(self._repo.get_stats, on_done=self._on_stats)
+
+    def _on_stats(self, stats: dict) -> None:
+        self._status_label.setText(
+            _("Files: {files}, tags: {tags}").format(
+                files=stats.get("total_files", 0), tags=stats.get("total_tags", 0)
+            )
+        )
+
+    def _show_tree(self) -> None:
+        """The tag tree is the virtual panel: reload it and move focus there."""
+        self.tags.reload()
+        self.tags.setFocus()
+
+    def _prune(self) -> None:
+        """Delete tags with no files and no subtags."""
+        self._tasks.run(self._repo.prune_orphan_tags, on_done=self._on_pruned)
+
+    def _on_pruned(self, removed: int) -> None:
+        self._status_label.setText(_("Tags deleted: {n}").format(n=removed))
+        self._refresh()
+
+    def _mount(self) -> None:
+        """Start `meret mount` in its own process, so `meret umount` can stop it.
+
+        The backend is deliberately not imported: keeping it out of meret.gui means
+        no FUSE or WinFsp import just to open a window.
+        """
+        default = "M:" if sys.platform == "win32" else str(Path.home() / "meret-tags")
+        point, accepted = QInputDialog.getText(
+            self, _("Mount virtual filesystem"), _("Where to mount, e.g. M:"), text=default
+        )
+        if not accepted or not point.strip():
+            return
+        self._status_label.setText(_("Mounting at {path}...").format(path=point.strip()))
+        self._spawn_cli("mount", point.strip())
+
+    def _umount(self) -> None:
+        """Stop the mount process. `meret umount` takes no --db, only the point."""
+        point, accepted = QInputDialog.getText(
+            self, _("Unmount"), _("Mount point, e.g. M: or K:\\tags")
+        )
+        if not accepted or not point.strip():
+            return
+        point = point.strip()
+        self._run_cli("umount", point)
+        self._status_label.setText(_("Unmounted {path}").format(path=point))
+
+    def _spawn_cli(self, *args: str) -> None:
+        """Run the CLI without waiting - a mount lives until it is unmounted."""
+        command = ["meret", *args, "--db", str(self._db_path)]
+        logger.info("run: %s", command)
+        try:
+            subprocess.Popen(command)
+        except OSError as e:
+            logger.warning("cannot run %s: %s", command, e)
+            self._status_label.setText(_("Error: {error}").format(error=e))
+
+    def _run_cli(self, *args: str) -> None:
+        """Run the CLI and wait - for a command that ends on its own."""
+        command = ["meret", *args]
+        logger.info("run: %s", command)
+        try:
+            done = subprocess.run(command, capture_output=True, text=True)
+        except OSError as e:
+            logger.warning("cannot run %s: %s", command, e)
+            self._status_label.setText(_("Error: {error}").format(error=e))
+            return
+        if done.returncode != 0:
+            logger.warning("exit %s: %s", done.returncode, (done.stderr or "").strip())
+
+    def _go_home(self) -> None:
+        """Point the real-FS panel at the home directory."""
+        home = Path.home()
+        self.fs.set_root(home)
+        self._status_label.setText(_("Path: {path}").format(path=home))
+
+    def _go_up(self) -> None:
+        """One level up. At a drive root there is nowhere up, so pick a drive."""
+        root = self.fs.root_path()
+        parent = root.parent
+        if parent == root:
+            self._select_drive()
+            return
+        self.fs.set_root(parent)
+        self._status_label.setText(_("Path: {path}").format(path=parent))
+
+    def _sort(self) -> None:
+        """Cycle the real-FS panel sorting: name, then size, then date.
+
+        The header is hidden, so clicking cannot sort and the view's own slot is
+        the only way in: sortByColumn, not sort - QTreeView has no sort(). Column
+        3 is the date, and the two largest-first modes are the useful ones there.
+        """
+        modes = [_("name"), _("size"), _("date")]
+        self._sort_index = (self._sort_index + 1) % len(modes)
+        column = (0, 1, 3)[self._sort_index]
+        order = (
+            Qt.SortOrder.AscendingOrder
+            if self._sort_index == 0
+            else Qt.SortOrder.DescendingOrder
+        )
+        self.fs.sortByColumn(column, order)
+        self._status_label.setText(
+            _("Sort by: {mode}").format(mode=modes[self._sort_index])
+        )
+
+    def _select_drive(self) -> None:
+        """Pick a drive. Windows only - the TUI says the same."""
+        if sys.platform != "win32":
+            self._status_label.setText(_("Drive selection only available on Windows"))
+            return
+
+        drives = [info.absoluteFilePath() for info in QDir.drives()]
+        if not drives:
+            return
+        chosen, accepted = QInputDialog.getItem(
+            self, _("Select drive"), _("Select Drive:"), drives, 0, False
+        )
+        if not accepted or not chosen:
+            return
+        self.fs.set_root(Path(chosen))
+        self._status_label.setText(_("Switched to {drive}").format(drive=chosen))
+
+    def _help(self) -> None:
+        """Every command with its key: the TUI's footer, as a dialog."""
+        descriptions = dict(command_table())
+
+        def line(name: str) -> str:
+            key = SHORTCUTS.get(name) or "—"
+            return f"    {key:<12}{descriptions[name]}"
+
+        lines = [f"{_('Navigation')}:", *(line(name) for name in NAVIGATION_COMMANDS)]
+        lines.append("")
+        lines.append(f"{_('Commands')}:")
+        lines.extend(
+            line(name) for name, _description in command_table()
+            if name not in NAVIGATION_COMMANDS
+        )
+        QMessageBox.information(self, _("Help"), "\n".join(lines))
 
     # ---------- preview ----------
 
     def _show_preview(self) -> None:
         selected = self.grid.selectedItems()
         self._selection = {
-            vpath for vpath in (item.data(self.ROLE_VPATH) for item in selected) if vpath
+            key
+            for key in (
+                item.data(self.ROLE_VPATH) or item.data(self.ROLE_SOURCE)
+                for item in selected
+            )
+            if key
         }
         self._update_status()
 
@@ -529,9 +909,9 @@ class MainWindow(QMainWindow):
             return
 
         self._tasks.run(
-            self._thumbs.load,
-            on_done=lambda image, token=token, name=item.text(): self._set_preview(
-                image, name, token
+            self._thumbs.load_result,
+            on_done=lambda result, token=token, name=item.text(): self._set_preview(
+                result, name, token
             ),
             args=(Path(source),),
             kwargs={
@@ -541,14 +921,15 @@ class MainWindow(QMainWindow):
             },
         )
 
-    def _set_preview(self, image, name: str, token: int) -> None:
+    def _set_preview(self, result: Thumbnail, name: str, token: int) -> None:
         if token != self._preview_token:
             return  # a newer selection has already painted
-        if image is None or image.isNull():
+        if not result.ok:
             self.preview.setPixmap(QPixmap())
-            self.preview.setText(name)
+            reason = _reason_text(result.reason)
+            self.preview.setText(f"{name}\n{reason}" if reason else name)
             return
-        self.preview.setPixmap(QPixmap.fromImage(image))
+        self.preview.setPixmap(QPixmap.fromImage(result.image))
 
     def _open_external(self, item: QListWidgetItem) -> None:
         """Open a file with the system handler, or descend into a folder."""

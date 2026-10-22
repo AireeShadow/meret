@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from meret.core import tagpaths
-from meret.core.models import FileEntry, Tag
+from meret.core.models import FileEntry, FileType, Tag
 from meret.core.repository import AbstractRepository
 from meret.vfs.errors import IsADirectory, NotFound
 
@@ -34,6 +34,7 @@ class Node:
     tag_id: Optional[int] = None
     file_id: Optional[int] = None
     source_path: Optional[str] = None  # real path on disk
+    file_type: Optional[FileType] = None  # image / video / audio - for the icon
 
 
 def sanitize(name: str) -> str:
@@ -292,6 +293,7 @@ class VirtualTree:
                         mtime=mtime,
                         file_id=f.id,
                         source_path=f.filepath,
+                        file_type=f.type,
                     )
                 )
 
