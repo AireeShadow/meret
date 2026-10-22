@@ -59,8 +59,21 @@ _DARK_PALETTE = {
     "Text": "#e6e6e6",
     "Button": "#2b2d31",
     "ButtonText": "#e6e6e6",
+    "BrightText": "#ffffff",
     "Highlight": "#3d6ea5",
     "HighlightedText": "#ffffff",
+    "ToolTipBase": "#2b2d31",
+    "ToolTipText": "#e6e6e6",
+    "PlaceholderText": "#9aa0a6",
+    "Link": "#6ea8dc",
+}
+
+#: Without these, disabled buttons and dimmed text stay bright in dark mode.
+_DISABLED_PALETTE = {
+    "WindowText": "#7a7d82",
+    "Text": "#7a7d82",
+    "ButtonText": "#7a7d82",
+    "HighlightedText": "#9aa0a6",
 }
 
 
@@ -75,6 +88,12 @@ def _apply_theme(app: Optional[QApplication], theme: str) -> None:
     palette = QPalette()
     for role, colour in _DARK_PALETTE.items():
         palette.setColor(getattr(QPalette.ColorRole, role), QColor(colour))
+    for role, colour in _DISABLED_PALETTE.items():
+        palette.setColor(
+            QPalette.ColorGroup.Disabled,
+            getattr(QPalette.ColorRole, role),
+            QColor(colour),
+        )
     app.setPalette(palette)
 
 
@@ -258,6 +277,8 @@ class MainWindow(QMainWindow):
         """The commands the TUI had, as buttons. Labels reuse the catalog."""
         self.toolbar = QToolBar(_("Commands"), self)
         self.toolbar.setMovable(False)
+        # The actions carry no icons: without this Qt reserves icon-sized buttons
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         self.addToolBar(self.toolbar)
 
         def add(label: str, handler, shortcut: str) -> None:
@@ -288,6 +309,9 @@ class MainWindow(QMainWindow):
         """Show a virtual folder: its subfolders and its files."""
         self._vpath = VirtualTree.normalize(path)
         self._selection.clear()
+        # The preview belongs to the folder: a decode still on its way must not
+        # paint over the emptied grid once the listing below has cleared it
+        self._preview_token += 1
         self.grid.clear()
         self._queue.clear()
         self._update_status()
@@ -437,7 +461,12 @@ class MainWindow(QMainWindow):
         self._refresh()
 
     def _scan(self) -> None:
-        """Index the folder picked in the real filesystem panel."""
+        """Index the folder picked in the real filesystem panel.
+
+        The poll is stopped for the duration: the scan commits the whole time, and
+        a refresh every 1.5 s would rebuild the tree and the grid underneath it.
+        The task is sticky, so browsing during a long scan cannot swallow its end.
+        """
         target = self.fs.current_path()
         if target is None:
             self._status_label.setText(_("Select a real file first!"))
@@ -445,18 +474,28 @@ class MainWindow(QMainWindow):
 
         folder = target if target.is_dir() else target.parent
         self._status_label.setText(_("Scanning {path}...").format(path=folder))
+        self._poll.stop()
         indexer = Indexer(self._repo, folder)
         self._tasks.run(
-            indexer.run, on_done=self._on_scan_done, on_failed=self._on_scan_failed
+            indexer.run,
+            on_done=self._on_scan_done,
+            on_failed=self._on_scan_failed,
+            sticky=True,
         )
 
     def _on_scan_done(self, _stats: dict) -> None:
         self._status_label.setText(_("Scan complete!"))
+        # The scan itself was the change: re-baseline, so the first poll after it
+        # does not refresh a second time on data the refresh below already read
+        self._version = None
         self._refresh()
+        self._poll.start()
 
     def _on_scan_failed(self, error: Exception) -> None:
         logger.warning("scan failed: %s", error)
         self._status_label.setText(_("Error: {error}").format(error=error))
+        self._version = None
+        self._poll.start()
 
     def _open_selected(self) -> None:
         selected = self.grid.selectedItems()
@@ -547,8 +586,12 @@ class MainWindow(QMainWindow):
     # ---------- outside changes ----------
 
     def _check_version(self) -> None:
-        """Pick up tagging done by another process (the CLI, a mount, a scan)."""
-        self._tasks.run(self._repo.data_version, self._on_version)
+        """Pick up tagging done by another process (the CLI, a mount, a scan).
+
+        Sticky: every folder change bumps the generation, so a probe that got
+        dropped each time would never report anything while the user browses.
+        """
+        self._tasks.run(self._repo.data_version, self._on_version, sticky=True)
 
     def _on_version(self, version: Optional[int]) -> None:
         if version is None or version == self._version:

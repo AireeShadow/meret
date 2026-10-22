@@ -2,10 +2,19 @@
 
 Workers produce QImage, never QPixmap: QPixmap belongs to the GUI thread, QImage
 is safe to build in a pool thread. The GUI thread does the conversion on arrival.
+
+Images go through Pillow. A video container has no Pillow plugin, so one frame is
+pulled out of the file with ffmpeg (the toolchain ffprobe already comes from) and
+decoded from a pipe. Audio only ever has an embedded cover, which Pillow reads on
+its own - when there is none, the caller falls back to an icon.
 """
 
 import hashlib
+import io
 import logging
+import shutil
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -20,12 +29,81 @@ logger = logging.getLogger(__name__)
 CACHE_SUBDIR = "thumbs"
 MAX_SIZE = 1024
 
+#: Seek points for the frame grab: a clip shorter than a second has nothing at 1s.
+VIDEO_SEEKS = ("1", "0")
+#: Seconds a single ffmpeg call may take before it is abandoned.
+VIDEO_TIMEOUT = 20
+
+#: Containers Pillow cannot open: the frame has to come from ffmpeg.
+VIDEO_SUFFIXES = frozenset(
+    {".mp4", ".m4v", ".mkv", ".mov", ".avi", ".wmv", ".webm", ".flv", ".mpg", ".mpeg"}
+)
+
+
+@lru_cache(maxsize=1)
+def ffmpeg_path() -> Optional[str]:
+    """ffmpeg from PATH, probed once. None when only ffprobe is installed."""
+    return shutil.which("ffmpeg")
+
 
 def cache_dir() -> Path:
     """Where thumbnails live: the user's cache dir, created on demand."""
     path = Path(platformdirs.user_cache_dir("meret")) / CACHE_SUBDIR
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _video_frame(source: Path) -> Optional[Image.Image]:
+    """One frame of a video, decoded from ffmpeg's stdout.
+
+    `-ss` before `-i` is a fast keyframe seek, and the scale keeps a 4K frame from
+    being decoded at full size only to be shrunk again right after. A clip shorter
+    than the seek point yields nothing, so the very first frame is the fallback.
+    """
+    binary = ffmpeg_path()
+    if binary is None:
+        logger.debug("no ffmpeg on PATH, no thumbnail for %s", source)
+        return None
+
+    for seek in VIDEO_SEEKS:
+        command = [
+            binary,
+            "-nostdin",
+            "-loglevel", "error",
+            "-ss", seek,
+            "-i", str(source),
+            "-frames:v", "1",
+            "-vf", f"scale='min({MAX_SIZE},iw)':-2",
+            "-f", "image2pipe",
+            "-vcodec", "png",
+            "-",
+        ]
+        try:
+            done = subprocess.run(command, capture_output=True, timeout=VIDEO_TIMEOUT)
+        except (OSError, subprocess.SubprocessError) as e:
+            logger.debug("ffmpeg failed for %s: %s", source, e)
+            return None
+        if not done.stdout:
+            continue
+        try:
+            with Image.open(io.BytesIO(done.stdout)) as frame:
+                return frame.convert("RGB")
+        except (OSError, ValueError) as e:
+            logger.debug("ffmpeg returned no usable frame for %s: %s", source, e)
+    return None
+
+
+def _decode(source: Path) -> Optional[Image.Image]:
+    """The source as a detached PIL image, or None if it cannot be read."""
+    if source.suffix.casefold() in VIDEO_SUFFIXES:
+        return _video_frame(source)
+    try:
+        with Image.open(source) as img:
+            # copy(): the handle closes with the block, the pixels must outlive it
+            return ImageOps.exif_transpose(img).copy()
+    except (OSError, ValueError) as e:
+        logger.debug("cannot decode %s: %s", source, e)
+        return None
 
 
 class ThumbnailCache:
@@ -58,24 +136,32 @@ class ThumbnailCache:
         side = min(int(size or self.size), MAX_SIZE)
         target = self._target(file_id, mtime, side)
 
-        if not target.is_file() and not self._render(source, target, side):
-            return None
+        if target.is_file():
+            image = QImage(str(target))
+            if not image.isNull():
+                return image
+            # A crash between save() and replace() leaves a truncated PNG, and it
+            # would stay unreadable forever: drop it and decode the file again
+            target.unlink(missing_ok=True)
 
+        if not self._render(source, target, side):
+            return None
         image = QImage(str(target))
         return None if image.isNull() else image
 
     def _render(self, source: Path, target: Path, side: int) -> bool:
         """Decode, rotate by EXIF, fit into side x side, write atomically."""
+        image = _decode(source)
+        if image is None:
+            return False
         try:
-            with Image.open(source) as img:
-                img = ImageOps.exif_transpose(img)
-                img.thumbnail((side, side), Image.Resampling.LANCZOS)
-                if img.mode not in ("RGB", "RGBA"):
-                    img = img.convert("RGB")
-                partial = target.with_name(target.name + ".part")
-                img.save(partial, "PNG")
-                # replace() is atomic: a reader never sees a half-written PNG
-                partial.replace(target)
+            image.thumbnail((side, side), Image.Resampling.LANCZOS)
+            if image.mode not in ("RGB", "RGBA"):
+                image = image.convert("RGB")
+            partial = target.with_name(target.name + ".part")
+            image.save(partial, "PNG")
+            # replace() is atomic: a reader never sees a half-written PNG
+            partial.replace(target)
             return True
         except (OSError, ValueError) as e:
             logger.debug("thumbnail failed for %s: %s", source, e)

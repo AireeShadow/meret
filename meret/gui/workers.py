@@ -6,7 +6,8 @@ runs a callable in a thread pool and hands the result back on the GUI thread.
 
 Each task carries a generation. A panel that re-asks (another tag, another
 folder) calls bump(); results from an older generation are dropped instead of
-overwriting fresher rows.
+overwriting fresher rows. A task marked sticky ignores that: a version probe or a
+scan must still report even though the user kept browsing while it ran.
 
 Lifetime rules, learned the hard way:
 - the pool must not delete the runnable, and Python must not collect it while a
@@ -15,6 +16,9 @@ Lifetime rules, learned the hard way:
   TaskRunner that queued it is already garbage.
 - a task keeps its runner alive, so a queued delivery still finds its receiver.
 - delivery is explicitly queued, so callbacks never run on a pool thread.
+- a runnable that is dropped from the queue never emits, so clear() has to release
+  it itself - otherwise the safety net would hold it (and its closures) for the
+  whole run.
 """
 
 import logging
@@ -55,6 +59,7 @@ class Task(QRunnable):
         self.args = args
         self.kwargs = kwargs or {}
         self.generation = 0
+        self.sticky = False
         self.on_done: Optional[Callable[[Any], None]] = None
         self.on_failed: Optional[Callable[[Exception], None]] = None
         self.runner: Optional["TaskRunner"] = None
@@ -104,10 +109,16 @@ class TaskRunner(QObject):
         args: tuple = (),
         kwargs: Optional[dict] = None,
         generation: Optional[int] = None,
+        sticky: bool = False,
     ) -> Task:
-        """Queue `fn`. Callbacks run on the GUI thread; stale ones are skipped."""
+        """Queue `fn`. Callbacks run on the GUI thread; stale ones are skipped.
+
+        sticky=True for work that must not be cancelled by a bump() - a probe of
+        the database, or a scan whose ending the user's browsing must not eat.
+        """
         task = Task(fn, args, kwargs)
         task.generation = self._generation if generation is None else generation
+        task.sticky = sticky
         task.on_done = on_done
         task.on_failed = on_failed
         task.runner = self
@@ -127,7 +138,7 @@ class TaskRunner(QObject):
     @Slot(object, object)
     def _deliver_done(self, task: Task, result: Any) -> None:
         try:
-            if task.generation != self._generation:
+            if not task.sticky and task.generation != self._generation:
                 logger.debug("dropping result from generation %s", task.generation)
             elif task.on_done is not None:
                 task.on_done(result)
@@ -137,7 +148,7 @@ class TaskRunner(QObject):
     @Slot(object, object)
     def _deliver_failed(self, task: Task, error: Exception) -> None:
         try:
-            if task.generation != self._generation:
+            if not task.sticky and task.generation != self._generation:
                 return
             if task.on_failed is not None:
                 task.on_failed(error)
@@ -155,13 +166,18 @@ class TaskRunner(QObject):
         task.runner = None
 
     def clear(self) -> None:
-        """Drop queued work. Running tasks finish on their own.
+        """Drop queued work: nothing still registered will deliver any more.
 
-        Cleared-but-never-started tasks get no delivery, so they stay in
-        _INFLIGHT until the process ends - cheap, and it keeps them safe.
+        QThreadPool.clear() drops runnables that never started, and those emit no
+        signal at all, so they are released here instead of leaking into the
+        module-level safety net along with the closures they carry. A task that is
+        already running finishes on its own and releases itself.
         """
         self._pool.clear()
-        self._inflight.clear()
+        for task in list(self._inflight):
+            task.on_done = None
+            task.on_failed = None
+            self._release(task)
 
     def wait(self, msecs: int = -1) -> bool:
         """Block until the pool is empty - for tests and shutdown."""
@@ -170,5 +186,5 @@ class TaskRunner(QObject):
     def shutdown(self, msecs: int = 5000) -> None:
         """Bump, clear and wait, so no task outlives the window it paints into."""
         self.bump()
-        self._pool.clear()
+        self.clear()
         self._pool.waitForDone(msecs)
