@@ -24,7 +24,6 @@ from meret.core.locale import _
 
 logger = logging.getLogger(__name__)
 
-#: Qt keys, the counterpart of the TUI's bindings. An empty entry has no key.
 #: Qt keys, the counterpart of the TUI's bindings. Every command has one: a
 #: command reachable only from the palette is a command with no key, and the TUI
 #: binds every action.
@@ -88,7 +87,6 @@ def short_label(command: str) -> str:
         "tag": _("Tag"),
     }
     return short.get(command) or dict(command_table()).get(command, command)
-
 
 def matches(query: str) -> List[str]:
     """Commands for the typed text: exact, then name prefix, then anywhere."""

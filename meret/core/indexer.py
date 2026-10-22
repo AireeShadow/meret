@@ -171,7 +171,7 @@ class Indexer:
         if self.skip_existing and files:
             known = self.repo.known_fingerprints()
             before = len(files)
-            files = [f for f in files if known.get(str(f)) != self._fingerprint(f)]
+            files = [f for f in files if not self._unchanged(f, known)]
             skipped = before - len(files)
             logger.info("Skipped %d/%d unchanged files", skipped, before)
 
@@ -197,3 +197,15 @@ class Indexer:
         logger.info("Indexed in %.1f s (total %.1f s): %s",
                     time.perf_counter() - t0, time.perf_counter() - started, stats)
         return stats
+
+    def _unchanged(self, path: Path, known: Dict[str, Tuple[int, float]]) -> bool:
+        """True only when both sides are known and equal.
+
+        A file that cannot be stat'ed gives None on one side, and comparing that to
+        the None of a path that is not in the database read as "unchanged" - so a
+        file that vanished between collect and fingerprint was counted as skipped
+        and never indexed.
+        """
+        recorded = known.get(str(path))
+        current = self._fingerprint(path)
+        return recorded is not None and current is not None and recorded == current
