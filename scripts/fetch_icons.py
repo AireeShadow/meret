@@ -1,113 +1,116 @@
-"""Vendor the toolbar and file-type icons from Lucide into meret/gui/icons/.
+"""Vendor the Lucide glyphs the toolbar uses into meret/gui/icons/commands/.
 
-Vendored, not fetched at runtime: the GUI must open without a network, and a pinned
-tag keeps the shapes from changing under a release.
+Lucide is ISC licensed, so its LICENSE is copied in beside the SVGs. Run this by
+hand when a command appears or a glyph changes - nothing is fetched at runtime, and
+a missing file is not fatal: icons.py falls back to a drawn tile.
 
-    python scripts/fetch_icons.py                 # latest release, prints the tag
-    python scripts/fetch_icons.py --tag 0.544.0   # reproducible
-
-Files are named after the command, never after the upstream icon: the loader looks
-up `icons/<command>.svg`, so an upstream rename (`home` -> `house`,
-`bar-chart-3` -> `chart-column`) cannot break the mapping. A wrong name fails
-loudly with the HTTP status instead of writing a broken SVG.
+    python scripts/fetch_icons.py [--force]
 """
 
-from __future__ import annotations
-
 import argparse
-import json
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Dict, Iterable, Optional, Tuple
 
-RAW = "https://raw.githubusercontent.com/lucide-icons/lucide/{tag}/{path}"
-LATEST = "https://api.github.com/repos/lucide-icons/lucide/releases/latest"
-TARGET = Path(__file__).resolve().parents[1] / "meret" / "gui" / "icons"
-TIMEOUT = 30
+#: The default branch, not a tag: the vendored files are committed anyway, so a glyph
+#: that moves upstream shows up as a reviewable diff instead of a silent change.
+BASE = "https://raw.githubusercontent.com/lucide-icons/lucide/main"
+SUFFIX = ".svg"
 
-#: our file name -> upstream Lucide name. Checked against the repo tree, not guessed.
-COMMANDS = {
-    "refresh": "refresh-cw",
-    "scan": "folder-search",
-    "search": "search",
-    "tag": "tag",
-    "untag": "tag-x",
-    "delete": "trash",
-    "open_file": "external-link",
-    "home": "house",
-    "up": "arrow-up",
-    "sort_files": "arrow-up-down",
-    "select_drive": "hard-drive",
-    "init_db": "database",
-    "config": "settings",
-    "stats": "chart-column",
-    "tree": "list-tree",
-    "prune": "eraser",
-    "mount": "plug",
-    "umount": "unplug",
-    "command_palette": "square-terminal",
-    "help": "circle-question-mark",
-    "quit": "power",
-}
+REPO = Path(__file__).resolve().parent.parent
+ICON_DIR = REPO / "meret" / "gui" / "icons" / "commands"
+LICENSE = ICON_DIR.parent / "LICENSE"
 
-#: file kinds for the grid placeholder
-KINDS = {
-    "image": "image",
-    "video": "film",
-    "audio": "file-music",
-    "unknown": "file-question-mark",
+#: command -> candidate Lucide stems, best first. Lucide renames glyphs between
+#: releases - bar-chart-3 became chart-column, trash-2 became trash - so candidates
+#: are tried in order. The vendored file is named after the *command*, which is why a
+#: rename upstream never reaches the code.
+GLYPHS: Dict[str, Tuple[str, ...]] = {
+    "refresh": ("refresh-cw",),
+    "scan": ("folder-search",),
+    "search": ("search",),
+    "tag": ("tag",),
+    "untag": ("tag-off", "tag-x", "tags"),
+    "delete": ("trash-2", "trash"),
+    "sort_files": ("arrow-up-down",),
+    "init_db": ("database",),
+    "config": ("settings",),
+    "stats": ("chart-column", "bar-chart-3", "chart-bar"),
+    "tree": ("list-tree",),
+    "prune": ("scissors",),
+    "mount": ("hard-drive",),
+    "umount": ("eject",),
+    "command_palette": ("terminal",),
+    "help": ("circle-question-mark", "circle-help", "help-circle", "info"),
+    "quit": ("log-out",),
 }
 
 
-def _get(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "meret-icon-fetch"})
-    with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
-        return response.read()
+def download(url: str, target: Path) -> Optional[str]:
+    """Save `url` as `target`. None when it worked, otherwise why it did not."""
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            target.write_bytes(response.read())
+    except (OSError, urllib.error.URLError) as error:
+        return str(error)
+    return None
 
 
-def _latest_tag() -> str:
-    """The newest release tag, so the default is never a stale guess."""
-    payload = json.loads(_get(LATEST).decode("utf-8"))
-    return payload["tag_name"]
+def fetch_one(command: str, stems: Tuple[str, ...], force: bool) -> Optional[str]:
+    """Save the first candidate stem that exists. None when the file is already there."""
+    target = ICON_DIR / f"{command}{SUFFIX}"
+    if target.exists() and not force:
+        return None
+
+    last = ""
+    for stem in stems:
+        problem = download(f"{BASE}/icons/{stem}{SUFFIX}", target)
+        if problem is None:
+            print(f"  + {target.name} <- {stem}")
+            return None
+        last = problem
+    return f"{command}: none of {', '.join(stems)} ({last})"
 
 
-def main(argv: list[str] | None = None) -> int:
+def prune(keep: Iterable[str]) -> int:
+    """Delete glyphs no command asks for any more - a renamed command leaves them."""
+    wanted = set(keep)
+    removed = 0
+    for path in sorted(ICON_DIR.glob(f"*{SUFFIX}")):
+        if path.stem not in wanted:
+            path.unlink()
+            print(f"  - {path.name}")
+            removed += 1
+    return removed
+
+
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tag", default=None, help="Lucide tag (default: latest release)")
-    parser.add_argument("--out", type=Path, default=TARGET, help="target directory")
+    parser.add_argument("--force", action="store_true", help="re-download existing files")
     args = parser.parse_args(argv)
 
-    tag = args.tag or _latest_tag()
-    args.out.mkdir(parents=True, exist_ok=True)
-    print(f"lucide {tag} -> {args.out}")
+    ICON_DIR.mkdir(parents=True, exist_ok=True)
+    problems = [
+        problem
+        for problem in (
+            fetch_one(command, stems, args.force)
+            for command, stems in sorted(GLYPHS.items())
+        )
+        if problem
+    ]
 
-    failed: list[str] = []
-    for name, upstream in sorted({**COMMANDS, **KINDS}.items()):
-        url = RAW.format(tag=tag, path=f"icons/{upstream}.svg")
-        try:
-            payload = _get(url)
-        except urllib.error.HTTPError as error:
-            failed.append(f"{name}: {upstream}.svg -> HTTP {error.code}")
-            continue
-        except urllib.error.URLError as error:
-            failed.append(f"{name}: {upstream}.svg -> {error.reason}")
-            continue
-        (args.out / f"{name}.svg").write_bytes(payload)
-        print(f"  {name}.svg  <- {upstream}.svg")
+    problem = download(f"{BASE}/LICENSE", LICENSE)
+    if problem:
+        problems.append(f"LICENSE: {problem}")
+    elif args.force:
+        print(f"  + {LICENSE.name}")
 
-    # ISC: the notice has to travel with the files
-    (args.out / "LICENSE").write_bytes(_get(RAW.format(tag=tag, path="LICENSE")))
-    print(f"  LICENSE    <- lucide {tag}")
-
-    if failed:
-        print("\nfailed:", file=sys.stderr)
-        for line in failed:
-            print(f"  {line}", file=sys.stderr)
-        print("\nfix the name in COMMANDS/KINDS, then re-run", file=sys.stderr)
-        return 1
-    print(f"\ndone. pin it: --tag {tag}")
-    return 0
+    print(f"{len(GLYPHS)} glyphs in {ICON_DIR}, {prune(GLYPHS)} removed")
+    for problem in problems:
+        print(f"! {problem}", file=sys.stderr)
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

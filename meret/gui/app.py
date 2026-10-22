@@ -593,22 +593,49 @@ class MainWindow(QMainWindow):
         return item
 
     def _pump(self, generation: int) -> None:
-        """Hand the pool one batch, then come back for the next."""
+        """Hand the pool one batch; its last result asks for the next one.
+
+        Not a zero-timer per batch: that resubmits the next batch the moment this
+        one is queued, so a huge folder ends up with the whole folder waiting in the
+        pool and BATCH limits nothing. Waiting for the batch to land keeps the pool
+        queue at BATCH and wakes the event loop once per batch, not once per row.
+        """
         if generation != self._tasks.generation:
             return
+
         batch, self._queue = self._queue[:BATCH], self._queue[BATCH:]
-        for file_id, source, mtime, item in batch:
-            if file_id is None or not source:
-                continue
+        todo = [(f, s, m, item) for f, s, m, item in batch if f is not None and s]
+        if not todo:
+            # nothing to wait for: rows without a file id must not stall the queue
+            if self._queue:
+                QTimer.singleShot(0, lambda: self._pump(generation))
+            return
+
+        left = len(todo)
+
+        def landed(item: QListWidgetItem, result: Optional[Thumbnail]) -> None:
+            """One row is in: paint it, and start the next batch when it was last."""
+            nonlocal left
+            if result is not None:
+                self._set_icon(item, result)
+            left -= 1
+            if left <= 0 and self._queue:
+                self._pump(generation)
+
+        def failed(error: Exception, item: QListWidgetItem) -> None:
+            """A decoder that raised is not a crash: keep the placeholder, count it."""
+            logger.warning("thumbnail failed for %s: %s", item.text(), error)
+            landed(item, None)
+
+        for file_id, source, mtime, item in todo:
             self._tasks.run(
                 self._thumbs.load_result,
-                on_done=lambda result, item=item: self._set_icon(item, result),
+                on_done=lambda result, item=item: landed(item, result),
+                on_failed=lambda error, item=item: failed(error, item),
                 args=(Path(source),),
                 kwargs={"file_id": file_id, "mtime": mtime},
                 generation=generation,
             )
-        if self._queue:
-            QTimer.singleShot(0, lambda: self._pump(generation))
 
     def _folder_icon(self) -> QIcon:
         return self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)

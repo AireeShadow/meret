@@ -134,3 +134,47 @@ def test_preview_updates_for_the_selected_file(tmp_path, qapp, qtbot):
     window.grid.setCurrentRow(0)
     qtbot.waitUntil(lambda: window.preview.pixmap() is not None
         and not window.preview.pixmap().isNull(), timeout=2000)
+
+def test_thumbnails_are_batched_and_the_queue_refills_on_completion(tmp_path, qapp, qtbot):
+    """The bug: a zero-timer refilled the queue at once, so BATCH limited nothing."""
+    from meret.core.sqlite_repo import SQLiteRepository
+    from meret.gui.app import BATCH, MainWindow
+
+    repo = SQLiteRepository(str(tmp_path / "meret.db"))
+    window = MainWindow(repo, tmp_path / "meret.db")
+    qtbot.addWidget(window)
+
+    submitted, landed = [], []
+
+    def fake_run(work, on_done=None, on_failed=None, args=(), kwargs=None,
+                 generation=None, sticky=False):
+        submitted.append(args[0])
+        landed.append(lambda: on_done(None))  # None: nothing is painted
+
+    window._tasks.run = fake_run
+    # Bump first: the listing the window fired on start is still in flight, and it
+    # would otherwise land on the queue below and pump it a second time
+    generation = window._tasks.bump()
+    window._queue = [
+        (
+            index,
+            f"file{index}.png",
+            0.0,
+            window._add_file_item(f"file{index}.png", f"file{index}.png", index, 0.0, None),
+        )
+        for index in range(BATCH * 2)
+    ]
+
+    window._pump(generation)
+    pump(qapp)  # a zero-timer would have fired here and submitted everything
+
+    assert len(submitted) == BATCH  # one batch, not the whole queue
+    assert len(window._queue) == BATCH  # the rest waits for the pool
+
+    index = 0
+    while index < len(landed):  # a landing batch is what asks for the next one
+        landed[index]()
+        index += 1
+
+    assert len(submitted) == BATCH * 2
+    assert window._queue == []

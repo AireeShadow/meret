@@ -1,292 +1,143 @@
-"""Toolbar and placeholder icons.
+"""Toolbar glyphs and the tiles that stand in for a missing preview.
 
-The set is vendored under meret/gui/icons/ (see scripts/fetch_icons.py) and named
-after the command, so the lookup is `icons/<command>.svg`. Everything falls back to
-a QPainter-drawn tile when a file is missing, so the GUI opens with an empty icon
-folder too and nothing needs a network at runtime.
+Two jobs, one rule: never show a hole. The command glyphs are vendored from Lucide
+(ISC, see icons/LICENSE) by scripts/fetch_icons.py and named after the command, so
+an upstream rename never reaches this code; anything missing falls back to a tile
+drawn by hand. Nothing is downloaded at runtime.
 
-Icons are rendered once per (key, size, colour) and cached: a toolbar repaints
-constantly and a grid of five thousand rows must not re-render five thousand SVGs.
-
-These are QPixmap, so build and use them on the GUI thread only.
+`icons` is a module sitting next to an `icons/` directory, and that only works while
+the directory has no __init__.py: with one, the package shadows this module and
+`from meret.gui import icons` resolves to something without command_icon().
 """
 
-import logging
+from functools import lru_cache
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
-from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import (
-    QColor,
-    QFont,
-    QIcon,
-    QPainter,
-    QPalette,
-    QPen,
-    QPixmap,
-    QPolygonF,
-)
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPalette, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
 
 from meret.core.models import FileType
 
-try:  # QtSvg ships with PySide6; the drawn tiles cover its absence
-    from PySide6.QtSvg import QSvgRenderer
-except ImportError:  # pragma: no cover - only without the QtSvg module
-    QSvgRenderer = None
-
-logger = logging.getLogger(__name__)
-
-ICON_DIR = Path(__file__).parent / "icons"
+#: The vendored SVGs: one <command><ICON_SUFFIX> per toolbar command.
+ICON_DIR = Path(__file__).parent / "icons" / "commands"
 ICON_SUFFIX = ".svg"
 
-#: Render at twice the size and map it back: crisp on HiDPI, smooth on 1x.
-SCALE = 2
-
-IMAGE = "image"
-VIDEO = "video"
-AUDIO = "audio"
+#: Kind for a file whose type is unknown or absent: it gets the neutral tile.
 UNKNOWN = "unknown"
 
-#: Wash per kind, for the drawn fallback. The vendored SVGs are tinted with the
-#: palette instead, so a whole set looks like one family.
-_COLOURS: Dict[str, str] = {
-    IMAGE: "#4c9a8f",
-    VIDEO: "#7a6bb5",
-    AUDIO: "#c08a3e",
-    UNKNOWN: "#6b7076",
+#: Tile geometry as a fraction of the requested size, plus the letter size.
+_INSET = 0.06
+_RADIUS = 0.18
+_LETTER = 0.45
+
+#: Neutral grey: a command whose glyph is missing must read as "no glyph", not as a
+#: file type.
+_NEUTRAL = "#7a7d82"
+
+#: Placeholder tiles: a letter and a colour per kind. Keyed by the type's name, not by
+#: the member, so a type added to FileType gets a tile without an edit here.
+_TILES: Dict[str, Tuple[str, str]] = {
+    "IMAGE": ("I", "#4f8fd0"),
+    "VIDEO": ("V", "#c06a8a"),
+    "AUDIO": ("A", "#5aa06a"),
+    "DOCUMENT": ("D", "#b08a4a"),
+    UNKNOWN: ("?", _NEUTRAL),
 }
 
-_KIND_BY_TYPE = {
-    FileType.IMAGE: IMAGE,
-    FileType.VIDEO: VIDEO,
-    FileType.AUDIO: AUDIO,
-}
 
-#: Two letters per command, used only when the SVG is missing.
-_COMMAND_GLYPHS: Dict[str, Tuple[str, str]] = {
-    "refresh": ("RF", "#4c9a8f"),
-    "scan": ("SC", "#4c9a8f"),
-    "search": ("SE", "#4c9a8f"),
-    "open_file": ("OP", "#4c9a8f"),
-    "tag": ("TG", "#7a6bb5"),
-    "untag": ("UN", "#7a6bb5"),
-    "delete": ("DL", "#7a6bb5"),
-    "home": ("HM", "#5b7fb0"),
-    "up": ("UP", "#5b7fb0"),
-    "sort_files": ("ST", "#5b7fb0"),
-    "select_drive": ("DR", "#5b7fb0"),
-    "init_db": ("IN", "#c08a3e"),
-    "config": ("CF", "#c08a3e"),
-    "stats": ("SB", "#c08a3e"),
-    "tree": ("TR", "#c08a3e"),
-    "prune": ("PR", "#c08a3e"),
-    "mount": ("MN", "#5aa46b"),
-    "umount": ("UM", "#5aa46b"),
-    "command_palette": (":", "#6b7076"),
-    "help": ("?", "#6b7076"),
-    "quit": ("QT", "#6b7076"),
-}
-
-_CACHE: Dict[Tuple[str, int], QIcon] = {}
-
-
-def kind_for(file_type: Optional[FileType]) -> str:
-    """Placeholder kind for a file type. Anything else gets the generic one."""
-    return _KIND_BY_TYPE.get(file_type, UNKNOWN)
-
-
-def _theme_colour() -> str:
-    """Icon colour from the active palette, so light and dark both read.
-
-    The vendored SVGs draw with `currentColor`, which Qt does not resolve: it
-    renders black, and black on a dark theme is invisible.
-    """
+def _palette_colour() -> QColor:
+    """The palette's text colour: the tint that keeps glyphs visible in dark mode."""
     app = QApplication.instance()
     if app is None:
-        return _COLOURS[UNKNOWN]
-    return app.palette().color(QPalette.ColorRole.WindowText).name()
+        return QColor("#e6e6e6")
+    return app.palette().color(QPalette.ColorRole.WindowText)
 
 
-# ---------- vendored SVGs ----------
+def _ratio() -> float:
+    """Device pixel ratio, so a HiDPI screen gets a sharp glyph, not a blurry one."""
+    app = QApplication.instance()
+    return float(app.devicePixelRatio()) if app is not None else 1.0
 
 
-def _render_svg(path: Path, side: int, colour: str) -> Optional[QPixmap]:
-    """Render `path` at `side` and paint it in `colour`. None when unusable."""
-    if QSvgRenderer is None or not path.is_file():
+@lru_cache(maxsize=512)
+def _tinted(name: str, size: int, colour: str, ratio: float) -> Optional[QPixmap]:
+    """Render one vendored SVG in `colour`. None when the file cannot be used.
+
+    Cached on its arguments, so a repaint costs a dict lookup - and a palette switch
+    is a different colour, hence a different key, never a stale pixmap.
+    """
+    path = ICON_DIR / f"{name}{ICON_SUFFIX}"
+    if not path.is_file():
         return None
-
     renderer = QSvgRenderer(str(path))
     if not renderer.isValid():
-        logger.warning("not a usable SVG: %s", path)
         return None
 
-    pixmap = QPixmap(side * SCALE, side * SCALE)
+    pixmap = QPixmap(int(size * ratio), int(size * ratio))
+    pixmap.setDevicePixelRatio(ratio)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
-    try:
-        renderer.render(painter)
-        # SourceIn replaces the colour and keeps the antialiased alpha
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.fillRect(pixmap.rect(), QColor(colour))
-    finally:
-        painter.end()
-    pixmap.setDevicePixelRatio(SCALE)
+    renderer.render(painter)
+    # SourceIn paints the glyph's own alpha with our colour: the SVGs are black
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+    painter.fillRect(pixmap.rect(), QColor(colour))
+    painter.end()
     return pixmap
 
 
-# ---------- drawn fallback ----------
+def _tile(letter: str, size: int, colour: QColor, background: str) -> QIcon:
+    """A rounded tile with one letter on it: the fallback that always draws."""
+    ratio = _ratio()
+    pixmap = QPixmap(int(size * ratio), int(size * ratio))
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(Qt.GlobalColor.transparent)
 
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    body = QRectF(0, 0, size, size).adjusted(
+        size * _INSET, size * _INSET, -size * _INSET, -size * _INSET
+    )
+    path = QPainterPath()
+    path.addRoundedRect(body, size * _RADIUS, size * _RADIUS)
+    painter.fillPath(path, QColor(background))
 
-def _frame(painter: QPainter, side: int, colour: QColor) -> None:
-    """The rounded tile the drawn variants sit in."""
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    inset = max(1.0, side * 0.03)
-    box = QRectF(inset, inset, side - 2 * inset, side - 2 * inset)
-
-    wash = QColor(colour)
-    wash.setAlpha(36)
-    edge = QColor(colour)
-    edge.setAlpha(150)
-    painter.setPen(QPen(edge, max(1.0, side / 64.0)))
-    painter.setBrush(wash)
-    painter.drawRoundedRect(box, side * 0.12, side * 0.12)
-
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(colour)
-
-
-def _draw_text(painter: QPainter, text: str, side: float, ratio: float) -> None:
-    """Centred text, sized to `ratio` of the tile."""
-    font = QFont()
+    font = painter.font()
+    font.setPixelSize(max(8, int(size * _LETTER)))
     font.setBold(True)
-    font.setPixelSize(max(6, int(side * ratio)))
     painter.setFont(font)
-    painter.drawText(QRectF(0, 0, side, side), Qt.AlignmentFlag.AlignCenter, text)
+    painter.setPen(colour)
+    painter.drawText(body, Qt.AlignmentFlag.AlignCenter, letter)
+    painter.end()
+    return QIcon(pixmap)
 
 
-def _draw_glyph(painter: QPainter, kind: str, side: float, colour: QColor) -> None:
-    """The figure inside a file tile: mountains, a play mark, a note, a question mark."""
-    if kind == IMAGE:
-        painter.drawEllipse(QPointF(0.32 * side, 0.32 * side), 0.075 * side, 0.075 * side)
-        painter.drawPolygon(
-            QPolygonF(
-                [
-                    QPointF(0.18 * side, 0.74 * side),
-                    QPointF(0.40 * side, 0.42 * side),
-                    QPointF(0.54 * side, 0.60 * side),
-                    QPointF(0.64 * side, 0.50 * side),
-                    QPointF(0.84 * side, 0.74 * side),
-                ]
-            )
-        )
-        return
+def command_icon(command: str, size: int) -> QIcon:
+    """The glyph for a toolbar command: the vendored SVG, or a tile with its initial.
 
-    if kind == VIDEO:
-        painter.drawPolygon(
-            QPolygonF(
-                [
-                    QPointF(0.36 * side, 0.28 * side),
-                    QPointF(0.36 * side, 0.72 * side),
-                    QPointF(0.74 * side, 0.50 * side),
-                ]
-            )
-        )
-        return
-
-    if kind == AUDIO:
-        painter.drawEllipse(QPointF(0.44 * side, 0.68 * side), 0.10 * side, 0.085 * side)
-        painter.setPen(QPen(colour, 0.055 * side))
-        painter.drawLine(QPointF(0.53 * side, 0.68 * side), QPointF(0.53 * side, 0.28 * side))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawPolygon(
-            QPolygonF(
-                [
-                    QPointF(0.53 * side, 0.28 * side),
-                    QPointF(0.74 * side, 0.35 * side),
-                    QPointF(0.74 * side, 0.45 * side),
-                    QPointF(0.53 * side, 0.38 * side),
-                ]
-            )
-        )
-        return
-
-    _draw_text(painter, "?", side, 0.5)
+    A missing file is not an error: the button stays clickable and its tooltip still
+    names the command, so a half-filled icon set is still usable.
+    """
+    colour = _palette_colour()
+    pixmap = _tinted(command, size, colour.name(), _ratio())
+    if pixmap is None:
+        return _tile(command[:1].upper(), size, colour, _NEUTRAL)
+    return QIcon(pixmap)
 
 
-def _render_kind(kind: str, side: int) -> QPixmap:
-    """A file tile with the kind's figure in it."""
-    colour = QColor(_COLOURS.get(kind, _COLOURS[UNKNOWN]))
-    pixmap = QPixmap(side, side)
-    pixmap.fill(Qt.GlobalColor.transparent)
-
-    painter = QPainter(pixmap)
-    try:
-        _frame(painter, side, colour)
-        _draw_glyph(painter, kind, float(side), colour)
-    finally:
-        painter.end()
-    return pixmap
+def placeholder(kind: str, size: int) -> QIcon:
+    """The tile for a file kind. A kind without one gets the neutral tile."""
+    letter, background = _TILES.get(kind, _TILES[UNKNOWN])
+    return _tile(letter, size, _palette_colour(), background)
 
 
-def _render_glyph(text: str, colour: str, side: int) -> QPixmap:
-    """A toolbar tile with a short text glyph in it."""
-    tint = QColor(colour)
-    pixmap = QPixmap(side, side)
-    pixmap.fill(Qt.GlobalColor.transparent)
-
-    painter = QPainter(pixmap)
-    try:
-        _frame(painter, side, tint)
-        _draw_text(painter, text, float(side), 0.40)
-    finally:
-        painter.end()
-    return pixmap
+def placeholder_for(file_type: Optional[FileType], size: int) -> QIcon:
+    """placeholder(), for a FileType or for nothing at all."""
+    return placeholder(getattr(file_type, "name", UNKNOWN), size)
 
 
-# ---------- public ----------
-
-
-def _cached(key: str, side: int, paint: Callable[[], QPixmap]) -> QIcon:
-    """Build once per (key, size). The key carries the colour, so a theme change
-    re-renders instead of serving a stale tint."""
-    cache_key = (key, int(side))
-    icon = _CACHE.get(cache_key)
-    if icon is None:
-        icon = QIcon(paint())
-        _CACHE[cache_key] = icon
-    return icon
-
-
-def placeholder(kind: str, side: int) -> QIcon:
-    """Icon for a file with no thumbnail: the set's kind icon, else a drawn tile."""
-    return _cached(f"kind:{kind}", side, lambda: _kind_pixmap(kind, side))
-
-
-def _kind_pixmap(kind: str, side: int) -> QPixmap:
-    rendered = _render_svg(ICON_DIR / f"{kind}{ICON_SUFFIX}", side, _theme_colour())
-    if rendered is not None:
-        return rendered
-    return _render_kind(kind, side)
-
-
-def placeholder_for(file_type: Optional[FileType], side: int) -> QIcon:
-    """Placeholder for a file type: what the grid shows before a decode lands."""
-    return placeholder(kind_for(file_type), side)
-
-
-def command_icon(command: str, side: int) -> QIcon:
-    """Toolbar icon for a command: the vendored SVG, else a drawn two-letter tile."""
-    return _cached(
-        f"cmd:{command}:{_theme_colour()}", side, lambda: _command_pixmap(command, side)
-    )
-
-
-def _command_pixmap(command: str, side: int) -> QPixmap:
-    rendered = _render_svg(
-        ICON_DIR / f"{command}{ICON_SUFFIX}", side, _theme_colour()
-    )
-    if rendered is not None:
-        return rendered
-    glyph, colour = _COMMAND_GLYPHS.get(command, (command[:2].upper(), _COLOURS[UNKNOWN]))
-    return _render_glyph(glyph, colour, side)
+def clear_cache() -> None:
+    """Drop the rendered glyphs. Tests need this after switching the palette."""
+    _tinted.cache_clear()
