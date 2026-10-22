@@ -15,9 +15,10 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QDir, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QDir, QModelIndex, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QDialog,
     QFileSystemModel,
@@ -247,17 +248,19 @@ class TagTree(QTreeWidget):
 
 
 class RealFsPanel(QTreeView):
-    """The real filesystem: where a folder to scan is picked.
+    """The whole real filesystem, from its top: drives on Windows, "/" on Unix.
 
     Qt's own model, so nothing here needs a database connection or a pool thread.
-    The root is remembered by hand: the Up action has to know where it is.
+    The view is rooted at the model's own root - an invalid QModelIndex - which is
+    the drive list on Windows and "/" on Unix, so one tree covers every drive
+    instead of one folder. Navigation reveals a path inside that tree instead of
+    re-rooting it, which is what makes the panel show the filesystem, not a folder.
     """
 
     path_activated = Signal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._root = Path.home()
         self._model = QFileSystemModel(self)
         self._model.setFilter(
             QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot
@@ -271,24 +274,57 @@ class RealFsPanel(QTreeView):
         for column in (1, 2, 3):  # size, type, date - the name column is enough
             self.hideColumn(column)
         self.doubleClicked.connect(self._on_double)
+        self.show_filesystem()
 
-    def set_root(self, path: Path) -> None:
-        """Point the panel at `path` and remember it."""
-        self._root = Path(path)
-        self.setRootIndex(self._model.setRootPath(str(path)))
+    def show_filesystem(self) -> None:
+        """Show the top of the filesystem and drop the selection.
 
-    def root_path(self) -> Path:
-        """Where the panel is rooted right now."""
-        return self._root
+        setRootPath("") returns an invalid index - the model's own root - and it is
+        also what flips the flag canFetchMore() and fetchMore() need before they
+        populate anything at all.
+        """
+        self._model.setRootPath("")
+        self.setRootIndex(QModelIndex())
+        self.setCurrentIndex(QModelIndex())
 
-    def current_path(self) -> Optional[Path]:
-        index = self.currentIndex()
+    def reveal(self, path: Path) -> bool:
+        """Show `path`: expand its ancestors, select it and scroll it into view.
+
+        Deliberately not index(path): that one fetches with fetch=false and hands
+        back an invalid index for a folder that is cached but filtered out - a
+        hidden one such as AppData - while setRootPath() re-lists it as visible.
+        """
+        index = self._model.setRootPath(str(Path(path)))
+        if not index.isValid():
+            return False
+        self._expand_ancestors(index)
+        self.setCurrentIndex(index)
+        self.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
+        return True
+
+    def _expand_ancestors(self, index: QModelIndex) -> None:
+        """Expand every row above `index`, top down, so it is on screen."""
+        chain: List[QModelIndex] = []
+        parent = index.parent()
+        while parent.isValid():
+            chain.append(parent)
+            parent = parent.parent()
+        for parent in reversed(chain):
+            self.expand(parent)
+
+    def path_of(self, index: QModelIndex) -> Optional[Path]:
+        """The real path behind a row, or None for the invalid top index."""
         if not index.isValid():
             return None
         return Path(self._model.filePath(index))
 
-    def _on_double(self, index) -> None:
-        self.path_activated.emit(self._model.filePath(index))
+    def current_path(self) -> Optional[Path]:
+        return self.path_of(self.currentIndex())
+
+    def _on_double(self, index: QModelIndex) -> None:
+        path = self.path_of(index)
+        if path is not None:
+            self.path_activated.emit(str(path))
 
 
 class MainWindow(QMainWindow):
@@ -357,7 +393,9 @@ class MainWindow(QMainWindow):
 
         self.fs = RealFsPanel(self)
         self.fs.path_activated.connect(self._on_real_activated)
-        self.fs.set_root(self._db_path.parent)
+        # reveal, not set_root: the panel is rooted at the filesystem top for good,
+        # so the database folder is a row to walk to, not a new root
+        self.fs.reveal(self._db_path.parent)
 
         left = QSplitter(Qt.Orientation.Vertical, self)
         tags_box = QGroupBox(_("Virtual FS (Tags)"), self)
@@ -913,19 +951,25 @@ class MainWindow(QMainWindow):
             logger.warning("exit %s: %s", done.returncode, (done.stderr or "").strip())
 
     def _go_home(self) -> None:
-        """Point the real-FS panel at the home directory."""
+        """Reveal the home directory inside the tree."""
         home = Path.home()
-        self.fs.set_root(home)
-        self._status_label.setText(_("Path: {path}").format(path=home))
+        if self.fs.reveal(home):
+            self._status_label.setText(_("Path: {path}").format(path=home))
+            return
+        self._status_label.setText(_("Cannot open {path}").format(path=home))
 
     def _go_up(self) -> None:
-        """One level up. At a drive root there is nowhere up, so pick a drive."""
-        root = self.fs.root_path()
-        parent = root.parent
-        if parent == root:
-            self._select_drive()
+        """Reveal the parent of the selection.
+
+        At the top of a drive pathlib hands back the drive itself, so there is no
+        parent left to reveal - the filesystem top, the drive list, is the answer.
+        """
+        current = self.fs.current_path() or Path.home()
+        parent = current.parent
+        if parent == current or not self.fs.reveal(parent):
+            self.fs.show_filesystem()
+            self._status_label.setText(_("Filesystem root"))
             return
-        self.fs.set_root(parent)
         self._status_label.setText(_("Path: {path}").format(path=parent))
 
     def _sort(self) -> None:
@@ -949,7 +993,7 @@ class MainWindow(QMainWindow):
         )
 
     def _select_drive(self) -> None:
-        """Pick a drive. Windows only - the TUI says the same."""
+        """Pick a drive and reveal it. Redundant now - kept for Alt+D until removed."""
         if sys.platform != "win32":
             self._status_label.setText(_("Drive selection only available on Windows"))
             return
@@ -962,8 +1006,8 @@ class MainWindow(QMainWindow):
         )
         if not accepted or not chosen:
             return
-        self.fs.set_root(Path(chosen))
-        self._status_label.setText(_("Switched to {drive}").format(drive=chosen))
+        if self.fs.reveal(Path(chosen)):
+            self._status_label.setText(_("Switched to {drive}").format(drive=chosen))
 
     def _help(self) -> None:
         """Every command with its key: the TUI's footer, as a dialog."""
