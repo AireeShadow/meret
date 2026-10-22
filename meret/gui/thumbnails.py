@@ -31,16 +31,19 @@ def cache_dir() -> Path:
 class ThumbnailCache:
     """Disk-backed thumbnails. Safe to call from any thread."""
 
-    def __init__(self, size: Optional[int] = None) -> None:
+    def __init__(self, size: Optional[int] = None, scope: str = "") -> None:
         self.size = min(int(size or get_config().get("gui.thumbnail_size", 256)), MAX_SIZE)
         self._dir = cache_dir()
+        # The cache dir is shared by every database, and a file id is only unique
+        # inside one of them: the scope belongs in the key
+        self._scope = hashlib.sha1(str(scope).encode("utf-8")).hexdigest()[:12]
 
     def _target(self, file_id: int, mtime: float, side: int) -> Path:
-        """Key on the file's identity plus its fingerprint.
+        """Key on the database, the file's identity and its fingerprint.
 
         Editing a file moves its mtime, so a stale thumbnail cannot survive.
         """
-        raw = f"{file_id}:{side}:{mtime:.6f}"
+        raw = f"{self._scope}:{file_id}:{side}:{mtime:.6f}"
         return self._dir / f"{hashlib.sha1(raw.encode('utf-8')).hexdigest()}.png"
 
     def load(

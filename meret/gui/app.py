@@ -87,6 +87,7 @@ class TagTree(QTreeWidget):
 
     tag_selected = Signal(str)
     FILLED = Qt.ItemDataRole.UserRole + 10
+    ROLE_TAG_ID = Qt.ItemDataRole.UserRole + 11
 
     def __init__(self, tree: VirtualTree, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -106,8 +107,9 @@ class TagTree(QTreeWidget):
                 continue
             item = QTreeWidgetItem([node.name])
             item.setData(0, Qt.ItemDataRole.UserRole, node.vpath)
+            item.setData(0, self.ROLE_TAG_ID, node.tag_id)
             parent.addChild(item)
-            item.addChild(QTreeWidgetItem([""]))  # lazy-expansion placeholder
+            item.addChild(QTreeWidgetItem([""]))
 
     def _on_expanded(self, item: QTreeWidgetItem) -> None:
         if item.data(0, self.FILLED):
@@ -177,6 +179,7 @@ class MainWindow(QMainWindow):
         self._selection: set[str] = set()
         self._vpath = "/"
         self._version: Optional[int] = None
+        self._preview_token = 0
 
         # Widgets next
         self._build_ui()
@@ -410,13 +413,23 @@ class MainWindow(QMainWindow):
     def _delete_tag(self) -> None:
         """Delete the tag selected in the tree. Its children move up one level."""
         item = self.tags.currentItem()
-        path = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
-        if not path or path == "/":
+        if item is None or item.data(0, Qt.ItemDataRole.UserRole) == "/":
             self._status_label.setText(_("Select a tag folder in the virtual panel first"))
             return
 
-        self._repo.delete_tag(path.lstrip("/"))
-        self._status_label.setText(_("Deleted tag {path}").format(path=path))
+        # The tree shows sanitized names; the repository needs the raw tag path
+        tag_id = item.data(0, TagTree.ROLE_TAG_ID)
+        by_id = {tag.id: tag for tag in self._repo.get_all_tags()}
+        tag = by_id.get(tag_id)
+        if tag is None:
+            self._status_label.setText(_("No such path: {path}").format(path=item.text(0)))
+            return
+
+        path = tagpaths.path_of(tag, by_id)
+        if not self._repo.delete_tag(path):
+            self._status_label.setText(_("No such path: {path}").format(path=path))
+            return
+        self._status_label.setText(_("Deleted tag {path}").format(path="/" + path))
         self._refresh()
 
     def _scan(self) -> None:
@@ -455,6 +468,11 @@ class MainWindow(QMainWindow):
         }
         self._update_status()
 
+        # Two selections share the folder's generation, so a slow decode could
+        # overwrite a newer preview: every request takes its own token instead
+        self._preview_token += 1
+        token = self._preview_token
+
         if not selected:
             self.preview.setPixmap(QPixmap())
             self.preview.setText(_("Nothing selected"))
@@ -469,7 +487,9 @@ class MainWindow(QMainWindow):
 
         self._tasks.run(
             self._thumbs.load,
-            on_done=lambda image: self._set_preview(image, item.text()),
+            on_done=lambda image, token=token, name=item.text(): self._set_preview(
+                image, name, token
+            ),
             args=(Path(source),),
             kwargs={
                 "file_id": item.data(self.ROLE_FILE_ID),
@@ -477,6 +497,15 @@ class MainWindow(QMainWindow):
                 "size": PREVIEW,
             },
         )
+
+    def _set_preview(self, image, name: str, token: int) -> None:
+        if token != self._preview_token:
+            return  # a newer selection has already painted
+        if image is None or image.isNull():
+            self.preview.setPixmap(QPixmap())
+            self.preview.setText(name)
+            return
+        self.preview.setPixmap(QPixmap.fromImage(image))
 
     def _set_preview(self, image, name: str) -> None:
         if image is None or image.isNull():
