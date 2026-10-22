@@ -34,11 +34,7 @@ SHORTCUTS: Dict[str, str] = {
     "tag": "Ctrl+T",
     "untag": "Ctrl+Shift+T",
     "delete": "Ctrl+D",
-    "open_file": "Ctrl+O",
-    "home": "Alt+Home",
-    "up": "Alt+Up",
     "sort_files": "Alt+S",
-    "select_drive": "Alt+D",
     "init_db": "Ctrl+I",
     "config": "Ctrl+,",
     "stats": "Alt+I",
@@ -53,7 +49,12 @@ SHORTCUTS: Dict[str, str] = {
 
 
 def command_table() -> List[Tuple[str, str]]:
-    """(command, description) — the TUI's bindings and palette, verbatim."""
+    """(command, description) - the TUI's bindings and palette, verbatim.
+
+    Minus home / up / select_drive / open_file: the real-FS panel is one tree from
+    the filesystem top, and a file opens on a double click, so the GUI has nothing
+    left to navigate to and nothing left to hand over to the system.
+    """
     return [
         ("refresh", _("Refresh")),
         ("scan", _("Scan directory for media")),
@@ -61,11 +62,7 @@ def command_table() -> List[Tuple[str, str]]:
         ("tag", _("Tag selected file")),
         ("untag", _("Remove tag from file")),
         ("delete", _("Delete tag")),
-        ("open_file", _("Open file")),
-        ("home", _("Go to home directory")),
-        ("up", _("Go to parent directory")),
         ("sort_files", _("Cycle sort: name / size / date")),
-        ("select_drive", _("Select drive")),
         ("init_db", _("Initialize new database")),
         ("config", _("Edit configuration")),
         ("stats", _("Show database statistics")),

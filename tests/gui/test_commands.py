@@ -11,16 +11,49 @@ PALETTE_ALIASES = {"init": "init_db"}
 
 
 def test_command_table_covers_the_whole_tui():
-    """Every TUI binding, every palette entry, plus untag - and nothing else."""
-    from meret.cli.tui import CommandPalette as TuiPalette
-    from meret.cli.tui import MeretApp
+    """The TUI's whole surface, minus what the whole-filesystem tree replaced.
+
+    home / up / select_drive moved into the panel: it already shows every drive
+    and every folder, so there is nothing left for the GUI to navigate to.
+    """
+    from meret.cli.tui import CommandPalette, MeretApp
     from meret.gui.commands import command_table
 
-    expected = {binding.action for binding in MeretApp.BINDINGS}
-    expected |= {PALETTE_ALIASES.get(name, name) for name, _ in TuiPalette().commands}
-    expected |= {"untag"}  # in the TUI palette, wired up only in the GUI
+    def name_of(binding) -> str:
+        """The action name of a binding, however the TUI declares it.
 
-    assert {command for command, _ in command_table()} == expected
+        Textual takes tuples and Binding objects, so a bare `for name in BINDINGS`
+        would compare tuples against command names and always fail.
+        """
+        if isinstance(binding, str):
+            return binding
+        if isinstance(binding, tuple):
+            return binding[1]
+        return binding.action
+
+    def command_name(row) -> str:
+        """The command out of a (command, description) row, or the row itself."""
+        return row[0] if isinstance(row, tuple) else row
+
+    def palette_entries() -> list:
+        """The palette's rows.
+
+        The class attribute is tried first, so nothing is instantiated without a
+        running app - a Textual screen built outside one leaves unawaited watchers.
+        """
+        entries = getattr(CommandPalette, "commands", None)
+        if entries is None or isinstance(entries, property):
+            entries = CommandPalette().commands
+        entries = entries() if callable(entries) else entries
+        return list(entries)
+
+    dropped = {"home", "up", "select_drive", "open_file"}
+    bindings = {PALETTE_ALIASES.get(name_of(b), name_of(b)) for b in MeretApp.BINDINGS}
+    palette = {PALETTE_ALIASES.get(command_name(r), command_name(r)) for r in palette_entries()}
+
+    assert {command for command, _ in command_table()} == (
+        bindings | palette | {"untag"}
+    ) - dropped
 
 
 def test_shared_descriptions_are_the_tui_ones():

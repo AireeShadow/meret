@@ -76,11 +76,7 @@ TOOLBAR: tuple = (
     "untag",
     "delete",
     None,
-    "open_file",
-    "home",
-    "up",
     "sort_files",
-    "select_drive",
     None,
     "init_db",
     "config",
@@ -98,7 +94,7 @@ TOOLBAR: tuple = (
 )
 
 #: The help dialog groups these under Navigation, as the TUI's help does.
-NAVIGATION_COMMANDS = ("home", "up", "sort_files", "select_drive", "open_file")
+NAVIGATION_COMMANDS = ("sort_files",)
 
 _DARK_PALETTE = {
     "Window": "#1e1f22",
@@ -497,11 +493,7 @@ class MainWindow(QMainWindow):
             "tag": self._tag_selected,
             "untag": self._untag_selected,
             "delete": self._delete_tag,
-            "open_file": self._open_selected,
-            "home": self._go_home,
-            "up": self._go_up,
             "sort_files": self._sort,
-            "select_drive": self._select_drive,
             "init_db": self._init_db,
             "config": self._edit_config,
             "stats": self._stats,
@@ -950,28 +942,6 @@ class MainWindow(QMainWindow):
         if done.returncode != 0:
             logger.warning("exit %s: %s", done.returncode, (done.stderr or "").strip())
 
-    def _go_home(self) -> None:
-        """Reveal the home directory inside the tree."""
-        home = Path.home()
-        if self.fs.reveal(home):
-            self._status_label.setText(_("Path: {path}").format(path=home))
-            return
-        self._status_label.setText(_("Cannot open {path}").format(path=home))
-
-    def _go_up(self) -> None:
-        """Reveal the parent of the selection.
-
-        At the top of a drive pathlib hands back the drive itself, so there is no
-        parent left to reveal - the filesystem top, the drive list, is the answer.
-        """
-        current = self.fs.current_path() or Path.home()
-        parent = current.parent
-        if parent == current or not self.fs.reveal(parent):
-            self.fs.show_filesystem()
-            self._status_label.setText(_("Filesystem root"))
-            return
-        self._status_label.setText(_("Path: {path}").format(path=parent))
-
     def _sort(self) -> None:
         """Cycle the real-FS panel sorting: name, then size, then date.
 
@@ -991,23 +961,6 @@ class MainWindow(QMainWindow):
         self._status_label.setText(
             _("Sort by: {mode}").format(mode=modes[self._sort_index])
         )
-
-    def _select_drive(self) -> None:
-        """Pick a drive and reveal it. Redundant now - kept for Alt+D until removed."""
-        if sys.platform != "win32":
-            self._status_label.setText(_("Drive selection only available on Windows"))
-            return
-
-        drives = [info.absoluteFilePath() for info in QDir.drives()]
-        if not drives:
-            return
-        chosen, accepted = QInputDialog.getItem(
-            self, _("Select drive"), _("Select Drive:"), drives, 0, False
-        )
-        if not accepted or not chosen:
-            return
-        if self.fs.reveal(Path(chosen)):
-            self._status_label.setText(_("Switched to {drive}").format(drive=chosen))
 
     def _help(self) -> None:
         """Every command with its key: the TUI's footer, as a dialog."""

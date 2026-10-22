@@ -77,18 +77,28 @@ def test_the_window_reveals_the_database_folder_on_start(window):
     assert pump_until(lambda: window.fs.current_path() == window._db_path.parent)
 
 
-def test_up_walks_to_the_parent(window, tmp_path):
-    assert window.fs.reveal(tmp_path)
+def test_revealing_the_parent_walks_up_one_level(window, tmp_path):
+    """Up is gone as a command: the panel walks by revealing, not by re-rooting."""
+    deep = tmp_path / "a" / "b"
+    deep.mkdir(parents=True)
+    assert window.fs.reveal(deep)
+    assert pump_until(lambda: window.fs.current_path() == deep)
 
-    window._go_up()
+    assert window.fs.reveal(deep.parent)
 
-    assert window.fs.current_path() == tmp_path.parent
+    assert pump_until(lambda: window.fs.current_path() == tmp_path / "a")
 
 
-def test_up_at_the_filesystem_top_shows_the_top(window, tmp_path):
-    assert window.fs.reveal(Path(tmp_path.anchor))
+def test_the_top_of_a_drive_is_where_walking_up_stops(window, tmp_path):
+    """pathlib hands back the drive itself, so the drive list is the last stop."""
+    top = Path(tmp_path.anchor)
+    assert window.fs.reveal(top)
+    assert pump_until(lambda: window.fs.current_path() == top)
 
-    window._go_up()
+    current = window.fs.current_path()
+    assert current.parent == current
+
+    window.fs.show_filesystem()
 
     assert not window.fs.rootIndex().isValid()
     assert pump_until(lambda: _top_count(window.fs) > 0)
