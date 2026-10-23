@@ -9,9 +9,12 @@ Mounting and unmounting shell out to `meret mount` / `meret umount` instead of
 importing a backend, so opening a window never drags FUSE or WinFsp in.
 """
 
+import gc
 import logging
+import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -21,6 +24,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QDialog,
+    QFileDialog,
     QFileSystemModel,
     QGroupBox,
     QInputDialog,
@@ -185,6 +189,16 @@ class TagTree(QTreeWidget):
         self.setHeaderHidden(True)
         self.itemExpanded.connect(self._on_expanded)
         self.currentItemChanged.connect(self._on_current)
+
+    def set_tree(self, tree: Optional[VirtualTree]) -> None:
+        """Point the panel at another database's tree, or at nothing for a moment.
+
+        None is not a detail: the old tree holds the old repository, and a database
+        file cannot be deleted while a connection to it is still open.
+        """
+        self._tree = tree
+        if tree is not None:
+            self.reload()
 
     def reload(self) -> None:
         """Rebuild from the root. Anything in flight for the old rows is dropped."""
@@ -874,12 +888,145 @@ class MainWindow(QMainWindow):
             self._open_external(selected[0])
 
     def _init_db(self) -> None:
-        """The window's repository is the database: make sure it is on disk."""
+        """Create the database - or ask what to do when one is already here.
+
+        Doing nothing was the bug: the user clicks, the file exists, and no window,
+        no message, nothing at all.
+        """
         if not self._db_path.exists():
-            SQLiteRepository(str(self._db_path))
+            self._use_db(self._db_path)
+            self._status_label.setText(_("Database initialized!"))
+            return
+
+        box = QMessageBox(self)
+        box.setWindowTitle(_("Initialize new database"))
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText(_("A database already exists here:"))
+        box.setInformativeText(str(self._db_path))
+        here = box.addButton(_("Recreate here"), QMessageBox.ButtonRole.AcceptRole)
+        elsewhere = box.addButton(
+            _("Choose a folder..."), QMessageBox.ButtonRole.ActionRole
+        )
+        cancel = box.addButton(_("Cancel"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(here)
+        box.setEscapeButton(cancel)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is here:
+            self._use_db(self._db_path, fresh=True)
+            self._status_label.setText(_("Database recreated!"))
+        elif clicked is elsewhere:
+            self._create_elsewhere()
+
+    def _use_db(self, path: Path, fresh: bool = False) -> None:
+        """Point the whole window at another database, empty when `fresh`.
+
+        Nothing is set to None on the way: a task in flight can call back at any
+        moment, and it reads self._repo and self._tree.
+        """
+        path = Path(path)
+        if fresh:
+            self._wipe(self._repo, path)
+
+        self._repo = self._open_db(path)
+        self._db_path = path
+        self._tree = VirtualTree(self._repo)
+        self._thumbs = ThumbnailCache(size=self._thumbs.size, scope=str(self._db_path))
+
+        self.tags.set_tree(self._tree)
         self._version = None
-        self._refresh()
-        self._status_label.setText(_("Database initialized!"))
+        self.open_folder("/")
+        self._show_preview()
+
+    def _open_db(self, path: Path):
+        """Open a repository, waiting out a lock left by a task in flight.
+
+        A scan writes while it runs, so its connection can hold the file for a moment.
+        Connections are opened per operation, so the wait is short and the retry is
+        only a safety net.
+        """
+        for _attempt in range(10):
+            try:
+                return SQLiteRepository(str(path))
+            except sqlite3.OperationalError as error:
+                if "locked" not in str(error) and "busy" not in str(error):
+                    raise
+                gc.collect()
+                time.sleep(0.05)
+        return SQLiteRepository(str(path))
+
+    def _wipe(self, old, path: Path) -> None:
+        """Empty the database through SQL, leaving its file alone.
+
+        Deleting the file would leave a brand-new database in `delete` journal mode,
+        and switching that to WAL wants an exclusive lock that PRAGMA journal_mode
+        does not wait for - that was the `database is locked`. Dropping the objects
+        keeps the file, and its WAL mode, exactly where they are, and the schema is
+        rebuilt by the repository itself.
+        """
+        closer = getattr(old, "close", None)
+        if closer is not None:
+            closer()
+
+        for _attempt in range(10):
+            try:
+                self._drop_objects(path)
+                return
+            except sqlite3.OperationalError as error:
+                if "locked" not in str(error) and "busy" not in str(error):
+                    raise
+                gc.collect()
+                time.sleep(0.05)
+        self._drop_objects(path)
+
+    @staticmethod
+    def _drop_objects(path: Path) -> None:
+        """Drop every table and view, creating the file when it is not there yet.
+
+        One connection of our own, closed on the way out: the repository opens its
+        own per operation, and a handle left behind is one more lock to wait for.
+        """
+        conn = sqlite3.connect(str(path))
+        try:
+            # Off first: with it on, the drops would depend on the reference order
+            conn.execute("PRAGMA foreign_keys = OFF")
+            rows = list(
+                conn.execute(
+                    "SELECT type, name FROM sqlite_master"
+                    " WHERE type IN ('view', 'table') AND name NOT LIKE 'sqlite_%'"
+                    " ORDER BY type = 'table'"  # views first, their tables after
+                )
+            )
+            for kind, name in rows:
+                conn.execute(f'DROP {kind.upper()} IF EXISTS "{name}"')
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _create_elsewhere(self) -> None:
+        """Pick a folder, put a fresh database in it, and work on that one."""
+        folder = QFileDialog.getExistingDirectory(
+            self, _("Choose a folder for the database"), str(self._db_path.parent)
+        )
+        if not folder:
+            return
+        target = Path(folder) / self._db_path.name
+        if target.exists() and not self._confirm_overwrite(target):
+            return
+        self._use_db(target, fresh=True)
+        self._status_label.setText(_("Database: {path}").format(path=target))
+
+    def _confirm_overwrite(self, target: Path) -> bool:
+        """Yes/no for a database that already sits in the chosen folder."""
+        answer = QMessageBox.question(
+            self,
+            _("Initialize new database"),
+            _("A database already exists there:\n{path}\n\nRecreate it?").format(
+                path=target
+            ),
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def _edit_config(self) -> None:
         """Open the config file in the system's editor, creating it if needed."""

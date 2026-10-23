@@ -225,3 +225,109 @@ def test_a_menu_entry_is_the_very_same_action_as_the_toolbar(menu_window):
     in_toolbar = {a for a in menu_window.toolbar.actions() if not a.isSeparator()}
 
     assert set(_menu_entries(menu_window)) == in_toolbar
+
+def _answer(monkeypatch, role):
+    """Make the next QMessageBox answer as if the button with `role` was clicked.
+
+    Roles, not labels: the tests must not care whether a catalog is loaded.
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: 0)
+    monkeypatch.setattr(
+        QMessageBox,
+        "clickedButton",
+        lambda box: next((b for b in box.buttons() if box.buttonRole(b) == role), None),
+    )
+
+
+def test_init_db_creates_the_database_when_it_is_missing(tmp_path, qapp, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from meret.core.sqlite_repo import SQLiteRepository
+    from meret.gui.app import MainWindow
+
+    asked = []
+    monkeypatch.setattr(QMessageBox, "exec", lambda box: asked.append(box) or 0)
+    # The repository lives in another file, so _db_path is the missing one
+    window = MainWindow(SQLiteRepository(str(tmp_path / "other.db")), tmp_path / "meret.db")
+    qtbot.addWidget(window)
+
+    window._init_db()
+
+    assert asked == []  # nothing to ask about
+    assert window._db_path.is_file()
+
+
+def test_init_db_recreates_the_database_here(tmp_path, qapp, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from meret.core.models import FileEntry, FileType
+    from meret.core.sqlite_repo import SQLiteRepository
+    from meret.gui.app import MainWindow
+
+    db = tmp_path / "meret.db"
+    window = MainWindow(SQLiteRepository(str(db)), db)
+    qtbot.addWidget(window)
+    file_id = window._repo.save_file(
+        FileEntry(filename="a.png", filepath=str(tmp_path / "a.png"), type=FileType.IMAGE)
+    )
+    window._repo.add_tag(file_id, "travel")
+    assert window._repo.get_all_tags()
+
+    _answer(monkeypatch, QMessageBox.ButtonRole.AcceptRole)
+    window._init_db()
+
+    assert window._db_path == db
+    assert window._repo.get_all_tags() == []  # wiped, not merged
+
+
+def test_init_db_can_put_the_database_in_another_folder(tmp_path, qapp, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+    from meret.core.models import FileEntry, FileType
+    from meret.core.sqlite_repo import SQLiteRepository
+    from meret.gui.app import MainWindow
+
+    db = tmp_path / "meret.db"
+    window = MainWindow(SQLiteRepository(str(db)), db)
+    qtbot.addWidget(window)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    _answer(monkeypatch, QMessageBox.ButtonRole.ActionRole)
+    monkeypatch.setattr(
+        QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: str(elsewhere))
+    )
+    window._init_db()
+
+    assert window._db_path == elsewhere / "meret.db"
+    assert window._db_path.is_file()
+    # and the window works on the new file, not on the old one
+    file_id = window._repo.save_file(
+        FileEntry(filename="b.png", filepath=str(tmp_path / "b.png"), type=FileType.IMAGE)
+    )
+    window._repo.add_tag(file_id, "here")
+    assert len(window._repo.get_all_tags()) == 1
+
+
+def test_init_db_cancel_leaves_everything_alone(tmp_path, qapp, qtbot, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from meret.core.models import FileEntry, FileType
+    from meret.core.sqlite_repo import SQLiteRepository
+    from meret.gui.app import MainWindow
+
+    db = tmp_path / "meret.db"
+    window = MainWindow(SQLiteRepository(str(db)), db)
+    qtbot.addWidget(window)
+    file_id = window._repo.save_file(
+        FileEntry(filename="a.png", filepath=str(tmp_path / "a.png"), type=FileType.IMAGE)
+    )
+    window._repo.add_tag(file_id, "travel")
+
+    _answer(monkeypatch, QMessageBox.ButtonRole.RejectRole)
+    window._init_db()
+
+    assert window._db_path == db
+    assert len(window._repo.get_all_tags()) == 1  # untouched

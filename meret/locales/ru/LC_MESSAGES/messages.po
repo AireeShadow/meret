@@ -763,3 +763,24 @@ msgstr "Правка"
 
 msgid "View"
 msgstr "Вид"
+
+msgid "Recreate here"
+msgstr "Пересоздать здесь"
+
+msgid "Choose a folder..."
+msgstr "Выбрать папку..."
+
+msgid "A database already exists here:"
+msgstr "База данных уже есть здесь:"
+
+msgid "Choose a folder for the database"
+msgstr "Выберите папку для базы данных"
+
+msgid "A database already exists there:\n{path}\n\nRecreate it?"
+msgstr "Там уже есть база данных:\n{path}\n\nПересоздать её?"
+
+msgid "Database recreated!"
+msgstr "База данных пересоздана!"
+
+msgid "Database: {path}"
+msgstr "База данных: {path}"
