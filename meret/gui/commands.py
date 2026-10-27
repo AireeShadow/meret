@@ -23,8 +23,8 @@ from meret.core.locale import _
 
 logger = logging.getLogger(__name__)
 
-##: Qt keys, the counterpart of the TUI's bindings. A command without one would be
-#: reachable only from the palette, and the TUI binds every action.
+# Qt keys, the counterpart of the TUI's bindings: the TUI binds every action, so a
+# command without a key here would be reachable from the palette alone.
 SHORTCUTS: dict[str, str] = {
     "refresh": "F5",
     "scan": "F6",
@@ -118,8 +118,9 @@ def matches(query: str) -> list[str]:
         for command, description in command_table()
         if query in command or query in description.lower()
     ]
-    return sorted(hits, key=lambda command: (command != query, not command.startswith(query)))
-
+    return sorted(
+        hits, key=lambda command: (command != query, not command.startswith(query))
+    )
 
 def _column_widths() -> tuple[int, int]:
     """Palette column widths, taken from the data instead of hardcoded.

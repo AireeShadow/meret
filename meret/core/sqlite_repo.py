@@ -208,10 +208,13 @@ class SQLiteRepository(AbstractRepository):
     def _tags_from_row(row) -> list[str]:
         """Tag names of a row, empty when the query has no tag_names column.
 
-        sqlite3.Row is not a dict: it has no .get(), so SIM401's advice
-        (`row.get("tag_names", "")`) would raise AttributeError here.
+        `in` on a sqlite3.Row tests VALUES, not column names (cpython#100450), so
+        `"tag_names" in row` is False for any real listing and every file would come
+        back untagged. keys() is the honest question, and holding it in a local keeps
+        ruff's SIM118 and SIM401 from "simplifying" it back into the bug.
         """
-        raw = row["tag_names"] if "tag_names" in row else ""  # noqa: SIM401
+        columns = row.keys()
+        raw = row["tag_names"] if "tag_names" in columns else ""
         return raw.split(_TAG_SEP) if raw else []
 
     def _row_to_file(self, row) -> FileEntry:
