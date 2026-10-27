@@ -36,15 +36,24 @@ def pump(target: object | None = None, ms: int = 50) -> None:
     """Process pending Qt events for roughly ms milliseconds.
 
     Accepts both call styles used across the suite: pump(qapp) and pump(50).
+
+    processEvents() without a limit returns only once the queue is empty - and it
+    keeps processing whatever the handlers queue while it runs, so a single running
+    animation is enough to make it never return. The suite then looks hung and the
+    deadline is never even reached. The bounded overload returns on its own.
     """
     if isinstance(target, (int, float)):
         ms, target = int(target), None
     app = target if target is not None else (QApplication.instance() if HAS_QT else None)
     if app is None:
         return
+
+    from PySide6.QtCore import QEventLoop
+
+    flags = QEventLoop.ProcessEventsFlag.AllEvents
     deadline = time.monotonic() + ms / 1000.0
     while time.monotonic() < deadline:
-        app.processEvents()
+        app.processEvents(flags, 1)  # at most a millisecond per pass
         time.sleep(0.001)
 
 
@@ -57,6 +66,62 @@ def pump_until(predicate: Callable[[], bool], timeout_ms: int = 2000) -> bool:
         pump(10)
     return predicate()
 
+if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
+
+    from PySide6.QtCore import QObject
+
+    class EventTally(QObject):
+        """Counts every event the application delivers, by receiver and event type.
+
+        notify() does the same job in the app, but the suite runs on pytest-qt's own
+        QApplication: an application-wide event filter works with whatever is there.
+        A flood is what makes processEvents() never settle, so a test can assert on
+        it - and the report names the widget instead of leaving it to a guess.
+        """
+
+        def __init__(self, app: object) -> None:
+            super().__init__()
+            self._app = app
+            self._counts: dict[tuple, int] = {}
+            self._started = time.monotonic()
+            app.installEventFilter(self)
+
+        def eventFilter(self, receiver, event) -> bool:  # noqa: N802 - Qt's name
+            """Count every event and let it through untouched."""
+            pair = (type(receiver).__name__, type(event).__name__)
+            self._counts[pair] = self._counts.get(pair, 0) + 1
+            return False
+
+        def reset(self) -> None:
+            """Start a fresh window: the rate is measured from here."""
+            self._counts = {}
+            self._started = time.monotonic()
+
+        def rate(self) -> float:
+            """Events per second since the last reset."""
+            spent = max(time.monotonic() - self._started, 1e-6)
+            return sum(self._counts.values()) / spent
+
+        def report(self, top: int = 8) -> str:
+            """The rate and the busiest receivers, ready to print."""
+            busiest = sorted(self._counts.items(), key=lambda item: item[1], reverse=True)
+            lines = [f"[tally] {self.rate():.0f} events/s"]
+            lines += [
+                f"[tally]     {count:>8}  {name} in {receiver}"
+                for (receiver, name), count in busiest[:top]
+            ]
+            return "\n".join(lines)
+
+        def stop(self) -> None:
+            """Detach from the application."""
+            self._app.removeEventFilter(self)
+
+    @pytest.fixture
+    def tally(qapp: object) -> Iterator["EventTally"]:
+        """Counts every event while a test runs. For tests about event floods."""
+        counter = EventTally(qapp)
+        yield counter
+        counter.stop()
 
 @pytest.fixture(autouse=True)
 def quiet_dialogs(monkeypatch) -> None:

@@ -281,20 +281,18 @@ class RealFsPanel(QTreeView):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._root = ""
         self._model = QFileSystemModel(self)
         self._model.setFilter(
             QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot
         )
-        # The watcher is the freeze. QFileSystemModel watches every directory it has
+        # The watcher is the freeze: QFileSystemModel watches every directory it has
         # ever listed, and a change anywhere in one of them makes it re-read that
         # directory on the GUI thread with a stat per entry - 6.4 seconds in a single
-        # event, measured. The panel is rooted at the whole filesystem, so the
-        # watched set reaches C:\ and the user's profile, which Windows touches all
-        # the time: that is why the freeze came at random. Nothing here is urgent
-        # enough to pay for it, and refresh() re-reads on demand.
-        self._model.setOption(QFileSystemModel.Option.DontWatchForChanges, True)
-        self._model.setOption(QFileSystemModel.Option.DontResolveSymlinks, True)
+        # event, measured. MERET_WATCH_FS=1 skips both options and leaves the stock
+        # model, i.e. exactly what the panel did before the freeze was found.
+        if not os.environ.get("MERET_WATCH_FS"):
+            self._model.setOption(QFileSystemModel.Option.DontWatchForChanges, True)
+            self._model.setOption(QFileSystemModel.Option.DontResolveSymlinks, True)
         self.setModel(self._model)
         self.setHeaderHidden(True)
         # Rows are one line high and never wrap, so the view can skip asking every
@@ -308,15 +306,23 @@ class RealFsPanel(QTreeView):
             self.hideColumn(column)
         self.doubleClicked.connect(self._on_double)
         self.show_filesystem()
+        # Delayed on purpose: the drive list is read on the gatherer thread, and a
+        # drive that is missing and a drive that is slow look exactly the same.
+        # A singleShot outlives the panel, hence the guard in the slot.
+        QTimer.singleShot(500, self._report_top)
 
     def show_filesystem(self) -> None:
         """Show the top of the filesystem and drop the selection.
 
-        setRootPath("") returns an invalid index - the model's own root - and it is
-        also what flips the flag canFetchMore() and fetchMore() need before they
-        populate anything at all.
+        The empty root path is the model's own root - the drive list on Windows, "/"
+        elsewhere - and it is also what flips the flag canFetchMore() needs before it
+        populates anything at all.
+
+        One call only, deliberately: every setRootPath("") makes the model read the
+        drive list again, and each drive costs a volumeName() call on the GUI thread.
+        setRootPath() with the path it already has returns early, and the view does
+        the first fetch itself - which is enough here.
         """
-        self._root = ""
         self._model.setRootPath("")
         self.setRootIndex(QModelIndex())
         self.setCurrentIndex(QModelIndex())
@@ -327,31 +333,44 @@ class RealFsPanel(QTreeView):
         Deliberately not index(path): that one fetches with fetch=false and hands
         back an invalid index for a folder that is cached but filtered out - a
         hidden one such as AppData - while setRootPath() re-lists it as visible.
+
+        The model's own root goes back to empty on the way out. The drive list *is*
+        the root, so a model left rooted at the revealed folder shows that one drive
+        and hides the rest - which is what the panel was doing.
         """
-        self._root = str(Path(path))
-        index = self._model.setRootPath(self._root)
+        index = self._model.setRootPath(str(Path(path)))
         if not index.isValid():
+            self._model.setRootPath("")
             return False
         self._expand_ancestors(index)
         self.setCurrentIndex(index)
         self.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
+        self._model.setRootPath("")
         return True
 
     def refresh(self) -> None:
         """Re-read the panel from scratch.
 
         Nothing else does it now that the watcher is off, and setRootPath() with the
-        path it already has does not re-fetch - hence the step off the root and
-        back, which is a real change and therefore a real re-read.
+        path it already has returns early - hence the step off the root and back,
+        which is a real change and therefore a real re-read.
         """
-        self._model.setRootPath("")
-        if self._root:
-            self._model.setRootPath(self._root)
-            return
-        # The whole filesystem is the root: step through the home directory, so that
-        # even the empty root is a change twice over
         self._model.setRootPath(QDir.homePath())
         self._model.setRootPath("")
+
+    def _report_top(self) -> None:
+        """One line in the log: how many entries the panel is actually showing.
+
+        A singleShot outlives the widget it was started from, so the C++ object
+        behind self can already be gone by the time this runs - which is a failure
+        in whatever test happens to be pumping events at that moment, not here.
+        """
+        try:
+            logger.info(
+                "filesystem panel: %d entries at the top", self._model.rowCount()
+            )
+        except RuntimeError:
+            return
 
     def _expand_ancestors(self, index: QModelIndex) -> None:
         """Expand every row above `index`, top down, so it is on screen."""
@@ -599,7 +618,11 @@ class MainWindow(QMainWindow):
         """Re-read tags, the filesystem panel and the current view after any write."""
         self._tree.invalidate()
         self.tags.reload()
-        self.fs.refresh()  # the panel no longer notices changes by itself
+        # The panel no longer notices changes by itself, so it has to be told.
+        # getattr: a test may have swapped the panel for a stub without refresh().
+        refresh_panel = getattr(self.fs, "refresh", None)
+        if refresh_panel is not None:
+            refresh_panel()
         if self._search is not None:
             self._run_search(self._search)
             return
@@ -1108,8 +1131,11 @@ class MainWindow(QMainWindow):
 
         def to_front() -> None:
             """Re-ask for the foreground on the next turn of the loop."""
-            dialog.raise_()
-            dialog.activateWindow()
+            try:
+                dialog.raise_()
+                dialog.activateWindow()
+            except RuntimeError:
+                return  # already deleted: finished() ran and deleteLater() landed
 
         dialog.finished.connect(finished)
         self._poll.stop()  # no rebuilds underneath a modal window

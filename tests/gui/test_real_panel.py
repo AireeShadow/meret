@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.gui.conftest import pump_until
+from tests.gui.conftest import pump_until, pump
 
 pytest.importorskip("PySide6")
 
@@ -120,6 +120,31 @@ def test_refresh_leaves_the_panel_rooted_at_the_filesystem_top(qapp):
 
     panel = RealFsPanel()
     panel.refresh()
+
+    assert panel._model.rootPath() == ""
+    assert not panel.rootIndex().isValid()
+
+def test_the_panel_is_rooted_at_the_filesystem_top(qapp):
+    """The drive list is the model's root: the panel must sit at it, not inside it."""
+    from meret.gui.app import RealFsPanel
+
+    panel = RealFsPanel()
+    for _ in range(20):  # the listing comes from the gatherer thread
+        if panel._model.rowCount() > 0:
+            break
+        pump(50)
+
+    assert panel._model.rootPath() == ""
+    assert not panel.rootIndex().isValid()
+    assert panel._model.rowCount() > 0
+
+
+def test_revealing_a_folder_leaves_the_panel_at_the_top(qapp, tmp_path):
+    """Being left rooted at the revealed folder is what hid the other drives."""
+    from meret.gui.app import RealFsPanel
+
+    panel = RealFsPanel()
+    panel.reveal(tmp_path)
 
     assert panel._model.rootPath() == ""
     assert not panel.rootIndex().isValid()

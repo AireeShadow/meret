@@ -310,3 +310,32 @@ def test_switching_pages_back_and_forth_keeps_the_dialog_settled(config, qapp, q
         pump(qapp, ms=5)
         assert dialog.size() == size
         assert dialog.isVisible()
+
+def test_the_dialog_does_not_flood_the_event_loop(config, qapp, qtbot, tally):
+    """A storm is what makes processEvents() never settle - and the suite hang.
+
+    The numbers are printed, not only asserted: when this fails, the busiest
+    receiver in the report is the widget that has to be fixed.
+    """
+    from PySide6.QtWidgets import QScrollArea
+
+    from meret.gui.settings import SettingsDialog
+
+    dialog = SettingsDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    pump(qapp, 50)
+
+    area = dialog.findChild(QScrollArea)
+    assert area is not None
+    bar = area.verticalScrollBar()
+
+    tally.reset()
+    bar.setValue(bar.maximum())
+    pump(qapp, 100)
+    bar.setValue(0)
+    pump(qapp, 100)
+    tally.stop()
+
+    print("\n" + tally.report())
+    assert tally.rate() < 500  # a scroll is a handful of events, not thousands
