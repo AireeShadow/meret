@@ -64,11 +64,12 @@ def test_shared_descriptions_are_the_tui_ones():
         assert ours[PALETTE_ALIASES.get(command, command)] == description
 
 
-def test_every_command_has_a_key_and_a_label():
+def test_every_command_has_a_non_empty_key():
+    """An empty key is allowed nowhere: the TUI binds every action it offers."""
     from meret.gui.commands import SHORTCUTS, command_table, short_label
 
     for command, _description in command_table():
-        assert command in SHORTCUTS
+        assert SHORTCUTS[command], command
         assert short_label(command)
 
 

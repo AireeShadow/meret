@@ -8,6 +8,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from typing import Self
+
 from meret.core import tagpaths
 from meret.core.models import FileEntry, FileType, Tag
 from meret.core.repository import AbstractRepository
@@ -56,6 +58,9 @@ class SourceFile:
         self.path = Path(path)
         self._file = open(self.path, "rb")
         self._lock = threading.Lock()
+
+    def __enter__(self) -> Self:
+        return self
 
     @property
     def size(self) -> int:

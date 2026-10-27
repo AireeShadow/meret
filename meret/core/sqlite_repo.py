@@ -206,7 +206,7 @@ class SQLiteRepository(AbstractRepository):
     # ---------- conversion ----------
     @staticmethod
     def _tags_from_row(row) -> list[str]:
-        raw = row["tag_names"] if "tag_names" in row.keys() else ""
+        raw = row["tag_names"] if "tag_names" in row else ""
         return raw.split(_TAG_SEP) if raw else []
 
     def _row_to_file(self, row) -> FileEntry:

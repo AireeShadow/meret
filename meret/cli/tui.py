@@ -528,19 +528,18 @@ class MeretApp(App):
                 self.action_open_file()
             else:
                 self.real_tree.action_select_cursor()
-        elif self.focused == self.virt_tree:
-            if self.selected_virtual:
-                try:
-                    from meret.vfs import VirtualTree
-                    repo = get_repo(self.db_path)
-                    tree = VirtualTree(repo)
-                    node = tree.stat(self.selected_virtual)
-                    if node.is_dir:
-                        self.virt_tree.action_select_cursor()
-                    else:
-                        self.action_open_file()
-                except Exception:
-                    logger.exception("select/open %s failed", self.selected_virtual)
+        elif self.focused == self.virt_tree and self.selected_virtual:
+            try:
+                from meret.vfs import VirtualTree
+                repo = get_repo(self.db_path)
+                tree = VirtualTree(repo)
+                node = tree.stat(self.selected_virtual)
+                if node.is_dir:
+                    self.virt_tree.action_select_cursor()
+                else:
+                    self.action_open_file()
+            except Exception:
+                logger.exception("select/open %s failed", self.selected_virtual)
     
     def action_command_palette(self):
         """Open command palette."""
@@ -851,10 +850,13 @@ class MeretApp(App):
                     def mount_thread():
                         try:
                             do_mount(tree, Path(path))
-                        except Exception:
+                        except Exception as exc:
                             logger.exception("mount at %s failed", path)
+                            # Bound here on purpose: `e` of an outer except is deleted
+                            # when that block ends, and this lambda runs later still
+                            message = f"Mount error: {exc}"
                             self.call_from_thread(
-                                lambda: self.notify(f"Mount error: {e}", severity="error")
+                                lambda: self.notify(message, severity="error")
                             )
                     
                     threading.Thread(target=mount_thread, daemon=True).start()

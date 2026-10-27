@@ -1554,11 +1554,13 @@ class TracedApplication(QApplication):
         gap = (now - self._last_report) * 1000
         busiest = sorted(self._counts.items(), key=lambda item: item[1], reverse=True)
         lines = [
-            f"{self._events} events/s | worst {self._worst:.0f} ms"
-            f" ({self._worst_where}) | tick gap {gap:.0f} ms"
-            f" | active {self._name_of(self.activeWindow())}"
-            f" | modal {self._name_of(self.activeModalWidget())}"
-            f" | shown {[type(w).__name__ for w in self.topLevelWidgets() if w.isVisible()]}"
+            (
+                f"{self._events} events/s | worst {self._worst:.0f} ms"
+                f" ({self._worst_where}) | tick gap {gap:.0f} ms"
+                f" | active {self._name_of(self.activeWindow())}"
+                f" | modal {self._name_of(self.activeModalWidget())}"
+                f" | shown {[type(w).__name__ for w in self.topLevelWidgets() if w.isVisible()]}"
+            )
         ]
         for pair, count in busiest[: self.TOP]:
             lines.append(f"    {count:>8}  {pair[1]} in {self._chains[pair]}")

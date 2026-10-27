@@ -42,6 +42,33 @@ line-length = 100
 [tool.ruff]
 line-length = 100
 
+[tool.ruff.lint]
+ignore = [
+    # typer.Argument()/Option() in defaults is the documented Typer style, and _()
+    # there has to run at import time so the help text is translated.
+    "B008",
+    # A deliberate mutable class attribute: Textual's BINDINGS and the extractor
+    # registry's supported_extensions.
+    "RUF012",
+    # returncode is inspected by hand at every subprocess.run call.
+    "PLW1510",
+    # A worker or task boundary catches everything on purpose: one unreadable file
+    # must not take the app down.
+    "BLE001",
+    # Best-effort flush()/stop() on a stream or a mount that may already be gone.
+    "S110",
+    # An unknown log level is a bad value, not a bad type - and the CLI turns the
+    # ValueError into a BadParameter.
+    "TRY004",
+    # SourceFile keeps its handle open for the object's whole life and closes it in
+    # close(); a `with` would defeat that.
+    "SIM115",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: leftovers and the shape of pytest itself, not production code.
+"tests/**" = ["B017", "F841", "RUF059", "SIM102"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["meret"]
 artifacts = ["meret/gui/icons/*.svg", "meret/gui/icons/LICENSE"]

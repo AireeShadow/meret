@@ -144,3 +144,10 @@ def test_reveal_does_not_list_a_path_it_already_knows(panel, tmp_path):
 
     assert panel.reveal(tmp_path)
     assert calls == []
+
+def test_the_drives_stay_the_root_of_the_panel(panel):
+    """The drive list is the model's root: the panel must sit at it, not inside it."""
+    assert pump_until(lambda: panel._model.rowCount() > 0)
+
+    assert panel._model.rootPath() == ""
+    assert not panel.rootIndex().isValid()

@@ -121,8 +121,10 @@ class Indexer:
                     entry = future.result()
                     if entry:
                         entries.append(entry)
-                except Exception as e:
-                    logger.error("Failed: %s: %s", futures[future], e, exc_info=True)
+                except Exception:
+                    # logger.exception, not error(..., exc_info=True): same traceback,
+                    # one argument less, and it cannot be forgotten
+                    logger.exception("Failed: %s", futures[future])
                 if progress_callback:
                     progress_callback(PHASE_EXTRACT, done, len(files))
         except KeyboardInterrupt:

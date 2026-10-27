@@ -277,7 +277,6 @@ def get_config(config_path: Path | str | None = None) -> ConfigManager:
 
 def reload_config() -> ConfigManager:
     """Force reload configuration from disk."""
-    global _config_instance
     if _config_instance is not None:
         _config_instance._config = None  # Force reload
     return get_config()
