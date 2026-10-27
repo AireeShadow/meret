@@ -9,11 +9,14 @@ Mounting and unmounting shell out to `meret mount` / `meret umount` instead of
 importing a backend, so opening a window never drags FUSE or WinFsp in.
 """
 
+import faulthandler
 import gc
 import logging
+import os
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -278,12 +281,25 @@ class RealFsPanel(QTreeView):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._root = ""
         self._model = QFileSystemModel(self)
         self._model.setFilter(
             QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot
         )
+        # The watcher is the freeze. QFileSystemModel watches every directory it has
+        # ever listed, and a change anywhere in one of them makes it re-read that
+        # directory on the GUI thread with a stat per entry - 6.4 seconds in a single
+        # event, measured. The panel is rooted at the whole filesystem, so the
+        # watched set reaches C:\ and the user's profile, which Windows touches all
+        # the time: that is why the freeze came at random. Nothing here is urgent
+        # enough to pay for it, and refresh() re-reads on demand.
+        self._model.setOption(QFileSystemModel.Option.DontWatchForChanges, True)
+        self._model.setOption(QFileSystemModel.Option.DontResolveSymlinks, True)
         self.setModel(self._model)
         self.setHeaderHidden(True)
+        # Rows are one line high and never wrap, so the view can skip asking every
+        # item for its height - which matters with thousands of rows under a root
+        self.setUniformRowHeights(True)
         # Sortable, even though the hidden header cannot be clicked: sortByColumn
         # needs the view in the sorting mode to keep the indicator and the model
         # in step
@@ -300,6 +316,7 @@ class RealFsPanel(QTreeView):
         also what flips the flag canFetchMore() and fetchMore() need before they
         populate anything at all.
         """
+        self._root = ""
         self._model.setRootPath("")
         self.setRootIndex(QModelIndex())
         self.setCurrentIndex(QModelIndex())
@@ -311,13 +328,30 @@ class RealFsPanel(QTreeView):
         back an invalid index for a folder that is cached but filtered out - a
         hidden one such as AppData - while setRootPath() re-lists it as visible.
         """
-        index = self._model.setRootPath(str(Path(path)))
+        self._root = str(Path(path))
+        index = self._model.setRootPath(self._root)
         if not index.isValid():
             return False
         self._expand_ancestors(index)
         self.setCurrentIndex(index)
         self.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
         return True
+
+    def refresh(self) -> None:
+        """Re-read the panel from scratch.
+
+        Nothing else does it now that the watcher is off, and setRootPath() with the
+        path it already has does not re-fetch - hence the step off the root and
+        back, which is a real change and therefore a real re-read.
+        """
+        self._model.setRootPath("")
+        if self._root:
+            self._model.setRootPath(self._root)
+            return
+        # The whole filesystem is the root: step through the home directory, so that
+        # even the empty root is a change twice over
+        self._model.setRootPath(QDir.homePath())
+        self._model.setRootPath("")
 
     def _expand_ancestors(self, index: QModelIndex) -> None:
         """Expand every row above `index`, top down, so it is on screen."""
@@ -375,6 +409,9 @@ class MainWindow(QMainWindow):
         self._preview_token = 0
         self._sort_index = 0
         self._actions: Dict[str, QAction] = {}
+        # True while a modal dialog is up: the grid underneath is not looked at, so
+        # nothing has to be decoded and painted into it
+        self._paused = False
 
         # The palette before the icons: they are tinted with its WindowText colour,
         # so a dark theme must be in place or every icon renders black
@@ -559,9 +596,10 @@ class MainWindow(QMainWindow):
     # ---------- contents ----------
 
     def _refresh(self) -> None:
-        """Re-read tags and the current view after any write."""
+        """Re-read tags, the filesystem panel and the current view after any write."""
         self._tree.invalidate()
         self.tags.reload()
+        self.fs.refresh()  # the panel no longer notices changes by itself
         if self._search is not None:
             self._run_search(self._search)
             return
@@ -644,6 +682,10 @@ class MainWindow(QMainWindow):
         queue at BATCH and wakes the event loop once per batch, not once per row.
         """
         if generation != self._tasks.generation:
+            return
+        if self._paused:
+            # A modal dialog is up: the grid is not looked at, and every icon that
+            # lands repaints it. Whoever resumes the pump kicks this chain again.
             return
 
         batch, self._queue = self._queue[:BATCH], self._queue[BATCH:]
@@ -1036,15 +1078,23 @@ class MainWindow(QMainWindow):
         """Open the settings and apply the result when the window closes.
 
         Deliberately not exec(): that runs a nested event loop, and the poll, the
-        thread pool and the dialog end up fighting over the same window - which is
-        what made the dialog vanish the moment a tab was clicked. open() shows the
-        very same modal window and returns straight away.
+        thread pool and the dialog end up fighting over the same window.
+
+        The raise_/activateWindow pair is deferred, not immediate. open() already
+        raises and activates, but on Windows the owner can take the foreground back
+        in that same turn: the dialog ends up behind a window that modality has
+        already blocked, and the app looks dead, because Qt drops every click on
+        that window. Asking again once the show has settled is what keeps the dialog
+        in front. MERET_SETTINGS_MODELESS=1 removes native modality altogether, for
+        an A/B run.
         """
         manager = get_config()
         dialog = SettingsDialog(self)
 
         def finished(result: int) -> None:
             """The dialog is gone: let the poll run again and apply what was chosen."""
+            self._paused = False
+            self._pump(self._tasks.generation)  # the pause cut the chain in half
             self._poll.start()
             if result != QDialog.DialogCode.Accepted:
                 self._status_label.setText(_("Settings unchanged"))
@@ -1056,11 +1106,24 @@ class MainWindow(QMainWindow):
                 )
             dialog.deleteLater()
 
+        def to_front() -> None:
+            """Re-ask for the foreground on the next turn of the loop."""
+            dialog.raise_()
+            dialog.activateWindow()
+
         dialog.finished.connect(finished)
         self._poll.stop()  # no rebuilds underneath a modal window
-        dialog.open()
-        dialog.raise_()
-        dialog.activateWindow()
+        self._paused = True  # and no thumbnail batches painting the grid under it
+
+        started = time.perf_counter()
+        if os.environ.get("MERET_SETTINGS_MODELESS"):
+            dialog.setWindowModality(Qt.WindowModality.NonModal)
+            dialog.show()
+        else:
+            dialog.open()
+        logger.info("settings shown in %.0f ms", (time.perf_counter() - started) * 1000)
+
+        QTimer.singleShot(0, to_front)  # see the docstring
 
     def _apply_look(self) -> None:
         """Re-read what the window shows itself with - and only what actually changed.
@@ -1342,11 +1405,134 @@ class MainWindow(QMainWindow):
         self._tasks.shutdown()
         super().closeEvent(event)
 
+class TracedApplication(QApplication):
+    """An application that counts events and names whatever floods them.
 
+    A freeze the suite cannot reproduce has two shapes, and they need opposite
+    fixes: the loop stops turning - one event never returns, or the window system
+    never hands the input over - or it turns far too fast, a layout or paint storm.
+    The rate tells them apart, and the per-receiver table names the widget that has
+    to be fixed.
+
+    The report goes to stderr through print(), never through logging: the CLI may
+    have pointed logging at a file, and a diagnostic that can be swallowed is worse
+    than none. It is printed by a daemon thread, so the output keeps coming even
+    when the GUI thread is the thing that is stuck - a frozen counter is the answer.
+    """
+
+    SLOW_MS = 150.0
+    REPORT_MS = 1000
+    TOP = 6
+
+    def __init__(self, argv: List[str]) -> None:
+        super().__init__(argv)
+        self._events = 0
+        self._worst = 0.0
+        self._worst_where = "-"
+        self._counts: Dict[tuple, int] = {}
+        self._chains: Dict[tuple, str] = {}
+        self._last_report = time.perf_counter()
+        self._text = ""
+
+        self._beat = QTimer(self)
+        self._beat.setInterval(self.REPORT_MS)
+        self._beat.timeout.connect(self._report)
+        self._beat.start()
+
+        threading.Thread(target=self._watch, daemon=True).start()
+
+    def notify(self, receiver, event) -> bool:
+        """Time every event and count it per receiver, so a storm names itself."""
+        started = time.perf_counter()
+        try:
+            return super().notify(receiver, event)
+        finally:
+            spent = (time.perf_counter() - started) * 1000
+            self._events += 1
+            pair = (type(receiver).__name__, type(event).__name__)
+            self._counts[pair] = self._counts.get(pair, 0) + 1
+            if pair not in self._chains:
+                self._chains[pair] = self._chain(receiver)
+            if spent > self._worst:
+                self._worst = spent
+                self._worst_where = f"{pair[0]}/{pair[1]}"
+            if spent >= self.SLOW_MS:
+                print(
+                    f"[watchdog] slow: {pair[1]} took {spent:.0f} ms in"
+                    f" {self._chains[pair]}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+    @staticmethod
+    def _chain(receiver) -> str:
+        """The receiver and its ancestors: a busy widget has to name its window."""
+        names = []
+        node = receiver
+        while node is not None and len(names) < 6:
+            names.append(type(node).__name__)
+            try:
+                node = node.parent() if hasattr(node, "parent") else None
+            except RuntimeError:
+                break  # the C++ object is already gone, e.g. a finished animation
+        return " < ".join(names)
+
+    def _report(self) -> None:
+        """Once a second, on the GUI thread: compose the line the thread prints."""
+        now = time.perf_counter()
+        gap = (now - self._last_report) * 1000
+        busiest = sorted(self._counts.items(), key=lambda item: item[1], reverse=True)
+        lines = [
+            f"{self._events} events/s | worst {self._worst:.0f} ms"
+            f" ({self._worst_where}) | tick gap {gap:.0f} ms"
+            f" | active {self._name_of(self.activeWindow())}"
+            f" | modal {self._name_of(self.activeModalWidget())}"
+            f" | shown {[type(w).__name__ for w in self.topLevelWidgets() if w.isVisible()]}"
+        ]
+        for pair, count in busiest[: self.TOP]:
+            lines.append(f"    {count:>8}  {pair[1]} in {self._chains[pair]}")
+        self._text = "\n".join(lines)
+
+        self._events = 0
+        self._worst = 0.0
+        self._worst_where = "-"
+        self._counts = {}
+        self._chains = {}
+        self._last_report = now
+
+    def _watch(self) -> None:
+        """A daemon thread: keep printing while the GUI thread cannot."""
+        while True:
+            time.sleep(self.REPORT_MS / 1000 * 2)
+            if self._text:
+                print(f"[watchdog]\n{self._text}", file=sys.stderr, flush=True)
+
+    @staticmethod
+    def _name_of(widget) -> str:
+        """A widget's class, or a dash when there is none."""
+        return "-" if widget is None else type(widget).__name__
+
+    
 def run_gui(db_path: Path, argv: Optional[List[str]] = None) -> int:
-    """Open the database, show the window, run the event loop. Returns the exit code."""
+    """Open the database, show the window, run the event loop. Returns the exit code.
+
+    With MERET_WATCHDOG=1 the run is traced: every thread's Python stack is dumped
+    every three seconds, and the application counts and times every event. A freeze
+    the suite cannot reproduce leaves no other trace, and "the loop stopped" and
+    "the loop is spinning" need opposite fixes - the trace tells them apart.
+    """
+    watch = bool(os.environ.get("MERET_WATCHDOG"))
+    if watch:
+        faulthandler.dump_traceback_later(3.0, repeat=True)
+
     repo = SQLiteRepository(str(db_path))
-    app = QApplication.instance() or QApplication(argv or [sys.argv[0]])
+    app = QApplication.instance()
+    if app is None:
+        app = (
+            TracedApplication(argv or [sys.argv[0]])
+            if watch
+            else QApplication(argv or [sys.argv[0]])
+        )
     app.setApplicationName("meret")
 
     window = MainWindow(repo, db_path)
@@ -1354,4 +1540,5 @@ def run_gui(db_path: Path, argv: Optional[List[str]] = None) -> int:
     try:
         return app.exec()
     finally:
+        faulthandler.cancel_dump_traceback_later()
         window.close()

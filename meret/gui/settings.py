@@ -1,15 +1,20 @@
-"""The settings dialog: every config field as a widget, one tab per section.
+"""The settings dialog: every config field as a widget, one group per section.
 
 The file stays the source of truth - the dialog reads the manager and writes back
 through it, and offers a button to open the file for hand edits. The widget for a
 field follows the field's own kind, and a number's bounds come from the pydantic
 model, so the dialog cannot offer a value the config would then reject.
+
+There are no tabs on purpose. A QTabWidget lays a page out while it is being shown,
+and pages of different heights make the dialog re-lay itself out on every click -
+after a few clicks it stops settling. One scrolling body has a single fixed geometry.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -17,12 +22,13 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -48,7 +54,7 @@ class Setting:
 
 
 def sections() -> Tuple[Tuple[str, str], ...]:
-    """(section, title), in the order the tabs are shown."""
+    """(section, title), in the order the groups are shown."""
     return (
         ("paths", _("Paths")),
         ("scan", _("Scan")),
@@ -78,7 +84,7 @@ def bounds(setting: Setting) -> Tuple[int, int]:
     """The model's own ge/le for a number, so the two cannot drift apart.
 
     Capped: a spin box does not need a billion, and a smaller range keeps its width
-    hint steady while a page is being shown.
+    hint steady while the body is being shown.
     """
     field = MeretConfig.model_fields[setting.section].annotation.model_fields[setting.name]
     low, high = 0, 100_000
@@ -107,15 +113,15 @@ def apply_settings(values: Dict[str, Any]) -> None:
 
 
 class SettingsDialog(QDialog):
-    """Every setting as a widget, one tab per section."""
+    """Every setting as a widget in one scrolling body, a group per section."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Settings"))
-        # A fixed size, so switching pages cannot resize the window: the pages differ
-        # in height, and a dialog that grows on every tab click is a layout that never
-        # settles.
+        # A fixed size, so nothing the body does can resize the window while it is
+        # being laid out.
         self.resize(640, 540)
+        self.setMinimumWidth(560)
 
         manager = get_config()
         self._original: Dict[str, Any] = {
@@ -123,9 +129,23 @@ class SettingsDialog(QDialog):
         }
         self._editors: Dict[str, QWidget] = {}
 
-        tabs = QTabWidget(self)
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(4, 4, 4, 4)
         for section, title in sections():
-            tabs.addTab(self._page(section), title)
+            body_layout.addWidget(self._group(section, title))
+        body_layout.addStretch(1)
+
+        area = QScrollArea(self)
+        area.setWidgetResizable(True)
+        area.setWidget(body)
+        # Both bars pinned, and this is the important part. A bar that appears and
+        # disappears takes width or height away from the viewport, the body is
+        # resized with it, and the layout that just decided the bar was needed runs
+        # again - the two flip and the app stops answering. Pinned bars remove the
+        # feedback instead of hoping it settles.
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
@@ -139,28 +159,24 @@ class SettingsDialog(QDialog):
         open_file.clicked.connect(lambda _checked=False: manager.edit())
 
         layout = QVBoxLayout(self)
-        layout.addWidget(tabs)
+        layout.addWidget(area, 1)
         layout.addWidget(QLabel(str(manager.config_path)))
         layout.addWidget(buttons)
 
-    def _page(self, section: str) -> QWidget:
-        """One tab: a form with a row per setting of that section.
-
-        Parentless on purpose: addTab() adopts the page, and a page that is also a
-        child of the dialog would be laid out twice.
+    def _group(self, section: str, title: str) -> QGroupBox:
+        """One section: a box with a form row per setting of that section.
 
         DontWrapRows is the important line. With wrapping, the form reports
-        heightForWidth; a stacked widget is poor at that, the dialog re-lays itself
-        out on every page change, and after a few switches it spins instead of
-        settling - which is exactly the freeze in the app.
+        heightForWidth; a widget that is being scrolled is poor at that, the body
+        re-lays itself out on every pass, and the app spins instead of settling.
         """
-        page = QWidget()
-        form = QFormLayout(page)
+        box = QGroupBox(title)
+        form = QFormLayout(box)
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
         for setting in settings_table():
             if setting.section == section:
                 form.addRow(setting.label, self._editor(setting))
-        return page
+        return box
 
     def _editor(self, setting: Setting) -> QWidget:
         """The widget this field's kind asks for, filled with its current value.
@@ -171,13 +187,13 @@ class SettingsDialog(QDialog):
         value = self._original[setting.key]
 
         if setting.kind == "bool":
-            box = QCheckBox(self)
+            box = QCheckBox()
             box.setChecked(bool(value))
             self._editors[setting.key] = box
             return box
 
         if setting.kind == "int":
-            spin = QSpinBox(self)
+            spin = QSpinBox()
             low, high = bounds(setting)
             spin.setRange(low, high)
             spin.setValue(int(value) if value is not None else low)
@@ -185,8 +201,8 @@ class SettingsDialog(QDialog):
             return spin
 
         if setting.kind == "choice":
-            combo = QComboBox(self)
-            # AdjustToContentsOnFirstShow measures the popup while the page is being
+            combo = QComboBox()
+            # AdjustToContentsOnFirstShow measures the popup while the body is being
             # shown, which re-runs the layout it is measuring
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
             combo.addItems(setting.choices)
@@ -195,7 +211,7 @@ class SettingsDialog(QDialog):
             self._editors[setting.key] = combo
             return combo
 
-        line = QLineEdit(self)
+        line = QLineEdit()
         line.setText("" if value is None else str(value))
         self._editors[setting.key] = line
 
@@ -204,15 +220,15 @@ class SettingsDialog(QDialog):
 
         line.setPlaceholderText(_("auto"))
         row = QWidget()
-        browse = QPushButton("…", row)
+        browse = QPushButton("…")
         browse.setFixedWidth(32)
         browse.clicked.connect(
             lambda _checked=False, item=setting, target=line: self._browse(item, target)
         )
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(line)
-        layout.addWidget(browse)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.addWidget(line)
+        row_layout.addWidget(browse)
         return row
 
     def _browse(self, setting: Setting, line: QLineEdit) -> None:

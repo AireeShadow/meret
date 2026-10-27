@@ -102,3 +102,24 @@ def test_the_top_of_a_drive_is_where_walking_up_stops(window, tmp_path):
 
     assert not window.fs.rootIndex().isValid()
     assert pump_until(lambda: _top_count(window.fs) > 0)
+
+def test_the_panel_does_not_watch_the_filesystem(qapp):
+    """Watching every listed directory re-reads it on the GUI thread - seconds."""
+    from PySide6.QtWidgets import QFileSystemModel
+
+    from meret.gui.app import RealFsPanel
+
+    panel = RealFsPanel()
+    assert panel._model.testOption(QFileSystemModel.Option.DontWatchForChanges)
+    assert panel._model.testOption(QFileSystemModel.Option.DontResolveSymlinks)
+
+
+def test_refresh_leaves_the_panel_rooted_at_the_filesystem_top(qapp):
+    """The panel is a view of everything, and refresh() must not re-root it."""
+    from meret.gui.app import RealFsPanel
+
+    panel = RealFsPanel()
+    panel.refresh()
+
+    assert panel._model.rootPath() == ""
+    assert not panel.rootIndex().isValid()

@@ -176,44 +176,25 @@ def test_the_poll_pauses_while_the_dialog_is_open(
     assert seen == [False]  # stopped while the dialog was up
     assert window._poll.isActive()  # and ticking again once it closed
 
-def test_every_tab_can_be_shown(config, qapp, qtbot):
-    """The dialog must survive a tab click, with the app's own theme applied.
+def test_the_dialog_shows_every_section_at_once(config, qapp, qtbot):
+    """No tabs: switching them inside a dialog is where the app kept freezing."""
+    from PySide6.QtWidgets import QGroupBox, QScrollArea
 
-    Pages differ in size, and the app runs with a palette the suite never sets - the
-    two together are what made the window vanish there.
-    """
-    from PySide6.QtWidgets import QTabWidget
-
-    from meret.gui.app import _apply_theme
     from meret.gui.settings import SettingsDialog, sections
-
-    _apply_theme(qapp, "dark")  # the app applies one before any window is built
 
     dialog = SettingsDialog()
     qtbot.addWidget(dialog)
     dialog.show()
     pump(qapp)
-    width = dialog.width()
 
-    tabs = dialog.findChild(QTabWidget)
-    assert tabs is not None
-    assert tabs.count() == len(sections())
+    assert dialog.findChild(QScrollArea) is not None
+    assert [box.title() for box in dialog.findChildren(QGroupBox)] == [
+        title for _section, title in sections()
+    ]
 
-    for index in range(tabs.count()):
-        tabs.setCurrentIndex(index)
-        pump(qapp)
-        assert tabs.currentIndex() == index
-        assert dialog.isVisible()
-        assert dialog.width() == width  # a fixed size: no resize churn
 
-def test_switching_pages_back_and_forth_keeps_the_dialog_settled(config, qapp, qtbot):
-    """The freeze came after a few switches: a layout that never settles.
-
-    A spin still lets pump() return, so the tell is geometry: a dialog that changes
-    size while pages change is a dialog in a loop.
-    """
-    from PySide6.QtWidgets import QTabWidget
-
+def test_the_dialog_settles_after_being_shown(config, qapp, qtbot):
+    """A window that keeps resizing itself is a window in a loop: the size must hold."""
     from meret.gui.app import _apply_theme
     from meret.gui.settings import SettingsDialog
 
@@ -225,13 +206,24 @@ def test_switching_pages_back_and_forth_keeps_the_dialog_settled(config, qapp, q
     pump(qapp)
     size = dialog.size()
 
-    tabs = dialog.findChild(QTabWidget)
-    order = list(range(tabs.count())) + list(reversed(range(tabs.count())))
-    for index in order * 3:  # there and back, three times
-        tabs.setCurrentIndex(index)
-        pump(qapp, ms=5)
-        assert dialog.size() == size  # settled: no size churn on a page change
+    for _round in range(3):
+        pump(qapp)
+        assert dialog.size() == size
         assert dialog.isVisible()
+
+
+def test_every_editor_is_reachable_from_the_scroll_area(config, qapp, qtbot):
+    """A field that ends up outside the scrolled body cannot be edited at all."""
+    from meret.gui.settings import SettingsDialog, settings_table
+
+    dialog = SettingsDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    pump(qapp)
+
+    for setting in settings_table():
+        editor = dialog._editors[setting.key]
+        assert editor.isVisible()
 
 def test_a_theme_is_applied_only_when_it_changed(
     tmp_path, config, qapp, qtbot, monkeypatch
@@ -260,3 +252,61 @@ def test_a_theme_is_applied_only_when_it_changed(
     _answer(monkeypatch, change, QDialog.DialogCode.Accepted)
     window._edit_config()
     assert applied == ["dark"]
+
+def test_every_tab_can_be_shown(config, qapp, qtbot):
+    """The dialog must survive a show, with the app's own theme applied.
+
+    The groups differ in size, and the app runs with a palette the suite never sets -
+    the two together are what made the window vanish there.
+    """
+    from PySide6.QtWidgets import QGroupBox
+
+    from meret.gui.app import _apply_theme
+    from meret.gui.settings import SettingsDialog, sections
+
+    _apply_theme(qapp, "dark")  # the app applies one before any window is built
+
+    dialog = SettingsDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    pump(qapp)
+    width = dialog.width()
+
+    boxes = dialog.findChildren(QGroupBox)
+    assert len(boxes) == len(sections())
+    assert all(box.isVisible() for box in boxes)
+    assert dialog.isVisible()
+    assert dialog.width() == width  # a fixed size: no resize churn
+
+def test_switching_pages_back_and_forth_keeps_the_dialog_settled(config, qapp, qtbot):
+    """The freeze came after a few scrolls: a layout that never settles.
+
+    A spin still lets pump() return, so the tell is geometry: a dialog that changes
+    size while the body scrolls is a dialog in a loop.
+    """
+    from PySide6.QtWidgets import QScrollArea
+
+    from meret.gui.app import _apply_theme
+    from meret.gui.settings import SettingsDialog
+
+    _apply_theme(qapp, "dark")  # the app runs with a palette, the suite does not
+
+    dialog = SettingsDialog()
+    qtbot.addWidget(dialog)
+    dialog.show()
+    pump(qapp)
+    size = dialog.size()
+
+    area = dialog.findChild(QScrollArea)
+    assert area is not None
+    bar = area.verticalScrollBar()
+
+    for _ in range(3):  # there and back, three times
+        bar.setValue(bar.maximum())
+        pump(qapp, ms=5)
+        assert dialog.size() == size  # settled: no size churn while scrolling
+        assert dialog.isVisible()
+        bar.setValue(0)
+        pump(qapp, ms=5)
+        assert dialog.size() == size
+        assert dialog.isVisible()
