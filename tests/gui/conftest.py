@@ -70,6 +70,7 @@ def quiet_dialogs(monkeypatch) -> None:
     from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox
 
     from meret.gui.commands import CommandPalette
+    from meret.gui.settings import SettingsDialog
 
     monkeypatch.setattr(QMessageBox, "exec", lambda box: 0)
     monkeypatch.setattr(QMessageBox, "clickedButton", lambda box: box.defaultButton())
@@ -86,8 +87,13 @@ def quiet_dialogs(monkeypatch) -> None:
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("", False)))
     monkeypatch.setattr(QInputDialog, "getItem", staticmethod(lambda *a, **k: ("", False)))
     monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: ""))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: ("", "")))
     monkeypatch.setattr(CommandPalette, "exec", lambda self: QDialog.DialogCode.Rejected)
-
+    monkeypatch.setattr(
+        SettingsDialog,
+        "open",
+        lambda self: self.finished.emit(QDialog.DialogCode.Rejected),
+    )
 
 if not HAS_PYTEST_QT:  # pragma: no cover - only when pytest-qt is absent
 

@@ -784,3 +784,60 @@ msgstr "База данных пересоздана!"
 
 msgid "Database: {path}"
 msgstr "База данных: {path}"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "Paths"
+msgstr "Пути"
+
+msgid "GUI"
+msgstr "Интерфейс"
+
+msgid "Locale"
+msgstr "Локализация"
+
+msgid "Default database"
+msgstr "База данных по умолчанию"
+
+msgid "Default library"
+msgstr "Библиотека по умолчанию"
+
+msgid "Workers"
+msgstr "Потоки"
+
+msgid "Chunk size"
+msgstr "Размер порции"
+
+msgid "Skip already indexed files"
+msgstr "Пропускать уже проиндексированные файлы"
+
+msgid "Theme"
+msgstr "Тема"
+
+msgid "Thumbnail size"
+msgstr "Размер превью"
+
+msgid "Window width"
+msgstr "Ширина окна"
+
+msgid "Window height"
+msgstr "Высота окна"
+
+msgid "Language"
+msgstr "Язык"
+
+msgid "Date format"
+msgstr "Формат даты"
+
+msgid "Open the file"
+msgstr "Открыть файл"
+
+msgid "auto"
+msgstr "авто"
+
+msgid "Settings saved to {path}"
+msgstr "Настройки сохранены в {path}"
+
+msgid "Settings unchanged"
+msgstr "Настройки не изменены"

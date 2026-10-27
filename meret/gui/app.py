@@ -60,6 +60,7 @@ from meret.gui.commands import (
 )
 from meret.gui.thumbnails import Reason, Thumbnail, ThumbnailCache
 from meret.gui.workers import TaskRunner
+from meret.gui.settings import SettingsDialog, apply_settings
 from meret.vfs.tree import Node, VirtualTree
 
 logger = logging.getLogger(__name__)
@@ -378,6 +379,9 @@ class MainWindow(QMainWindow):
         # The palette before the icons: they are tinted with its WindowText colour,
         # so a dark theme must be in place or every icon renders black
         _apply_theme(QApplication.instance(), config.theme)
+        # The theme in effect, so a settings save can tell a change from a no-op:
+        # re-polishing the app is a visible stall while the grid is full
+        self._theme = config.theme
 
         # Widgets next
         self._build_ui()
@@ -1029,12 +1033,57 @@ class MainWindow(QMainWindow):
         return answer == QMessageBox.StandardButton.Yes
 
     def _edit_config(self) -> None:
-        """Open the config file in the system's editor, creating it if needed."""
+        """Open the settings and apply the result when the window closes.
+
+        Deliberately not exec(): that runs a nested event loop, and the poll, the
+        thread pool and the dialog end up fighting over the same window - which is
+        what made the dialog vanish the moment a tab was clicked. open() shows the
+        very same modal window and returns straight away.
+        """
         manager = get_config()
-        if not manager.config_path.exists():
-            manager.save()  # defaults, so the editor has something to show
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(manager.config_path)))
-        self._status_label.setText(_("Opened {path}").format(path=manager.config_path))
+        dialog = SettingsDialog(self)
+
+        def finished(result: int) -> None:
+            """The dialog is gone: let the poll run again and apply what was chosen."""
+            self._poll.start()
+            if result != QDialog.DialogCode.Accepted:
+                self._status_label.setText(_("Settings unchanged"))
+            else:
+                apply_settings(dialog.values())
+                self._apply_look()
+                self._status_label.setText(
+                    _("Settings saved to {path}").format(path=manager.config_path)
+                )
+            dialog.deleteLater()
+
+        dialog.finished.connect(finished)
+        self._poll.stop()  # no rebuilds underneath a modal window
+        dialog.open()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _apply_look(self) -> None:
+        """Re-read what the window shows itself with - and only what actually changed.
+
+        Applying a style re-polishes every widget in the app, which is a visible stall
+        with a filled grid, so it is skipped when the theme is the same. The window
+        size is left alone (the user may have resized it by hand), and a language
+        change waits for a restart, since the strings are already built.
+        """
+        gui = get_config().config.gui
+
+        if gui.theme != self._theme:
+            _apply_theme(QApplication.instance(), gui.theme)
+            self._theme = gui.theme
+            # The glyphs are painted in the palette colour: re-tint them with it
+            for command, action in self._actions.items():
+                action.setIcon(icons.command_icon(command, ICON))
+
+        if gui.thumbnail_size != self._thumbs.size:
+            self.grid.setIconSize(QSize(gui.thumbnail_size, gui.thumbnail_size))
+            self._thumbs = ThumbnailCache(
+                size=gui.thumbnail_size, scope=str(self._db_path)
+            )
 
     def _stats(self) -> None:
         """Database statistics, read off the event loop."""
