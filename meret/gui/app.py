@@ -281,6 +281,7 @@ class RealFsPanel(QTreeView):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self._started = time.monotonic()
         self._model = QFileSystemModel(self)
         self._model.setFilter(
             QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot
@@ -288,11 +289,15 @@ class RealFsPanel(QTreeView):
         # The watcher is the freeze: QFileSystemModel watches every directory it has
         # ever listed, and a change anywhere in one of them makes it re-read that
         # directory on the GUI thread with a stat per entry - 6.4 seconds in a single
-        # event, measured. MERET_WATCH_FS=1 skips both options and leaves the stock
+        # event, measured. MERET_WATCH_FS=1 skips the options and leaves the stock
         # model, i.e. exactly what the panel did before the freeze was found.
         if not os.environ.get("MERET_WATCH_FS"):
             self._model.setOption(QFileSystemModel.Option.DontWatchForChanges, True)
             self._model.setOption(QFileSystemModel.Option.DontResolveSymlinks, True)
+            # A directory icon is an SHGetFileInfo call per entry on Windows
+            self._model.setOption(
+                QFileSystemModel.Option.DontUseCustomDirectoryIcons, True
+            )
         self.setModel(self._model)
         self.setHeaderHidden(True)
         # Rows are one line high and never wrap, so the view can skip asking every
@@ -305,10 +310,10 @@ class RealFsPanel(QTreeView):
         for column in (1, 2, 3):  # size, type, date - the name column is enough
             self.hideColumn(column)
         self.doubleClicked.connect(self._on_double)
+        # Every listing is resolved on the GUI thread, so the cost of revealing a
+        # folder is the size of its ancestors. Naming them in the log beats guessing.
+        self._model.directoryLoaded.connect(self._log_loaded)
         self.show_filesystem()
-        # Delayed on purpose: the drive list is read on the gatherer thread, and a
-        # drive that is missing and a drive that is slow look exactly the same.
-        # A singleShot outlives the panel, hence the guard in the slot.
         QTimer.singleShot(500, self._report_top)
 
     def show_filesystem(self) -> None:
@@ -357,6 +362,22 @@ class RealFsPanel(QTreeView):
         """
         self._model.setRootPath(QDir.homePath())
         self._model.setRootPath("")
+
+    def _log_loaded(self, path: str) -> None:
+        """Log a directory the gatherer finished, with the time since start.
+
+        A directory that shows up here a minute in is the stall: the GUI thread
+        resolves every entry of it with a stat, and the model's destructor waits for
+        the listing to end. %TEMP% is an ancestor of every pytest tmp_path.
+        """
+        try:
+            logger.info(
+                "filesystem loaded after %.1f s: %s",
+                time.monotonic() - self._started,
+                path or "<drives>",
+            )
+        except RuntimeError:
+            return
 
     def _report_top(self) -> None:
         """One line in the log: how many entries the panel is actually showing.

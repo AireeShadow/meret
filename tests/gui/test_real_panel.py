@@ -103,47 +103,33 @@ def test_the_top_of_a_drive_is_where_walking_up_stops(window, tmp_path):
     assert not window.fs.rootIndex().isValid()
     assert pump_until(lambda: _top_count(window.fs) > 0)
 
-def test_the_panel_does_not_watch_the_filesystem(qapp):
+def test_the_panel_does_not_watch_the_filesystem(panel):
     """Watching every listed directory re-reads it on the GUI thread - seconds."""
     from PySide6.QtWidgets import QFileSystemModel
 
-    from meret.gui.app import RealFsPanel
-
-    panel = RealFsPanel()
     assert panel._model.testOption(QFileSystemModel.Option.DontWatchForChanges)
     assert panel._model.testOption(QFileSystemModel.Option.DontResolveSymlinks)
+    assert panel._model.testOption(QFileSystemModel.Option.DontUseCustomDirectoryIcons)
 
 
-def test_refresh_leaves_the_panel_rooted_at_the_filesystem_top(qapp):
+def test_refresh_leaves_the_panel_rooted_at_the_filesystem_top(panel):
     """The panel is a view of everything, and refresh() must not re-root it."""
-    from meret.gui.app import RealFsPanel
-
-    panel = RealFsPanel()
     panel.refresh()
 
     assert panel._model.rootPath() == ""
     assert not panel.rootIndex().isValid()
 
-def test_the_panel_is_rooted_at_the_filesystem_top(qapp):
-    """The drive list is the model's root: the panel must sit at it, not inside it."""
-    from meret.gui.app import RealFsPanel
 
-    panel = RealFsPanel()
-    for _ in range(20):  # the listing comes from the gatherer thread
-        if panel._model.rowCount() > 0:
-            break
-        pump(50)
+def test_the_panel_is_rooted_at_the_filesystem_top(panel):
+    """The drive list is the model's root: the panel must sit at it, not inside it."""
+    assert pump_until(lambda: panel._model.rowCount() > 0)
 
     assert panel._model.rootPath() == ""
     assert not panel.rootIndex().isValid()
-    assert panel._model.rowCount() > 0
 
 
-def test_revealing_a_folder_leaves_the_panel_at_the_top(qapp, tmp_path):
+def test_revealing_a_folder_leaves_the_panel_at_the_top(panel, tmp_path):
     """Being left rooted at the revealed folder is what hid the other drives."""
-    from meret.gui.app import RealFsPanel
-
-    panel = RealFsPanel()
     panel.reveal(tmp_path)
 
     assert panel._model.rootPath() == ""

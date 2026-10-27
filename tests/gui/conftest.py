@@ -6,6 +6,7 @@ module level - never inside a fixture and never after a call that can raise.
 """
 
 import os
+import sys
 import time
 from collections.abc import Callable, Iterator
 
@@ -37,10 +38,12 @@ def pump(target: object | None = None, ms: int = 50) -> None:
 
     Accepts both call styles used across the suite: pump(qapp) and pump(50).
 
-    processEvents() without a limit returns only once the queue is empty - and it
-    keeps processing whatever the handlers queue while it runs, so a single running
-    animation is enough to make it never return. The suite then looks hung and the
-    deadline is never even reached. The bounded overload returns on its own.
+    A nested event loop with a quit timer, not processEvents() in a loop.
+    processEvents() returns only once the queue is empty, and it keeps processing
+    whatever the handlers queue while it runs - so one widget that keeps posting to
+    itself makes a single call never return, the deadline is never reached, and the
+    suite looks hung. A nested loop checks its exit flag between dispatches, so the
+    timer always gets its turn and pump() always ends.
     """
     if isinstance(target, (int, float)):
         ms, target = int(target), None
@@ -48,13 +51,11 @@ def pump(target: object | None = None, ms: int = 50) -> None:
     if app is None:
         return
 
-    from PySide6.QtCore import QEventLoop
+    from PySide6.QtCore import QEventLoop, QTimer
 
-    flags = QEventLoop.ProcessEventsFlag.AllEvents
-    deadline = time.monotonic() + ms / 1000.0
-    while time.monotonic() < deadline:
-        app.processEvents(flags, 1)  # at most a millisecond per pass
-        time.sleep(0.001)
+    loop = QEventLoop()
+    QTimer.singleShot(max(1, ms), loop.quit)
+    loop.exec()
 
 
 def pump_until(predicate: Callable[[], bool], timeout_ms: int = 2000) -> bool:
@@ -68,6 +69,8 @@ def pump_until(predicate: Callable[[], bool], timeout_ms: int = 2000) -> bool:
 
 if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
 
+    import threading
+
     from PySide6.QtCore import QObject
 
     class EventTally(QObject):
@@ -77,7 +80,12 @@ if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
         QApplication: an application-wide event filter works with whatever is there.
         A flood is what makes processEvents() never settle, so a test can assert on
         it - and the report names the widget instead of leaving it to a guess.
+
+        The window report is printed by a daemon thread: a hung test never reaches
+        its own assertions, so the flood has to be readable while it happens.
         """
+
+        PERIOD = 2.0
 
         def __init__(self, app: object) -> None:
             super().__init__()
@@ -91,6 +99,24 @@ if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
             pair = (type(receiver).__name__, type(event).__name__)
             self._counts[pair] = self._counts.get(pair, 0) + 1
             return False
+
+        def watch(self) -> None:
+            """Print a window every PERIOD seconds, from a daemon thread."""
+            while True:
+                time.sleep(self.PERIOD)
+                print("\n" + self.take(), file=sys.stderr, flush=True)
+
+        def take(self, top: int = 6) -> str:
+            """The window that just passed, then a fresh one."""
+            busiest = sorted(self._counts.items(), key=lambda item: item[1], reverse=True)
+            spent = max(time.monotonic() - self._started, 1e-6)
+            lines = [f"[tally] {sum(self._counts.values()) / spent:.0f} events/s"]
+            lines += [
+                f"[tally]     {count:>8}  {name} in {receiver}"
+                for (receiver, name), count in busiest[:top]
+            ]
+            self.reset()
+            return "\n".join(lines)
 
         def reset(self) -> None:
             """Start a fresh window: the rate is measured from here."""
@@ -121,6 +147,21 @@ if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
         """Counts every event while a test runs. For tests about event floods."""
         counter = EventTally(qapp)
         yield counter
+        counter.stop()
+
+    @pytest.fixture(scope="session", autouse=True)
+    def event_watchdog(qapp: object) -> Iterator[None]:
+        """With MERET_WATCHDOG=1, print what the event loop is chewing on.
+
+        From a thread, because a hung test never gets to its own report: the flood
+        has to be readable while it is happening.
+        """
+        if not os.environ.get("MERET_WATCHDOG"):
+            yield None
+            return
+        counter = EventTally(qapp)
+        threading.Thread(target=counter.watch, daemon=True).start()
+        yield None
         counter.stop()
 
 @pytest.fixture(autouse=True)
