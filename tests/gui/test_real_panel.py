@@ -134,3 +134,13 @@ def test_revealing_a_folder_leaves_the_panel_at_the_top(panel, tmp_path):
 
     assert panel._model.rootPath() == ""
     assert not panel.rootIndex().isValid()
+
+def test_reveal_does_not_list_a_path_it_already_knows(panel, tmp_path):
+    """Every listing is resolved on the GUI thread: a known path must not be re-read."""
+    assert panel.reveal(tmp_path)
+
+    calls = []
+    panel._model.setRootPath = lambda *args: calls.append(args)
+
+    assert panel.reveal(tmp_path)
+    assert calls == []

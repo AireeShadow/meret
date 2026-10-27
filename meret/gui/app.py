@@ -333,24 +333,42 @@ class RealFsPanel(QTreeView):
         self.setCurrentIndex(QModelIndex())
 
     def reveal(self, path: Path) -> bool:
-        """Show `path`: expand its ancestors, select it and scroll it into view.
+        """Show `path`: expand what is needed, select it and scroll it into view.
 
-        Deliberately not index(path): that one fetches with fetch=false and hands
-        back an invalid index for a folder that is cached but filtered out - a
-        hidden one such as AppData - while setRootPath() re-lists it as visible.
+        Deliberately not index(path) alone: that one fetches with fetch=false and
+        hands back an invalid index for a folder that is cached but filtered out - a
+        hidden one such as AppData. So index() is tried first and setRootPath() is
+        the fallback for a path the model has not listed yet - which is also what
+        keeps a second reveal of the same folder free of a whole new listing.
 
-        The model's own root goes back to empty on the way out. The drive list *is*
+        The model's own root goes back to empty on the way out: the drive list *is*
         the root, so a model left rooted at the revealed folder shows that one drive
-        and hides the rest - which is what the panel was doing.
+        and hides the rest.
         """
-        index = self._model.setRootPath(str(Path(path)))
+        target = str(Path(path))
+        started = time.perf_counter()
+
+        index = self._model.index(target)
+        rerooted = not index.isValid()
+        if rerooted:
+            index = self._model.setRootPath(target)  # never listed: this lists it
         if not index.isValid():
-            self._model.setRootPath("")
+            if rerooted:
+                self._model.setRootPath("")
             return False
+
         self._expand_ancestors(index)
         self.setCurrentIndex(index)
         self.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
-        self._model.setRootPath("")
+        if rerooted:
+            self._model.setRootPath("")
+
+        logger.info(
+            "revealed %s in %.0f ms%s",
+            target,
+            (time.perf_counter() - started) * 1000,
+            " (listed)" if rerooted else "",
+        )
         return True
 
     def refresh(self) -> None:
@@ -394,14 +412,21 @@ class RealFsPanel(QTreeView):
             return
 
     def _expand_ancestors(self, index: QModelIndex) -> None:
-        """Expand every row above `index`, top down, so it is on screen."""
+        """Expand every row above `index`, top down, so it is on screen.
+
+        A row that is already open is skipped. Expanding makes the model list a
+        directory, and the GUI thread resolves every entry of that listing with a
+        stat, so expanding an open row repeats the whole cost for nothing - and
+        %TEMP% alone is tens of thousands of entries.
+        """
         chain: List[QModelIndex] = []
         parent = index.parent()
         while parent.isValid():
             chain.append(parent)
             parent = parent.parent()
         for parent in reversed(chain):
-            self.expand(parent)
+            if not self.isExpanded(parent):
+                self.expand(parent)
 
     def path_of(self, index: QModelIndex) -> Optional[Path]:
         """The real path behind a row, or None for the invalid top index."""
