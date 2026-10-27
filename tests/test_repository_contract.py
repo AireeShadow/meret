@@ -1,4 +1,3 @@
-import pytest
 
 from meret.core import tagpaths
 from meret.core.models import FileEntry, FileType

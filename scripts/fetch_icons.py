@@ -11,8 +11,8 @@ import argparse
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Iterable, Optional, Tuple
 
 #: The default branch, not a tag: the vendored files are committed anyway, so a glyph
 #: that moves upstream shows up as a reviewable diff instead of a silent change.
@@ -27,7 +27,7 @@ LICENSE = ICON_DIR.parent / "LICENSE"
 #: releases - bar-chart-3 became chart-column, trash-2 became trash - so candidates
 #: are tried in order. The vendored file is named after the *command*, which is why a
 #: rename upstream never reaches the code.
-GLYPHS: Dict[str, Tuple[str, ...]] = {
+GLYPHS: dict[str, tuple[str, ...]] = {
     "refresh": ("refresh-cw",),
     "scan": ("folder-search",),
     "search": ("search",),
@@ -48,7 +48,7 @@ GLYPHS: Dict[str, Tuple[str, ...]] = {
 }
 
 
-def download(url: str, target: Path) -> Optional[str]:
+def download(url: str, target: Path) -> str | None:
     """Save `url` as `target`. None when it worked, otherwise why it did not."""
     try:
         with urllib.request.urlopen(url, timeout=30) as response:
@@ -58,7 +58,7 @@ def download(url: str, target: Path) -> Optional[str]:
     return None
 
 
-def fetch_one(command: str, stems: Tuple[str, ...], force: bool) -> Optional[str]:
+def fetch_one(command: str, stems: tuple[str, ...], force: bool) -> str | None:
     """Save the first candidate stem that exists. None when the file is already there."""
     target = ICON_DIR / f"{command}{SUFFIX}"
     if target.exists() and not force:

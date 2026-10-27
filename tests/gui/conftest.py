@@ -6,7 +6,6 @@ module level - never inside a fixture and never after a call that can raise.
 """
 
 import os
-import sys
 import time
 from collections.abc import Callable, Iterator
 
@@ -94,7 +93,7 @@ if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
             self._started = time.monotonic()
             app.installEventFilter(self)
 
-        def eventFilter(self, receiver, event) -> bool:  # noqa: N802 - Qt's name
+        def eventFilter(self, receiver, event) -> bool:
             """Count every event and let it through untouched."""
             pair = (type(receiver).__name__, type(event).__name__)
             self._counts[pair] = self._counts.get(pair, 0) + 1

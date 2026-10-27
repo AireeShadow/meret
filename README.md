@@ -1,8 +1,11 @@
 # meret 🐍
 
 Tagged media library: tags instead of folders. Tags form a hierarchy
-(`travel/beach`) that you browse like folders — in a terminal UI, from the
-command line, or mounted as a read-only drive.
+(`travel/beach`) that you browse like folders — in a terminal UI, from the command
+line, in a Qt window, or mounted as a read-only drive.
+
+One database, four ways in. Nothing is ever moved or renamed on disk: a tag is a row,
+and the hierarchy is only a way of looking at it.
 
 ## Requirements
 
@@ -14,13 +17,15 @@ command line, or mounted as a read-only drive.
 ## Installation
 
 ```bash
-pip install -e .          # everything: CLI, TUI, scanning, tags, search, mounts
-pip install -e ".[dev]"   # + pytest, ruff, black, mypy
+pip install -e .            # CLI, TUI, scanning, tags, search, mounts
+pip install -e ".[gui]"     # + the Qt window (PySide6)
+pip install -e ".[dev]"     # + pytest, ruff, black, mypy
 ```
 
-Textual, fsspec and `tomli-w` are regular dependencies; the mount driver is picked
-by platform marker (`fusepy` elsewhere, `winfspy` on Windows). There is a `gui`
-extra with PySide6 — see [GUI](#gui).
+Textual, fsspec and `tomli-w` are regular dependencies; the mount driver is picked by
+platform marker (`fusepy` elsewhere, `winfspy` on Windows). PySide6 is an extra: the
+GUI is the only thing that needs it, and `core`, `vfs` and `cli` stay importable
+without it.
 
 ## Quick start
 
@@ -31,6 +36,7 @@ meret tag ~/Media/photo.jpg travel/beach --db ~/Media
 meret search --tag travel --db ~/Media      # a tag also matches its subtags
 meret tree --db ~/Media
 meret tui --db ~/Media                      # browse it all interactively
+meret gui --db ~/Media                      # ...or in a window
 ```
 
 The examples use a POSIX shell; on Windows give full paths (`C:\Users\you\Media`).
@@ -43,10 +49,11 @@ meret config set paths.default_db ~/Media/meret.db
 
 ### Which database is used
 
-Every command takes `--db` / `-d`: a directory containing `meret.db`, or a path to
-a `.db` file. Without it, meret uses `$MERET_DB`, then `paths.default_db` from the
+Every command takes `--db` / `-d`: a directory containing `meret.db`, or a path to a
+`.db` file. Without it, meret uses `$MERET_DB`, then `paths.default_db` from the
 config, otherwise `./meret.db`. Only `meret init` creates a database (`--force`
-recreates it); `meret where` shows which one a command would use.
+recreates it, dropping `-wal` and `-shm` with it); `meret where` shows which one a
+command would use.
 
 ## Scanning
 
@@ -127,9 +134,9 @@ meret mount ~/tags        # Linux/macOS (FUSE) — a directory
 
 The mount is read-only. File contents are read in ranges straight from the
 originals, so previews of large videos don't load whole files. Tag changes made
-while mounted (from the CLI or the TUI) are picked up without remounting — Explorer
-may need F5. Stop it with Ctrl+C (or Enter, on Windows) in its terminal, or from
-elsewhere with `meret umount M:`.
+while mounted (from the CLI, the TUI or the GUI) are picked up without remounting —
+Explorer may need F5. Stop it with Ctrl+C (or Enter, on Windows) in its terminal, or
+from elsewhere with `meret umount M:`.
 
 ### fsspec
 
@@ -177,15 +184,69 @@ separate terminal.
 
 ## GUI
 
-Not wired up yet — targeted at 0.7. Install the extra now to have PySide6 ready:
-
 ```bash
 pip install -e ".[gui]"
+meret gui --db ~/Media
 ```
 
-`meret/gui` will hold the Qt code; `core`, `vfs` and `cli` stay importable without
-PySide6, and the GUI will not depend on `cli`. The tag panel reuses
-`meret.vfs.tree.VirtualTree`, so the GUI shows exactly what a mount would.
+The window is the TUI's layout in Qt: the tag tree above the real file system on the
+left, a thumbnail grid in the middle, a preview on the right, the selection count in
+the status bar.
+
+- **The real-FS panel is one tree from the top of the filesystem** — the drive list on
+  Windows, `/` elsewhere — so every drive and every folder is reachable without
+  changing the root. Double-clicking a folder descends into it, double-clicking a file
+  hands it to the system. Navigation *reveals* a path (expanding its parents, selecting
+  and scrolling to it) instead of re-rooting the view.
+- **Every TUI command is here**, with the same descriptions: on the toolbar (icons,
+  with the name and key in the tooltip), in the menu bar, and in the palette on `:`,
+  which shows each command with its key. `tests/gui/test_commands.py` compares the two
+  tables, so the GUI and the TUI cannot drift apart.
+- **No `home` / `up` / `select_drive` / `open_file`**: the panel already shows the whole
+  filesystem, and a double click opens a file.
+- **Thumbnails** are decoded off the GUI thread (Pillow for images, a single ffmpeg
+  frame for video) and cached on disk, keyed by database, file and mtime. A file with
+  no preview keeps a type icon, and its tooltip says why.
+- **Nothing touches SQLite on the GUI thread**: repository calls and decodes go through
+  a thread pool and come back as signals, each carrying a generation, so a stale result
+  cannot paint over a newer one.
+- **Mounting shells out** to `meret mount` / `meret umount`, so opening a window never
+  imports FUSE or WinFsp.
+- **Settings are a dialog**, not a text editor: `Ctrl+,` (or File → config) opens every
+  config field as a checkbox, a spin box, a drop-down or a path with a browse button,
+  with the numeric bounds taken from the pydantic model. Ok writes and applies, Cancel
+  changes nothing, and a button opens the file for hand edits.
+
+| Key | Action |
+|-----|--------|
+| F5 | refresh |
+| F6 | scan the folder selected in the real-FS panel |
+| Ctrl+F | search: a name, or `tag:travel` |
+| Ctrl+T / Ctrl+Shift+T | tag / untag the selection |
+| Ctrl+D | delete the tag under the cursor in the tag tree |
+| Alt+S | cycle sorting: name → size → date |
+| Ctrl+I | initialize a new database (asks where, if one exists) |
+| Ctrl+, | settings |
+| Alt+I / Alt+L / Alt+P | statistics / tag tree / prune orphan tags |
+| Alt+M / Alt+U | mount / unmount |
+| `:` | command palette |
+| F1 | help |
+| Ctrl+Q | quit |
+
+### When the window misbehaves
+
+Three environment variables turn on diagnostics; all three are off by default.
+
+```bash
+MERET_WATCHDOG=1 meret gui        # every thread's stack every 3 s, plus an event rate
+MERET_WATCH_FS=1 meret gui        # keep the filesystem watcher on (stock QFileSystemModel)
+MERET_SETTINGS_MODELESS=1 meret gui   # settings as a modeless window
+```
+
+`MERET_WATCHDOG` prints a line a second with the event rate, the slowest event and who
+holds the focus, from a separate thread — so the output keeps coming while the GUI
+thread is the thing that is stuck. A rate of `0 events/s` means the thread is blocked
+outside event handling, not looping.
 
 ## Configuration
 
@@ -206,13 +267,17 @@ The file is `config.toml` in your user config folder:
 | Linux | `~/.config/meret/config.toml` |
 | macOS | `~/Library/Application Support/meret/config.toml` |
 
-Currently `paths.default_db` and `locale.language` are used. The `scan` and `gui`
-sections (and `locale.date_format`) are stored but not read yet — use `scan`'s flags
-instead.
+`paths.default_db` and `locale.language` are read by the CLI, and the GUI reads the
+`gui` section: theme, thumbnail size and window size are applied when the settings
+dialog is accepted (a theme is only re-applied when it actually changed — re-polishing
+the app is a visible stall). `scan` (`workers`, `chunk_size`, `skip_existing`) and
+`locale.date_format` are stored and editable in the dialog, but not read yet — use the
+`scan` flags.
 
 ## Language
 
-Command output, the help texts and the TUI are available in English and Russian.
+Command output, the help texts, the TUI and the GUI are available in English and
+Russian.
 
 ```bash
 meret --lang ru scan ~/Media             # this run only (-l ru)
@@ -277,8 +342,11 @@ MERET_LOG_FILE=./debug.log meret ... # log somewhere else
 command line, scan phases and timings, warnings and errors. At DEBUG you also get
 every database call with its arguments, result size and duration, how the database
 path was chosen, and virtual-FS cache and mount activity. Crashes — in the CLI, the
-TUI, background threads or the WinFsp driver — are written to the log with a full
-traceback.
+TUI, the GUI, background threads or the WinFsp driver — are written to the log with a
+full traceback.
+
+The GUI logs to the file only (a window has no console). `meret gui` is the one place
+where the log is the first thing to read when something looks stuck.
 
 ## Development
 
@@ -293,21 +361,30 @@ ruff check .
 | `meret/core` | models, SQLite repository and schema, scanner, metadata extractors, tag paths, config, locale, logging |
 | `meret/vfs` | the virtual tree (tags → folders); backends: mount (WinFsp/FUSE) and fsspec |
 | `meret/cli` | the Typer CLI, virtual-FS commands, the Textual TUI |
+| `meret/gui` | the Qt window: panels, actions, thumbnails, settings dialog, worker pool |
 
-`core` doesn't import `vfs` or `cli`, and the virtual tree has no third-party
-dependencies (`tests/vfs/test_architecture.py` checks both). The GUI adds a third
-rule in `tests/gui/test_architecture.py`: Qt stays in `meret/gui`.
+Three rules keep the layers apart, each with a test behind it:
+
+- `core` doesn't import `vfs` or `cli`, and the virtual tree has no third-party
+  dependencies (`tests/vfs/test_architecture.py`).
+- Qt stays in `meret/gui`; the GUI does not import the mount backends
+  (`tests/gui/test_architecture.py`).
+- The GUI's command table is the TUI's, minus the four commands the whole-filesystem
+  panel replaced (`tests/gui/test_commands.py`).
+
+The GUI test suite runs headless (`QT_QPA_PLATFORM=offscreen`) and stubs every modal
+dialog: a dialog runs its own event loop, and nothing clicks in a headless run.
 
 ## Milestones
 
-0.7 - GUI
-0.6 - localization
-0.5 - TUI
-0.4 - QoL and bugfixes
-0.3 - tag hierarchy
-0.2 - virtual file system
-0.1 - cli, total restructuring
-0.0 - basic code
+- 0.7 — GUI (current)
+- 0.6 — localization
+- 0.5 — TUI
+- 0.4 — QoL and bugfixes
+- 0.3 — tag hierarchy
+- 0.2 — virtual file system
+- 0.1 — cli, total restructuring
+- 0.0 — basic code
 
 ## License
 

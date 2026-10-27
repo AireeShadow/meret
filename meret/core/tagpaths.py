@@ -11,7 +11,7 @@ of tag `b` becomes `a/b`, but it still has to be found by name. Names may repeat
 across branches, so name lookup is deterministic (see name_map).
 """
 
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Callable, Iterable
 
 from meret.core.models import Tag
 
@@ -23,23 +23,23 @@ def normalize(path: str) -> str:
     return SEP.join(p.strip() for p in path.split(SEP) if p.strip())
 
 
-def parts(path: str) -> List[str]:
+def parts(path: str) -> list[str]:
     norm = normalize(path)
     return norm.split(SEP) if norm else []
 
 
 def index_by_parent(
     tags: Iterable[Tag], key: Callable[[Tag], str] = lambda t: t.name.casefold()
-) -> Dict[Tuple[Optional[int], str], Tag]:
+) -> dict[tuple[int | None, str], Tag]:
     """{(parent_id, key): tag}. The key can be overridden (VFS compares by sanitize)."""
     return {(t.parent_id, key(t)): t for t in tags}
 
 
-def path_of(tag: Tag, by_id: Dict[int, Tag]) -> str:
+def path_of(tag: Tag, by_id: dict[int, Tag]) -> str:
     """Full tag path. Robust to cycles."""
-    names: List[str] = []
+    names: list[str] = []
     seen: set[int] = set()
-    cur: Optional[Tag] = tag
+    cur: Tag | None = tag
     while cur is not None and cur.id not in seen:
         seen.add(cur.id)
         names.append(cur.name)
@@ -47,38 +47,38 @@ def path_of(tag: Tag, by_id: Dict[int, Tag]) -> str:
     return SEP.join(reversed(names))
 
 
-def name_map(tags: Iterable[Tag]) -> Dict[str, Tag]:
+def name_map(tags: Iterable[Tag]) -> dict[str, Tag]:
     """{lowercase_name: Tag}.
 
     Namesakes in different branches are now allowed, so the choice is deterministic:
     root first, then the lowest id. Unique names behave as before.
     """
-    result: Dict[str, Tag] = {}
+    result: dict[str, Tag] = {}
     for tag in sorted(tags, key=lambda t: (t.parent_id is not None, t.id or 0)):
         result.setdefault(tag.name.casefold(), tag)
     return result
 
 
-def path_map(tags: Iterable[Tag]) -> Dict[str, Tag]:
+def path_map(tags: Iterable[Tag]) -> dict[str, Tag]:
     """{'genre/mystery': Tag}. Keys are lowercase."""
     tags = list(tags)
     by_id = {t.id: t for t in tags}
     return {path_of(t, by_id).casefold(): t for t in tags}
 
 
-def name_to_path(tags: Iterable[Tag]) -> Dict[str, str]:
+def name_to_path(tags: Iterable[Tag]) -> dict[str, str]:
     """{lowercase_name: full path} — for display.
 
     With namesakes we take the shortest path: it's more stable and readable.
     """
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
     items = sorted(path_map(tags).items(), key=lambda kv: (kv[0].count(SEP), kv[0]))
     for path, tag in items:
         result.setdefault(tag.name.casefold(), path)
     return result
 
 
-def resolve(path: str, tags: Iterable[Tag]) -> Optional[Tag]:
+def resolve(path: str, tags: Iterable[Tag]) -> Tag | None:
     """Tag by full path OR by name. Case-insensitive. None if not found.
 
     Try the path first (it's more precise), then the name: after reparenting, a tag
@@ -89,7 +89,7 @@ def resolve(path: str, tags: Iterable[Tag]) -> Optional[Tag]:
     return path_map(tags).get(key) or name_map(tags).get(key)
 
 
-def resolve_all(path: str, tags: Iterable[Tag]) -> List[Tag]:
+def resolve_all(path: str, tags: Iterable[Tag]) -> list[Tag]:
     """All tags matching the path OR the name. All namesakes included."""
     tags = list(tags)
     by_id = {t.id: t for t in tags}
@@ -98,10 +98,10 @@ def resolve_all(path: str, tags: Iterable[Tag]) -> List[Tag]:
     return sorted(hits, key=lambda t: (t.parent_id is not None, t.id or 0))
 
 
-def missing_ancestors(path: str, tags: Iterable[Tag]) -> List[str]:
+def missing_ancestors(path: str, tags: Iterable[Tag]) -> list[str]:
     """Missing segments, from root to leaf: ['section', 'section/sub']."""
     known = path_map(tags)
-    result: List[str] = []
+    result: list[str] = []
     chunks = parts(path)
     for i in range(1, len(chunks) + 1):
         candidate = SEP.join(chunks[:i])
@@ -110,7 +110,7 @@ def missing_ancestors(path: str, tags: Iterable[Tag]) -> List[str]:
     return result
 
 
-def subtree_ids(path: str, tags: Iterable[Tag]) -> List[int]:
+def subtree_ids(path: str, tags: Iterable[Tag]) -> list[int]:
     """Ids of the tag (by path/name) and all of its descendants."""
     tags = list(tags)
     node = resolve(path, tags)
@@ -128,7 +128,7 @@ def subtree_ids(path: str, tags: Iterable[Tag]) -> List[int]:
     return sorted(ids)
 
 
-def subtree_names(path: str, tags: Iterable[Tag]) -> List[str]:
+def subtree_names(path: str, tags: Iterable[Tag]) -> list[str]:
     """Names of the tag (by path/name) and all its descendants (for subtree search)."""
     tags = list(tags)
     ids = subtree_ids(path=path, tags=tags)

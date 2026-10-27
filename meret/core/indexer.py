@@ -6,9 +6,9 @@ repository handles storage. Only traversal and coordination logic lives here.
 
 import logging
 import time
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Dict, Generator, List, Tuple, Optional
 
 from meret.core.extractors import ExtractorRegistry
 from meret.core.models import FileEntry, FileType
@@ -42,7 +42,7 @@ class Indexer:
 
     # ---------- traversal ----------
 
-    def _iter_files(self, single_file: Optional[Path] = None) -> Generator[Path, None, None]:
+    def _iter_files(self, single_file: Path | None = None) -> Generator[Path, None, None]:
         if single_file is not None:
             if single_file.is_file():
                 yield single_file
@@ -53,11 +53,11 @@ class Indexer:
 
     def collect(
         self,
-        single_file: Optional[Path] = None,
+        single_file: Path | None = None,
         progress_callback=None,
-    ) -> List[Path]:
+    ) -> list[Path]:
         """STAGE 1: collect the list of supported files. Fast, no metadata."""
-        found: List[Path] = []
+        found: list[Path] = []
 
         if single_file is not None:
             candidates = [single_file] if single_file.is_file() else []
@@ -83,14 +83,14 @@ class Indexer:
 
     # ---------- processing ----------
     @staticmethod
-    def _fingerprint(path: Path) -> Optional[Tuple[int, float]]:
+    def _fingerprint(path: Path) -> tuple[int, float] | None:
         try:
             st = path.stat()
         except OSError:
             return None
         return int(st.st_size), float(st.st_mtime)
     
-    def _process_file(self, file_path: Path) -> Optional[FileEntry]:
+    def _process_file(self, file_path: Path) -> FileEntry | None:
         """Extraction only — no DB access (important for threads)."""
         file_type = self.registry.get_file_type(file_path)
         if file_type is FileType.UNKNOWN:
@@ -104,11 +104,11 @@ class Indexer:
 
     def extract(
         self,
-        files: List[Path],
+        files: list[Path],
         progress_callback=None,
-    ) -> List[FileEntry]:
+    ) -> list[FileEntry]:
         """STAGE 2: extract metadata in parallel."""
-        entries: List[FileEntry] = []
+        entries: list[FileEntry] = []
         if not files:
             return entries
 
@@ -138,7 +138,7 @@ class Indexer:
 
     # ---------- writing ----------
 
-    def index(self, entries: List[FileEntry], progress_callback=None) -> Dict[str, int]:
+    def index(self, entries: list[FileEntry], progress_callback=None) -> dict[str, int]:
         """STAGE 3: write to the DB in batches. One transaction per chunk_size files."""
         if not entries:
             return {"indexed": 0, "updated": 0, "errors": 0}
@@ -153,10 +153,10 @@ class Indexer:
 
     def run(
         self,
-        single_file: Optional[Path] = None,
+        single_file: Path | None = None,
         dry_run: bool = False,
         progress_callback=None,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         self.interrupted = False
         logger.info(
             "Scan %s: workers=%d chunk_size=%d skip_existing=%s dry_run=%s",
@@ -198,7 +198,7 @@ class Indexer:
                     time.perf_counter() - t0, time.perf_counter() - started, stats)
         return stats
 
-    def _unchanged(self, path: Path, known: Dict[str, Tuple[int, float]]) -> bool:
+    def _unchanged(self, path: Path, known: dict[str, tuple[int, float]]) -> bool:
         """True only when both sides are known and equal.
 
         A file that cannot be stat'ed gives None on one side, and comparing that to

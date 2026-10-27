@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from meret.core.locale import set_locale, _
+from meret.core.locale import _, set_locale
 
 MERET = Path(__file__).resolve().parents[2] / "meret"
 TUI_FILE = MERET / "cli" / "tui.py"
@@ -64,7 +64,6 @@ class TestTuiBindingsLocalized:
         content = TUI_FILE.read_text(encoding="utf-8")
         
         # Find lines with Binding that don't use _()
-        import re
         
         # Pattern: Binding(..., "Description") without _()
         # This is a simplified check
@@ -81,7 +80,7 @@ class TestTuiBindingsLocalized:
         
         # This test documents which bindings need wrapping
         # After fix, this list should be empty
-        assert len(unwrapped) == 0, f"Unwrapped Binding descriptions found:\n" + "\n".join(f"{l}: {c}" for l, c in unwrapped)
+        assert len(unwrapped) == 0, "Unwrapped Binding descriptions found:\n" + "\n".join(f"{l}: {c}" for l, c in unwrapped)
 
 
 class TestTuiCommandPalette:

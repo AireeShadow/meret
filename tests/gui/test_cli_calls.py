@@ -96,8 +96,9 @@ def test_a_cancelled_dialog_runs_nothing(window, fake, monkeypatch):
 
 
 def test_a_missing_cli_is_reported_not_raised(window, monkeypatch):
-    import meret.gui.app as app_module
     from PySide6.QtWidgets import QInputDialog
+
+    import meret.gui.app as app_module
 
     monkeypatch.setattr(app_module, "subprocess", _FakeSubprocess(fail=True))
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("M:", True)))

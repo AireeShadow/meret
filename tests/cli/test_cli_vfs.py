@@ -3,12 +3,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-import meret.cli.vfs_cmds as vfs_cmds
+from meret.cli import vfs_cmds
 from meret.cli.app import app
 from meret.core.models import FileEntry, FileType
 from meret.core.sqlite_repo import SQLiteRepository
-
-from pathlib import Path
 
 MERET = Path(__file__).resolve().parents[2] / "meret"
 

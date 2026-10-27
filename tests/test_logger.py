@@ -7,9 +7,9 @@ import pytest
 from typer.testing import CliRunner
 
 from meret.core.logger import (
+    _MARK,
     ENV_FILE,
     ENV_LEVEL,
-    _MARK,
     disable_console_logging,
     log_file_path,
     resolve_level,

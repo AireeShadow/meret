@@ -1,10 +1,10 @@
 """Translations: catalog loading, language detection, and the CLI in Russian."""
 
-import re
-import sys
 import ast
 import gettext
+import re
 import string
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,9 +17,9 @@ from meret.core.locale import (
     DEFAULT_LOCALE_DIR,
     LocaleManager,
     _parse_po,
+    get_locale,
     load_po,
     system_language,
-    get_locale
 )
 
 MERET = Path(__file__).resolve().parents[2] / "meret"
@@ -430,7 +430,7 @@ def test_app_uses_the_translated_group():
 
 def test_unknown_command_message_text():
     """The catalog wording, without the CLI in the way."""
-    from meret.core.locale import set_locale, _
+    from meret.core.locale import _, set_locale
 
     set_locale("ru")
     msg = _("No such command '{cmd}'. Did you mean: {available}?").format(

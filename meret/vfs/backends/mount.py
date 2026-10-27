@@ -23,6 +23,7 @@ on the drive letter, IRPs keep arriving and stop() can hang forever. So:
 
 import errno
 import itertools
+import logging
 import os
 import platform
 import signal
@@ -31,8 +32,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-
-import logging
 
 from meret.vfs import IsADirectory, NotFound, SourceFile, VirtualTree
 
@@ -184,14 +183,14 @@ def _filetime(mtime: float) -> int:
 def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
     from winfspy import (
         FILE_ATTRIBUTE,
+        BaseFileSystemOperations,
+        FileSystem,
         NTStatusEndOfFile,
         NTStatusMediaWriteProtected,
         NTStatusNotADirectory,
         NTStatusObjectNameNotFound,
-        BaseFileSystemOperations,
-        FileSystem,
     )
-    from winfspy.plumbing import lib, ffi, NTSTATUS, NTStatusError
+    from winfspy.plumbing import NTSTATUS, NTStatusError, ffi, lib
     from winfspy.plumbing.security_descriptor import SecurityDescriptor
 
     _SD = SecurityDescriptor.from_string("O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;WD)")
@@ -243,7 +242,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 self.close(ffi.from_handle(file_context))
             except NTStatusError as exc:
                 return exc.value
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception("close failed")
                 return NTSTATUS.STATUS_UNEXPECTED_IO_ERROR
             return NTSTATUS.STATUS_SUCCESS
@@ -324,7 +323,6 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 if src is not None:
                     src.close()
                     self._log("source closed for %s", file_context["path"])
-            return None
 
         def cleanup(self, file_context, file_name, flags):
             # Called when a handle is closed. We're read-only — nothing to do.
@@ -413,7 +411,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             return
         try:
             lib.FspFileSystemRemoveMountPoint(ptr[0])
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("failed to remove the mount point")
             print(f"meret: failed to remove the mount point: {exc!r}", file=sys.stderr)
 
@@ -421,7 +419,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
         _detach_mount_point()
         try:
             fs.stop()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("error while stopping the FS")
             print(f"meret: error while stopping the FS: {exc!r}", file=sys.stderr)
         finally:

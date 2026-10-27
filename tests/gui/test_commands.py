@@ -2,8 +2,6 @@
 
 import pytest
 
-from tests.gui.conftest import pump
-
 pytest.importorskip("PySide6")
 
 #: The one command the TUI palette spells differently from the action it calls.
@@ -208,7 +206,7 @@ def test_palette_rows_separate_key_name_and_description(qapp):
     """Same trap as the help: 'command_palette' is exactly as wide as the column."""
     from PySide6.QtCore import Qt
 
-    from meret.gui.commands import CommandPalette, SHORTCUTS, command_table
+    from meret.gui.commands import SHORTCUTS, CommandPalette, command_table
 
     palette = CommandPalette()
     descriptions = dict(command_table())

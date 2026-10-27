@@ -18,7 +18,6 @@ import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional, Tuple
 
 import platformdirs
 from PIL import Image, ImageOps
@@ -55,7 +54,7 @@ class Reason:
 class Thumbnail:
     """A decoded thumbnail, or the reason there is none."""
 
-    image: Optional[QImage] = None
+    image: QImage | None = None
     reason: str = ""
 
     @property
@@ -65,7 +64,7 @@ class Thumbnail:
 
 
 @lru_cache(maxsize=1)
-def ffmpeg_path() -> Optional[str]:
+def ffmpeg_path() -> str | None:
     """ffmpeg from PATH, probed once. None when only ffprobe is installed."""
     return shutil.which("ffmpeg")
 
@@ -77,7 +76,7 @@ def cache_dir() -> Path:
     return path
 
 
-def _video_frame(source: Path) -> Tuple[Optional[Image.Image], str]:
+def _video_frame(source: Path) -> tuple[Image.Image | None, str]:
     """One frame of a video, decoded from ffmpeg's stdout.
 
     `-ss` before `-i` is a fast keyframe seek, and the scale keeps a 4K frame from
@@ -117,7 +116,7 @@ def _video_frame(source: Path) -> Tuple[Optional[Image.Image], str]:
     return None, Reason.NO_FRAME
 
 
-def _decode(source: Path) -> Tuple[Optional[Image.Image], str]:
+def _decode(source: Path) -> tuple[Image.Image | None, str]:
     """The source as a detached PIL image, plus why it is missing, if it is."""
     if source.suffix.casefold() in VIDEO_SUFFIXES:
         return _video_frame(source)
@@ -135,7 +134,7 @@ def _decode(source: Path) -> Tuple[Optional[Image.Image], str]:
 class ThumbnailCache:
     """Disk-backed thumbnails. Safe to call from any thread."""
 
-    def __init__(self, size: Optional[int] = None, scope: str = "") -> None:
+    def __init__(self, size: int | None = None, scope: str = "") -> None:
         self.size = min(int(size or get_config().get("gui.thumbnail_size", 256)), MAX_SIZE)
         self._dir = cache_dir()
         # The cache dir is shared by every database, and a file id is only unique
@@ -156,7 +155,7 @@ class ThumbnailCache:
         *,
         file_id: int,
         mtime: float = 0.0,
-        size: Optional[int] = None,
+        size: int | None = None,
     ) -> Thumbnail:
         """A thumbnail of `source`, from the cache or freshly decoded."""
         side = min(int(size or self.size), MAX_SIZE)
@@ -185,8 +184,8 @@ class ThumbnailCache:
         *,
         file_id: int,
         mtime: float = 0.0,
-        size: Optional[int] = None,
-    ) -> Optional[QImage]:
+        size: int | None = None,
+    ) -> QImage | None:
         """Just the image, for callers that do not care why it is missing."""
         return self.load_result(source, file_id=file_id, mtime=mtime, size=size).image
 

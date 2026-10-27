@@ -4,9 +4,9 @@ import posixpath
 import threading
 import time
 import unicodedata
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
 
 from meret.core import tagpaths
 from meret.core.models import FileEntry, FileType, Tag
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 #: How long a snapshot lives when the repository can't report data_version().
 DEFAULT_TTL = 1.0
 
-_TagIndex = Dict[Tuple[Optional[int], str], Tag]
+_TagIndex = dict[tuple[int | None, str], Tag]
 
 
 @dataclass(frozen=True)
@@ -31,10 +31,10 @@ class Node:
     is_dir: bool
     size: int = 0
     mtime: float = 0.0
-    tag_id: Optional[int] = None
-    file_id: Optional[int] = None
-    source_path: Optional[str] = None  # real path on disk
-    file_type: Optional[FileType] = None  # image / video / audio - for the icon
+    tag_id: int | None = None
+    file_id: int | None = None
+    source_path: str | None = None  # real path on disk
+    file_type: FileType | None = None  # image / video / audio - for the icon
 
 
 def sanitize(name: str) -> str:
@@ -86,19 +86,19 @@ class SourceFile:
 
 @dataclass
 class _Listing:
-    nodes: List[Node]
-    by_name: Dict[str, Node]
+    nodes: list[Node]
+    by_name: dict[str, Node]
 
 
 @dataclass
 class _Snapshot:
     """Everything the tree knows at one data_version. Replaced whole, never patched."""
 
-    version: Optional[int]
+    version: int | None
     taken_at: float
     index: _TagIndex
-    children: Dict[Optional[int], List[Tag]]
-    listings: Dict[str, _Listing] = field(default_factory=dict)  # filled lazily
+    children: dict[int | None, list[Tag]]
+    listings: dict[str, _Listing] = field(default_factory=dict)  # filled lazily
 
 
 class VirtualTree:
@@ -114,7 +114,7 @@ class VirtualTree:
         self.repo = repo
         self.ttl = ttl
         self._lock = threading.RLock()  # backends call in from many threads
-        self._snap: Optional[_Snapshot] = None
+        self._snap: _Snapshot | None = None
 
     # ---------- path parsing ----------
 
@@ -126,7 +126,7 @@ class VirtualTree:
         return "/" if vpath == "." else vpath
 
     @classmethod
-    def _parts(cls, vpath: str) -> List[str]:
+    def _parts(cls, vpath: str) -> list[str]:
         norm = cls.normalize(vpath)
         return [p for p in norm.split("/") if p]
 
@@ -137,11 +137,11 @@ class VirtualTree:
         with self._lock:
             self._snap = None
 
-    def _repo_version(self) -> Optional[int]:
+    def _repo_version(self) -> int | None:
         probe = getattr(self.repo, "data_version", None)
         return probe() if probe else None
 
-    def _is_fresh(self, snap: _Snapshot, version: Optional[int]) -> bool:
+    def _is_fresh(self, snap: _Snapshot, version: int | None) -> bool:
         if version is not None:
             return snap.version == version
         return time.monotonic() - snap.taken_at < self.ttl
@@ -159,7 +159,7 @@ class VirtualTree:
             
             # Read all data first
             tags = self.repo.get_all_tags()
-            children: Dict[Optional[int], List[Tag]] = {}
+            children: dict[int | None, list[Tag]] = {}
             for t in tags:
                 children.setdefault(t.parent_id, []).append(t)
             
@@ -184,7 +184,7 @@ class VirtualTree:
 
     # ---------- tag index ----------
 
-    def _tag_index(self, tags: Optional[List[Tag]] = None) -> _TagIndex:
+    def _tag_index(self, tags: list[Tag] | None = None) -> _TagIndex:
         """{(parent_id, lowercase_name): tag} — for fast lookup.
 
         The index is built by tagpaths — one implementation for the whole project.
@@ -195,10 +195,10 @@ class VirtualTree:
             return self._snapshot().index
         return tagpaths.index_by_parent(tags, key=lambda t: sanitize(t.name).casefold())
 
-    def _resolve_tag(self, vpath: str, snap: _Snapshot) -> Optional[Tag]:
+    def _resolve_tag(self, vpath: str, snap: _Snapshot) -> Tag | None:
         """Finds a tag by path. None for the root. NotFound if missing."""
-        parent_id: Optional[int] = None
-        tag: Optional[Tag] = None
+        parent_id: int | None = None
+        tag: Tag | None = None
         for part in self._parts(vpath):
             tag = snap.index.get((parent_id, part.casefold()))
             if tag is None:
@@ -209,10 +209,10 @@ class VirtualTree:
     # ---------- unique names ----------
 
     @staticmethod
-    def _dedupe(names: List[str]) -> List[str]:
+    def _dedupe(names: list[str]) -> list[str]:
         """Disambiguates duplicate names with ~1, ~2 suffixes (stable)."""
-        seen: Dict[str, int] = {}
-        result: List[str] = []
+        seen: dict[str, int] = {}
+        result: list[str] = []
         for name in names:
             key = name.casefold()
             if key not in seen:
@@ -228,7 +228,7 @@ class VirtualTree:
         return result
 
     @staticmethod
-    def _file_stat(entry: FileEntry) -> Tuple[int, float]:
+    def _file_stat(entry: FileEntry) -> tuple[int, float]:
         """(size, mtime) from metadata, otherwise from disk."""
         meta = entry.metadata or {}
         size, mtime = meta.get("size_bytes"), meta.get("modified_at")
@@ -297,12 +297,12 @@ class VirtualTree:
                     )
                 )
 
-        by_name: Dict[str, Node] = {}
+        by_name: dict[str, Node] = {}
         for node in nodes:
             by_name.setdefault(node.name, node)  # a folder wins over a same-named file
         return _Listing(nodes, by_name)
 
-    def listdir(self, vpath: str = "/") -> List[Node]:
+    def listdir(self, vpath: str = "/") -> list[Node]:
         """Returns the directory contents: subtags (folders) + files."""
         return list(self._listing(self.normalize(vpath)).nodes)
 

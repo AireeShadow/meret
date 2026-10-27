@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.gui.conftest import pump_until, pump
+from tests.gui.conftest import pump_until
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QModelIndex  # noqa: E402
+from PySide6.QtCore import QModelIndex
 
 
 @pytest.fixture

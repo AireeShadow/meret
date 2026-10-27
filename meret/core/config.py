@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import platformdirs
 from pydantic import BaseModel, Field, field_validator
@@ -22,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 class PathsConfig(BaseModel):
     """Path settings."""
-    default_db: Optional[str] = Field(
+    default_db: str | None = Field(
         default=None,
         description="Default database path (None = auto-detect)"
     )
-    default_library: Optional[str] = Field(
+    default_library: str | None = Field(
         default=None,
         description="Default library directory to scan"
     )
@@ -75,7 +75,7 @@ class MeretConfig(BaseModel):
 class ConfigManager:
     """Manages meret configuration file."""
     
-    def __init__(self, config_path: Optional[Path | str] = None) -> None:
+    def __init__(self, config_path: Path | str | None = None) -> None:
         """
         Initialize config manager.
         
@@ -88,7 +88,7 @@ class ConfigManager:
             config_dir = Path(platformdirs.user_config_dir(APP_NAME))
             self.config_path = config_dir / CONFIG_FILENAME
         
-        self._config: Optional[MeretConfig] = None
+        self._config: MeretConfig | None = None
         self._ensure_dir()
     
     def _ensure_dir(self) -> None:
@@ -141,7 +141,7 @@ class ConfigManager:
             )
             return self._create_default()
     
-    def save(self, config: Optional[MeretConfig] = None) -> None:
+    def save(self, config: MeretConfig | None = None) -> None:
         """Save configuration to file."""
         if config is None:
             config = self._config
@@ -260,10 +260,10 @@ class ConfigManager:
 
 
 # Global instance for convenience
-_config_instance: Optional[ConfigManager] = None
+_config_instance: ConfigManager | None = None
 
 
-def get_config(config_path: Optional[Path | str] = None) -> ConfigManager:
+def get_config(config_path: Path | str | None = None) -> ConfigManager:
     """
     Get global config manager instance.
     

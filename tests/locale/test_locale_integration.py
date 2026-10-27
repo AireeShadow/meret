@@ -1,12 +1,8 @@
 """Integration tests for locale in CLI."""
 
-import subprocess
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
-
-from pathlib import Path
 
 MERET = Path(__file__).resolve().parents[2] / "meret"
 
@@ -30,7 +26,7 @@ def test_cli_russian_output(tmp_path):
 
 def test_locale_switching():
     """Test that locale can be switched."""
-    from meret.core.locale import get_locale, set_locale, _  # <-- ДОБАВИТЬ ИМПОРТ '_' !!!
+    from meret.core.locale import _, get_locale, set_locale  # <-- ДОБАВИТЬ ИМПОРТ '_' !!!
     
     # Start with English
     set_locale("en")

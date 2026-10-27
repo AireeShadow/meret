@@ -12,7 +12,6 @@ the directory has no __init__.py: with one, the package shadows this module and
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPalette, QPixmap
@@ -39,7 +38,7 @@ _NEUTRAL = "#7a7d82"
 
 #: Placeholder tiles: a letter and a colour per kind. Keyed by the type's name, not by
 #: the member, so a type added to FileType gets a tile without an edit here.
-_TILES: Dict[str, Tuple[str, str]] = {
+_TILES: dict[str, tuple[str, str]] = {
     "IMAGE": ("I", "#4f8fd0"),
     "VIDEO": ("V", "#c06a8a"),
     "AUDIO": ("A", "#5aa06a"),
@@ -63,7 +62,7 @@ def _ratio() -> float:
 
 
 @lru_cache(maxsize=512)
-def _tinted(name: str, size: int, colour: str, ratio: float) -> Optional[QPixmap]:
+def _tinted(name: str, size: int, colour: str, ratio: float) -> QPixmap | None:
     """Render one vendored SVG in `colour`. None when the file cannot be used.
 
     Cached on its arguments, so a repaint costs a dict lookup - and a palette switch
@@ -133,7 +132,7 @@ def placeholder(kind: str, size: int) -> QIcon:
     return _tile(letter, size, _palette_colour(), background)
 
 
-def placeholder_for(file_type: Optional[FileType], size: int) -> QIcon:
+def placeholder_for(file_type: FileType | None, size: int) -> QIcon:
     """placeholder(), for a FileType or for nothing at all."""
     return placeholder(getattr(file_type, "name", UNKNOWN), size)
 

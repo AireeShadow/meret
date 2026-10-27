@@ -19,7 +19,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from PySide6.QtCore import QDir, QModelIndex, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QPixmap
@@ -61,9 +60,9 @@ from meret.gui.commands import (
     menu_table,
     short_label,
 )
+from meret.gui.settings import SettingsDialog, apply_settings
 from meret.gui.thumbnails import Reason, Thumbnail, ThumbnailCache
 from meret.gui.workers import TaskRunner
-from meret.gui.settings import SettingsDialog, apply_settings
 from meret.vfs.tree import Node, VirtualTree
 
 logger = logging.getLogger(__name__)
@@ -136,7 +135,7 @@ _DISABLED_PALETTE = {
 }
 
 
-def _apply_theme(app: Optional[QApplication], theme: str) -> None:
+def _apply_theme(app: QApplication | None, theme: str) -> None:
     """`system` keeps the platform look; `dark` sets a Fusion palette."""
     if app is None or theme == "system":
         return
@@ -184,7 +183,7 @@ class TagTree(QTreeWidget):
     LOADING = Qt.ItemDataRole.UserRole + 12
 
     def __init__(
-        self, tree: VirtualTree, tasks: TaskRunner, parent: Optional[QWidget] = None
+        self, tree: VirtualTree, tasks: TaskRunner, parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
         self._tree = tree
@@ -194,7 +193,7 @@ class TagTree(QTreeWidget):
         self.itemExpanded.connect(self._on_expanded)
         self.currentItemChanged.connect(self._on_current)
 
-    def set_tree(self, tree: Optional[VirtualTree]) -> None:
+    def set_tree(self, tree: VirtualTree | None) -> None:
         """Point the panel at another database's tree, or at nothing for a moment.
 
         None is not a detail: the old tree holds the old repository, and a database
@@ -229,7 +228,7 @@ class TagTree(QTreeWidget):
             sticky=True,
         )
 
-    def _filled(self, item: QTreeWidgetItem, nodes: List[Node], generation: int) -> None:
+    def _filled(self, item: QTreeWidgetItem, nodes: list[Node], generation: int) -> None:
         """Replace the placeholder with the real subfolders."""
         if generation != self._generation:
             return  # the tree was rebuilt; this row is gone
@@ -262,7 +261,7 @@ class TagTree(QTreeWidget):
         item.addChild(QTreeWidgetItem(["…"]))
         self._fill(item, item.data(0, Qt.ItemDataRole.UserRole), self._generation)
 
-    def _on_current(self, current: Optional[QTreeWidgetItem], _previous) -> None:
+    def _on_current(self, current: QTreeWidgetItem | None, _previous) -> None:
         if current is not None:
             self.tag_selected.emit(current.data(0, Qt.ItemDataRole.UserRole) or "/")
 
@@ -279,7 +278,7 @@ class RealFsPanel(QTreeView):
 
     path_activated = Signal(str)
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._started = time.monotonic()
         self._model = QFileSystemModel(self)
@@ -419,7 +418,7 @@ class RealFsPanel(QTreeView):
         stat, so expanding an open row repeats the whole cost for nothing - and
         %TEMP% alone is tens of thousands of entries.
         """
-        chain: List[QModelIndex] = []
+        chain: list[QModelIndex] = []
         parent = index.parent()
         while parent.isValid():
             chain.append(parent)
@@ -428,13 +427,13 @@ class RealFsPanel(QTreeView):
             if not self.isExpanded(parent):
                 self.expand(parent)
 
-    def path_of(self, index: QModelIndex) -> Optional[Path]:
+    def path_of(self, index: QModelIndex) -> Path | None:
         """The real path behind a row, or None for the invalid top index."""
         if not index.isValid():
             return None
         return Path(self._model.filePath(index))
 
-    def current_path(self) -> Optional[Path]:
+    def current_path(self) -> Path | None:
         return self.path_of(self.currentIndex())
 
     def _on_double(self, index: QModelIndex) -> None:
@@ -451,7 +450,7 @@ class MainWindow(QMainWindow):
     ROLE_MTIME = Qt.ItemDataRole.UserRole + 2
     ROLE_FILE_ID = Qt.ItemDataRole.UserRole + 3
 
-    def __init__(self, repo, db_path, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, repo, db_path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
         config = get_config().config.gui
@@ -466,14 +465,14 @@ class MainWindow(QMainWindow):
             size=config.thumbnail_size, scope=str(self._db_path)
         )
         self._tasks = TaskRunner(self)
-        self._queue: List[tuple] = []
+        self._queue: list[tuple] = []
         self._selection: set[str] = set()
         self._vpath = "/"
-        self._search: Optional[str] = None
-        self._version: Optional[int] = None
+        self._search: str | None = None
+        self._version: int | None = None
         self._preview_token = 0
         self._sort_index = 0
-        self._actions: Dict[str, QAction] = {}
+        self._actions: dict[str, QAction] = {}
         # True while a modal dialog is up: the grid underneath is not looked at, so
         # nothing has to be decoded and painted into it
         self._paused = False
@@ -695,7 +694,7 @@ class MainWindow(QMainWindow):
             generation=generation,
         )
 
-    def _show_nodes(self, nodes: List[Node], generation: int) -> None:
+    def _show_nodes(self, nodes: list[Node], generation: int) -> None:
         """Fill the grid: folders first, then files, thumbnails in batches."""
         if generation != self._tasks.generation:
             logger.debug("dropping stale listing for %s (gen %s)", self._vpath, generation)
@@ -725,11 +724,11 @@ class MainWindow(QMainWindow):
     def _add_file_item(
         self,
         name: str,
-        source: Optional[str],
-        file_id: Optional[int],
+        source: str | None,
+        file_id: int | None,
         mtime: float,
-        file_type: Optional[FileType],
-        vpath: Optional[str] = None,
+        file_type: FileType | None,
+        vpath: str | None = None,
     ) -> QListWidgetItem:
         """One grid row for a file: a placeholder icon now, a thumbnail later."""
         item = QListWidgetItem(name)
@@ -767,7 +766,7 @@ class MainWindow(QMainWindow):
 
         left = len(todo)
 
-        def landed(item: QListWidgetItem, result: Optional[Thumbnail]) -> None:
+        def landed(item: QListWidgetItem, result: Thumbnail | None) -> None:
             """One row is in: paint it, and start the next batch when it was last."""
             nonlocal left
             if result is not None:
@@ -794,7 +793,7 @@ class MainWindow(QMainWindow):
     def _folder_icon(self) -> QIcon:
         return self.style().standardIcon(QStyle.StandardPixmap.SP_DirIcon)
 
-    def _placeholder_icon(self, file_type: Optional[FileType]) -> QIcon:
+    def _placeholder_icon(self, file_type: FileType | None) -> QIcon:
         """Type icon shown until a thumbnail lands - and when it never does."""
         return icons.placeholder_for(file_type, self._thumbs.size)
 
@@ -837,7 +836,7 @@ class MainWindow(QMainWindow):
 
     # ---------- commands ----------
 
-    def _target_files(self) -> List[tuple]:
+    def _target_files(self) -> list[tuple]:
         """(file_id, path) for the grid selection, else the real-FS selection."""
         chosen = [
             (item.data(self.ROLE_FILE_ID), item.data(self.ROLE_SOURCE))
@@ -964,9 +963,9 @@ class MainWindow(QMainWindow):
 
         if query.startswith("tag:"):
             tag = query[4:]
-            work = lambda: self._repo.search_by_tags([tag])  # noqa: E731
+            work = lambda: self._repo.search_by_tags([tag])
         else:
-            work = lambda: self._repo.search_by_name(query)  # noqa: E731
+            work = lambda: self._repo.search_by_name(query)
 
         generation = self._tasks.bump()
         self._tasks.run(
@@ -976,7 +975,7 @@ class MainWindow(QMainWindow):
             generation=generation,
         )
 
-    def _show_files(self, files: List[FileEntry], generation: int) -> None:
+    def _show_files(self, files: list[FileEntry], generation: int) -> None:
         """Fill the grid from search results instead of a folder listing."""
         if generation != self._tasks.generation:
             return
@@ -1293,7 +1292,7 @@ class MainWindow(QMainWindow):
         if done.returncode != 0:
             logger.warning("exit %s: %s", done.returncode, (done.stderr or "").strip())
 
-    def _cli(self, *args: str, with_db: bool = True) -> List[str]:
+    def _cli(self, *args: str, with_db: bool = True) -> list[str]:
         """A `meret` command line.
 
         `with_db=False` for `umount`: it finds the mount process by the mount point
@@ -1304,7 +1303,7 @@ class MainWindow(QMainWindow):
             command += ["--db", str(self._db_path)]
         return command
 
-    def _spawn(self, command: List[str]) -> None:
+    def _spawn(self, command: list[str]) -> None:
         """Run without waiting - a mount lives until it is unmounted."""
         logger.info("run: %s", command)
         try:
@@ -1313,7 +1312,7 @@ class MainWindow(QMainWindow):
             logger.warning("cannot run %s: %s", command, e)
             self._status_label.setText(_("Error: {error}").format(error=e))
 
-    def _run(self, command: List[str]) -> None:
+    def _run(self, command: list[str]) -> None:
         """Run and wait - for a command that ends on its own."""
         logger.info("run: %s", command)
         try:
@@ -1462,7 +1461,7 @@ class MainWindow(QMainWindow):
         """
         self._tasks.run(self._repo.data_version, self._on_version, sticky=True)
 
-    def _on_version(self, version: Optional[int]) -> None:
+    def _on_version(self, version: int | None) -> None:
         if version is None or version == self._version:
             return
         known = self._version is not None
@@ -1496,13 +1495,13 @@ class TracedApplication(QApplication):
     REPORT_MS = 1000
     TOP = 6
 
-    def __init__(self, argv: List[str]) -> None:
+    def __init__(self, argv: list[str]) -> None:
         super().__init__(argv)
         self._events = 0
         self._worst = 0.0
         self._worst_where = "-"
-        self._counts: Dict[tuple, int] = {}
-        self._chains: Dict[tuple, str] = {}
+        self._counts: dict[tuple, int] = {}
+        self._chains: dict[tuple, str] = {}
         self._last_report = time.perf_counter()
         self._text = ""
 
@@ -1585,7 +1584,7 @@ class TracedApplication(QApplication):
         return "-" if widget is None else type(widget).__name__
 
     
-def run_gui(db_path: Path, argv: Optional[List[str]] = None) -> int:
+def run_gui(db_path: Path, argv: list[str] | None = None) -> int:
     """Open the database, show the window, run the event loop. Returns the exit code.
 
     With MERET_WATCHDOG=1 the run is traced: every thread's Python stack is dumped

@@ -1,9 +1,9 @@
 """Tests for config CLI commands."""
+from pathlib import Path
+
 from typer.testing import CliRunner
 
 from meret.cli.app import app
-
-from pathlib import Path
 
 MERET = Path(__file__).resolve().parents[2] / "meret"
 

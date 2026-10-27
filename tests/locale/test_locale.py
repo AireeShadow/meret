@@ -2,20 +2,16 @@
 Tests for localization support.
 """
 
-import gettext
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from meret.core.locale import (
     LocaleConfig,
     LocaleManager,
-    get_locale,
-    set_locale,
     _,
+    get_locale,
     ngettext,
+    set_locale,
 )
 
 MERET = Path(__file__).resolve().parents[2] / "meret"

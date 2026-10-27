@@ -27,7 +27,7 @@ import sys
 from array import array
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any
 
 # Default locale directory
 DEFAULT_LOCALE_DIR = Path(__file__).parent.parent / "locales"
@@ -35,7 +35,7 @@ DEFAULT_DOMAIN = "messages"
 DEFAULT_LANGUAGE = "en"
 
 #: (decimal separator, thousands separator) where they differ from "1234.5"
-_NUMBER_SEPARATORS: Dict[str, tuple] = {
+_NUMBER_SEPARATORS: dict[str, tuple] = {
     "ru": (",", " "),  # 1 234,5 — with a no-break space
 }
 
@@ -47,15 +47,15 @@ class LocaleConfig:
     """Immutable locale configuration."""
     language: str
     encoding: str = "UTF-8"
-    date_format: Optional[str] = None
-    decimal_separator: Optional[str] = None
-    thousands_separator: Optional[str] = None
+    date_format: str | None = None
+    decimal_separator: str | None = None
+    thousands_separator: str | None = None
 
 
 # ---------- system language ----------
 
 
-def _language_from_env() -> Optional[str]:
+def _language_from_env() -> str | None:
     """POSIX convention: LANGUAGE (a list), LC_ALL, LC_MESSAGES, LANG."""
     for var in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
         value = os.environ.get(var, "").split(":")[0].strip()
@@ -64,7 +64,7 @@ def _language_from_env() -> Optional[str]:
     return None
 
 
-def _language_from_windows() -> Optional[str]:
+def _language_from_windows() -> str | None:
     """The Windows display language, e.g. 'ru_RU'."""
     if sys.platform != "win32":
         return None
@@ -77,7 +77,7 @@ def _language_from_windows() -> Optional[str]:
     return locale.windows_locale.get(lcid)
 
 
-def _language_from_getlocale() -> Optional[str]:
+def _language_from_getlocale() -> str | None:
     """locale.getlocale(): 'ru_RU' on POSIX, 'Russian_Russia' on Windows."""
     try:
         name = locale.getlocale()[0]
@@ -101,7 +101,7 @@ def system_language() -> str:
 # ---------- .po -> catalog ----------
 
 
-def _parse_po(text: str, source: str = "<po>") -> Dict[str, str]:
+def _parse_po(text: str, source: str = "<po>") -> dict[str, str]:
     """{key: translation} from .po text, keyed the way gettext expects in a .mo.
 
     Context: ``ctxt\\x04msgid``; plurals: ``msgid\\0msgid_plural`` -> forms joined
@@ -112,11 +112,11 @@ def _parse_po(text: str, source: str = "<po>") -> Dict[str, str]:
     here it is logged as a warning, and the last translatable copy wins — so an
     empty or fuzzy copy cannot shadow a real translation.
     """
-    catalog: Dict[str, str] = {}
-    entry: Dict[str, Any] = {}
-    field: Optional[str] = None
+    catalog: dict[str, str] = {}
+    entry: dict[str, Any] = {}
+    field: str | None = None
     fuzzy = False
-    defined: Dict[tuple, int] = {}  # (msgctxt, msgid) -> line of its first definition
+    defined: dict[tuple, int] = {}  # (msgctxt, msgid) -> line of its first definition
 
     def flush() -> None:
         """Write the entry being built out, if it is translatable."""
@@ -202,7 +202,7 @@ def _parse_po(text: str, source: str = "<po>") -> Dict[str, str]:
     return catalog
 
 
-def _compile_mo(catalog: Dict[str, str]) -> bytes:
+def _compile_mo(catalog: dict[str, str]) -> bytes:
     """A GNU .mo image of the catalog (the layout CPython's Tools/i18n/msgfmt.py writes)."""
     keys = sorted(catalog)
     ids = strs = b""
@@ -244,17 +244,17 @@ class LocaleManager:
 
     def __init__(
         self,
-        language: Optional[str] = None,
-        locale_dir: Optional[Path] = None,
+        language: str | None = None,
+        locale_dir: Path | None = None,
         domain: str = DEFAULT_DOMAIN,
     ):
         self._locale_dir = locale_dir or DEFAULT_LOCALE_DIR
         self._domain = domain
         self._config = self._resolve_config(language)
         self._translation = self._load_translation()
-        self._cache: Dict[tuple, str] = {}
+        self._cache: dict[tuple, str] = {}
 
-    def _resolve_config(self, language: Optional[str]) -> LocaleConfig:
+    def _resolve_config(self, language: str | None) -> LocaleConfig:
         """Explicit language, or the system's (None or "auto")."""
         if language is None or language.strip().lower() == "auto":
             language = system_language()
@@ -295,7 +295,7 @@ class LocaleManager:
         """Current language code."""
         return self._config.language
 
-    def translate(self, message: str, context: Optional[str] = None) -> str:
+    def translate(self, message: str, context: str | None = None) -> str:
         """
         Translate a message.
 
@@ -322,7 +322,7 @@ class LocaleManager:
         singular: str,
         plural: str,
         n: int,
-        context: Optional[str] = None,
+        context: str | None = None,
     ) -> str:
         """
         Translate with plural forms support.
@@ -354,7 +354,7 @@ class LocaleManager:
         self,
         number: float,
         decimals: int = 2,
-        force_separator: Optional[str] = None,
+        force_separator: str | None = None,
     ) -> str:
         """
         Format number according to locale.
@@ -410,7 +410,7 @@ class LocaleManager:
         formatted = self.format_number(size, decimals=1)
         return f"{formatted} {units[unit_idx]}"
 
-    def get_locale_info(self) -> Dict[str, Any]:
+    def get_locale_info(self) -> dict[str, Any]:
         """Get current locale information."""
         return {
             "language": self._config.language,
@@ -422,7 +422,7 @@ class LocaleManager:
         }
 
 
-def _config_language() -> Optional[str]:
+def _config_language() -> str | None:
     """The locale.language from the config, or None when it is unset or "auto"."""
     try:
         from meret.core.config import get_config
@@ -438,10 +438,10 @@ def _config_language() -> Optional[str]:
 
 
 # Global instance (lazy-loaded)
-_locale_manager: Optional[LocaleManager] = None
+_locale_manager: LocaleManager | None = None
 
 
-def get_locale(language: Optional[str] = None) -> LocaleManager:
+def get_locale(language: str | None = None) -> LocaleManager:
     """Get or create the global locale manager: explicit language, config, system."""
     global _locale_manager
     if _locale_manager is None or language is not None:
@@ -449,7 +449,7 @@ def get_locale(language: Optional[str] = None) -> LocaleManager:
     return _locale_manager
 
 
-def set_locale(language: Optional[str]) -> LocaleManager:
+def set_locale(language: str | None) -> LocaleManager:
     """Set global locale language (None or "auto" = the system language)."""
     global _locale_manager
     _locale_manager = LocaleManager(language)
@@ -457,11 +457,11 @@ def set_locale(language: Optional[str]) -> LocaleManager:
 
 
 # Convenience functions
-def _(message: str, context: Optional[str] = None) -> str:
+def _(message: str, context: str | None = None) -> str:
     """Shorthand for translate."""
     return get_locale().translate(message, context)
 
 
-def ngettext(singular: str, plural: str, n: int, context: Optional[str] = None) -> str:
+def ngettext(singular: str, plural: str, n: int, context: str | None = None) -> str:
     """Shorthand for plural translation."""
     return get_locale().translate_plural(singular, plural, n, context)

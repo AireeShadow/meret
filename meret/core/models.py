@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any
 from datetime import datetime
 from enum import Enum
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FileType(str, Enum):
@@ -14,15 +15,15 @@ class FileType(str, Enum):
 class FileEntry(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: Optional[int] = None
+    id: int | None = None
     filename: str
     filepath: str
-    labels: List[str] = Field(default_factory=list)
+    labels: list[str] = Field(default_factory=list)
     rating: int = Field(default=0, ge=0, le=5)
     type: FileType = FileType.UNKNOWN
-    metadata: Optional[Dict[str, Any]] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    metadata: dict[str, Any] | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def add_label(self, label: str) -> None:
         if label not in self.labels:
@@ -36,17 +37,17 @@ class FileEntry(BaseModel):
 class Tag(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: Optional[int] = None
+    id: int | None = None
     name: str
-    colour: Optional[str] = None
-    parent_id: Optional[int] = None
+    colour: str | None = None
+    parent_id: int | None = None
     usage_count: int = 0
 
 
 class TagNode(Tag):
     """Tag with children — for the tree (folders from tags)."""
 
-    children: List["TagNode"] = Field(default_factory=list)
+    children: list["TagNode"] = Field(default_factory=list)
 
 
 TagNode.model_rebuild()

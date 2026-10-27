@@ -17,10 +17,11 @@ import reprlib
 import sys
 import threading
 import time
+from collections.abc import Callable
 from functools import wraps
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, TypeVar
 
 import platformdirs
 
@@ -45,7 +46,7 @@ def log_file_path() -> Path:
     return Path(platformdirs.user_log_dir(APP_NAME, appauthor=False)) / "meret.log"
 
 
-def resolve_level(level: Optional[str] = None) -> int:
+def resolve_level(level: str | None = None) -> int:
     """Explicit level, else $MERET_LOG_LEVEL, else INFO. ValueError if unknown."""
     name = (level or os.environ.get(ENV_LEVEL) or DEFAULT_LEVEL).strip().upper()
     value = logging.getLevelName(name)
@@ -82,7 +83,7 @@ class _StderrHandler(logging.StreamHandler):
 
 
 def setup_logging(
-    level: Optional[str] = None, *, console: bool = False, log_file: Optional[Path] = None
+    level: str | None = None, *, console: bool = False, log_file: Path | None = None
 ) -> Path:
     """Configure logging for an entry point. Calling it again replaces its handlers.
 

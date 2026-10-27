@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-import pytest_asyncio
 from PIL import Image
 
 from meret.core.config import ConfigManager
@@ -33,7 +32,7 @@ def english_and_isolated_config(tmp_path_factory, monkeypatch):
 @pytest.fixture(autouse=True)
 def clean_logger(tmp_path_factory, monkeypatch):
     """Logging is global: keep CLI logs out of the user's log dir, undo setup_logging()."""
-    from meret.core.logger import ENV_FILE, ENV_LEVEL, _MARK
+    from meret.core.logger import _MARK, ENV_FILE, ENV_LEVEL
 
     log_file = tmp_path_factory.mktemp("logs") / "meret.log"
     monkeypatch.setenv(ENV_FILE, str(log_file))

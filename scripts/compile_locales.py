@@ -2,7 +2,9 @@
 """Compile .po files to .mo files using polib."""
 
 from pathlib import Path
+
 import polib
+
 
 def compile_locales():
     locales_dir = Path(__file__).parent.parent / "meret" / "locales"

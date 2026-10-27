@@ -4,12 +4,10 @@ Lives in tests, but can easily move to meret/core/ if needed.
 """
 
 import functools
-from typing import Dict, List, Optional, Set, Tuple
 
 from meret.core import tagpaths
-from meret.core.models import FileEntry, FileType, Tag, TagNode
+from meret.core.models import FileEntry, Tag, TagNode
 from meret.core.repository import AbstractRepository
-
 
 
 def _mutates(method):
@@ -29,27 +27,27 @@ class MockRepository(AbstractRepository):
     """In-memory repository. Mirrors the semantics of the SQLite version."""
 
     def __init__(self) -> None:
-        self._files: Dict[int, FileEntry] = {}
-        self._tags: Dict[int, Tag] = {}
-        self._links: Set[Tuple[int, int]] = set()
+        self._files: dict[int, FileEntry] = {}
+        self._tags: dict[int, Tag] = {}
+        self._links: set[tuple[int, int]] = set()
         self._next_file_id = 1
         self._next_tag_id = 1
         self._version = 0
 
     # ---------- helpers ----------
-    def _child(self, parent_id: Optional[int], chunk: str) -> Optional[Tag]:
+    def _child(self, parent_id: int | None, chunk: str) -> Tag | None:
         key = chunk.casefold()
         for tag in self._tags.values():
             if tag.parent_id == parent_id and tag.name.casefold() == key:
                 return tag
         return None
 
-    def _tag_strict(self, ref: str) -> Optional[Tag]:
+    def _tag_strict(self, ref: str) -> Tag | None:
         chunks = tagpaths.parts(ref)
         if not chunks:
             return None
         tag = None
-        parent_id: Optional[int] = None
+        parent_id: int | None = None
         for chunk in chunks:
             tag = self._child(parent_id, chunk)
             if tag is None:
@@ -57,7 +55,7 @@ class MockRepository(AbstractRepository):
             parent_id = tag.id
         return tag
 
-    def _tag_by(self, ref: str) -> Optional[Tag]:
+    def _tag_by(self, ref: str) -> Tag | None:
         chunks = tagpaths.parts(ref)
         if not chunks:
             return None
@@ -70,7 +68,7 @@ class MockRepository(AbstractRepository):
         matches.sort(key=lambda t: (t.parent_id is not None, t.id or 0))
         return matches[0] if matches else None
 
-    def _ensure_tag(self, ref: str, colour: Optional[str] = None, reuse_any: bool = True) -> int:
+    def _ensure_tag(self, ref: str, colour: str | None = None, reuse_any: bool = True) -> int:
         chunks = tagpaths.parts(ref)
         if not chunks:
             raise ValueError(f"empty tag path: {ref!r}")
@@ -80,8 +78,8 @@ class MockRepository(AbstractRepository):
             if existing:
                 return existing.id
 
-        parent_id: Optional[int] = None
-        tag_id: Optional[int] = None
+        parent_id: int | None = None
+        tag_id: int | None = None
         for i, chunk in enumerate(chunks):
             tag = self._child(parent_id, chunk)
             if tag is None:
@@ -97,7 +95,7 @@ class MockRepository(AbstractRepository):
             parent_id = tag_id
         return tag_id
 
-    def _tag_names(self, file_id: int) -> List[str]:
+    def _tag_names(self, file_id: int) -> list[str]:
         names = [self._tags[t].name for (f, t) in self._links if f == file_id]
         return sorted(names, key=str.casefold)
 
@@ -110,11 +108,11 @@ class MockRepository(AbstractRepository):
         return clone
 
     # ---------- files ----------
-    def get_file_by_id(self, file_id: int) -> Optional[FileEntry]:
+    def get_file_by_id(self, file_id: int) -> FileEntry | None:
         entry = self._files.get(file_id)
         return self._clone(entry) if entry else None
 
-    def get_file_by_path(self, path: str) -> Optional[FileEntry]:
+    def get_file_by_path(self, path: str) -> FileEntry | None:
         for entry in self._files.values():
             if entry.filepath == path:
                 return self._clone(entry)
@@ -136,7 +134,7 @@ class MockRepository(AbstractRepository):
         return file.id
 
     @_mutates
-    def save_files(self, files, chunk_size: int = 1000, on_progress=None) -> Dict[str, int]:
+    def save_files(self, files, chunk_size: int = 1000, on_progress=None) -> dict[str, int]:
         stats = {"indexed": 0, "updated": 0, "errors": 0}
         total = len(files)
         for i, entry in enumerate(files, start=1):
@@ -157,7 +155,7 @@ class MockRepository(AbstractRepository):
 
     # ---------- tags: file links ----------
     @_mutates
-    def add_tag(self, file_id: int, tag: str, colour: Optional[str] = None) -> int:
+    def add_tag(self, file_id: int, tag: str, colour: str | None = None) -> int:
         tag_id = self._ensure_tag(tag, colour)
         self._links.add((file_id, tag_id))
         return tag_id
@@ -171,7 +169,7 @@ class MockRepository(AbstractRepository):
         return True
 
     @_mutates
-    def set_file_tags(self, file_id: int, tags: List[str]) -> bool:
+    def set_file_tags(self, file_id: int, tags: list[str]) -> bool:
         self._links = {(f, t) for (f, t) in self._links if f != file_id}
         for name in dict.fromkeys(tags):
             self._links.add((file_id, self._ensure_tag(name)))
@@ -208,8 +206,8 @@ class MockRepository(AbstractRepository):
         Walk up FROM THE PARENT looking for the tag: if we hit it, the parent is inside
         the tag's subtree and reparenting would create a loop.
         """
-        seen: Set[int] = set()
-        cur: Optional[int] = parent_id
+        seen: set[int] = set()
+        cur: int | None = parent_id
         while cur is not None and cur not in seen:
             if cur == tag_id:
                 return True
@@ -219,7 +217,7 @@ class MockRepository(AbstractRepository):
         return False
 
     @_mutates
-    def create_tag(self, name: str, colour: Optional[str] = None) -> bool:
+    def create_tag(self, name: str, colour: str | None = None) -> bool:
         if self._tag_strict(name) is not None:
             return False
         self._ensure_tag(name, colour, reuse_any=False)
@@ -238,7 +236,7 @@ class MockRepository(AbstractRepository):
         return True
 
     @_mutates
-    def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
+    def set_tag_parent(self, tag: str, parent: str | None) -> bool:
         node = self._tag_by(tag)
         if not node:
             return False
@@ -252,13 +250,13 @@ class MockRepository(AbstractRepository):
         return True
 
     # ---------- tags: reading ----------
-    def get_all_tags(self) -> List[Tag]:
+    def get_all_tags(self) -> list[Tag]:
         return sorted(
             (t.model_copy() for t in self._tags.values()),
             key=lambda t: t.name.casefold(),
         )
 
-    def get_tag_usage(self, limit: int = 100) -> List[Tag]:
+    def get_tag_usage(self, limit: int = 100) -> list[Tag]:
         tags = []
         for tag in self._tags.values():
             clone = tag.model_copy()
@@ -267,12 +265,12 @@ class MockRepository(AbstractRepository):
         tags.sort(key=lambda t: (-t.usage_count, t.name.casefold()))
         return tags[:limit]
 
-    def get_tag_tree(self) -> List[TagNode]:
+    def get_tag_tree(self) -> list[TagNode]:
         nodes = {
             t.id: TagNode(**{**t.model_dump(), "usage_count": self._usage(t.id)})
             for t in self._tags.values()
         }
-        roots: List[TagNode] = []
+        roots: list[TagNode] = []
         for node in nodes.values():
             parent = nodes.get(node.parent_id)
             if parent is None or parent is node:
@@ -324,13 +322,13 @@ class MockRepository(AbstractRepository):
                 results.append(self._clone(entry))
         return results[:limit] if limit is not None else results
 
-    def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]:
+    def search_by_name(self, query: str, limit: int = 100) -> list[FileEntry]:
         q = query.casefold()
         hits = [self._clone(e) for e in self._files.values() if q in e.filename.casefold()]
         return hits[:limit]
 
     def get_stats(self) -> dict:
-        by_type: Dict[str, int] = {}
+        by_type: dict[str, int] = {}
         for entry in self._files.values():
             by_type[entry.type.value] = by_type.get(entry.type.value, 0) + 1
         return {
@@ -339,16 +337,16 @@ class MockRepository(AbstractRepository):
             "total_tags": len(self._tags),
         }
 
-    def known_paths(self) -> Set[str]:
+    def known_paths(self) -> set[str]:
         return {entry.filepath for entry in self._files.values()}
 
     @staticmethod
-    def _fingerprint(entry: FileEntry) -> Tuple[int, float]:
+    def _fingerprint(entry: FileEntry) -> tuple[int, float]:
         meta = entry.metadata or {}
         return int(meta.get("size_bytes") or 0), float(meta.get("modified_at") or 0.0)
 
-    def known_fingerprints(self) -> Dict[str, Tuple[int, float]]:
+    def known_fingerprints(self) -> dict[str, tuple[int, float]]:
         return {e.filepath: self._fingerprint(e) for e in self._files.values()}
 
-    def data_version(self) -> Optional[int]:
+    def data_version(self) -> int | None:
         return self._version

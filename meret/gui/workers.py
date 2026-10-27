@@ -22,7 +22,8 @@ Lifetime rules, learned the hard way:
 """
 
 import logging
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot
 
@@ -52,7 +53,7 @@ class Task(QRunnable):
         self,
         fn: Callable[..., Any],
         args: tuple = (),
-        kwargs: Optional[dict] = None,
+        kwargs: dict | None = None,
     ) -> None:
         super().__init__()
         self.fn = fn
@@ -60,9 +61,9 @@ class Task(QRunnable):
         self.kwargs = kwargs or {}
         self.generation = 0
         self.sticky = False
-        self.on_done: Optional[Callable[[Any], None]] = None
-        self.on_failed: Optional[Callable[[Exception], None]] = None
-        self.runner: Optional["TaskRunner"] = None
+        self.on_done: Callable[[Any], None] | None = None
+        self.on_failed: Callable[[Exception], None] | None = None
+        self.runner: TaskRunner | None = None
         self.signals = _TaskSignals()
         # Python keeps ownership: _INFLIGHT references the task until delivery
         self.setAutoDelete(False)
@@ -82,7 +83,7 @@ class Task(QRunnable):
 class TaskRunner(QObject):
     """Pool plus generation bookkeeping. Create one per window, on the GUI thread."""
 
-    def __init__(self, parent: Optional[QObject] = None, max_threads: int = 0) -> None:
+    def __init__(self, parent: QObject | None = None, max_threads: int = 0) -> None:
         super().__init__(parent)
         self._pool = QThreadPool(self)
         if max_threads > 0:
@@ -103,12 +104,12 @@ class TaskRunner(QObject):
     def run(
         self,
         fn: Callable[..., Any],
-        on_done: Optional[Callable[[Any], None]] = None,
-        on_failed: Optional[Callable[[Exception], None]] = None,
+        on_done: Callable[[Any], None] | None = None,
+        on_failed: Callable[[Exception], None] | None = None,
         *,
         args: tuple = (),
-        kwargs: Optional[dict] = None,
-        generation: Optional[int] = None,
+        kwargs: dict | None = None,
+        generation: int | None = None,
         sticky: bool = False,
     ) -> Task:
         """Queue `fn`. Callbacks run on the GUI thread; stale ones are skipped.

@@ -8,16 +8,12 @@ Only `meret init` creates one (create=True).
 import logging
 import os
 from pathlib import Path
-from typing import Optional
 
-import typer
-import click
 from rich.console import Console
 
-from meret.core.repository import AbstractRepository
-from meret.core.sqlite_repo import SQLiteRepository
 from meret.core.config import get_config
 from meret.core.locale import _
+from meret.core.sqlite_repo import SQLiteRepository
 
 DB_NAME = "meret.db"
 ENV_DB_PATH = "MERET_DB"
@@ -56,7 +52,7 @@ def _db_file(given: Path | str) -> Path:
     return (p / DB_NAME if p.is_dir() else p).resolve()
 
 
-def resolve_db_path(path: Optional[Path] = None) -> Path:
+def resolve_db_path(path: Path | None = None) -> Path:
     """
     Resolve database path from CLI arg, environment or config.
 
@@ -92,7 +88,7 @@ def resolve_db_path(path: Optional[Path] = None) -> Path:
     return resolved
 
 
-def resolve_library_path(path: Optional[Path] = None) -> Optional[Path]:
+def resolve_library_path(path: Path | None = None) -> Path | None:
     """
     Resolve library path from CLI arg or config.
     """

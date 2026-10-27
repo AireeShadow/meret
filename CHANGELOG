@@ -1,3 +1,4 @@
+0.7.23 - readme and ruff check (part 1)
 0.7.22 - descriptor fix
 0.7.21 - fix for slow fs panel
 0.7.20 - fix for test freeze

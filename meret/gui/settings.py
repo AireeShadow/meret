@@ -12,7 +12,7 @@ after a few clicks it stops settling. One scrolling body has a single fixed geom
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -45,7 +45,7 @@ class Setting:
     name: str
     label: str
     kind: str  # "int" | "bool" | "choice" | "path" | "text"
-    choices: Tuple[str, ...] = ()
+    choices: tuple[str, ...] = ()
 
     @property
     def key(self) -> str:
@@ -53,7 +53,7 @@ class Setting:
         return f"{self.section}.{self.name}"
 
 
-def sections() -> Tuple[Tuple[str, str], ...]:
+def sections() -> tuple[tuple[str, str], ...]:
     """(section, title), in the order the groups are shown."""
     return (
         ("paths", _("Paths")),
@@ -63,7 +63,7 @@ def sections() -> Tuple[Tuple[str, str], ...]:
     )
 
 
-def settings_table() -> List[Setting]:
+def settings_table() -> list[Setting]:
     """Every field of the config. A function, so labels translate on call."""
     return [
         Setting("paths", "default_db", _("Default database"), "path"),
@@ -80,7 +80,7 @@ def settings_table() -> List[Setting]:
     ]
 
 
-def bounds(setting: Setting) -> Tuple[int, int]:
+def bounds(setting: Setting) -> tuple[int, int]:
     """The model's own ge/le for a number, so the two cannot drift apart.
 
     Capped: a spin box does not need a billion, and a smaller range keeps its width
@@ -96,7 +96,7 @@ def bounds(setting: Setting) -> Tuple[int, int]:
     return low, high
 
 
-def apply_settings(values: Dict[str, Any]) -> None:
+def apply_settings(values: dict[str, Any]) -> None:
     """Write the edited values and save once.
 
     Not `manager.set()` per key: that guesses a type from the text, so a path like
@@ -115,7 +115,7 @@ def apply_settings(values: Dict[str, Any]) -> None:
 class SettingsDialog(QDialog):
     """Every setting as a widget in one scrolling body, a group per section."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(_("Settings"))
         # A fixed size, so nothing the body does can resize the window while it is
@@ -124,10 +124,10 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(560)
 
         manager = get_config()
-        self._original: Dict[str, Any] = {
+        self._original: dict[str, Any] = {
             setting.key: manager.get(setting.key) for setting in settings_table()
         }
-        self._editors: Dict[str, QWidget] = {}
+        self._editors: dict[str, QWidget] = {}
 
         body = QWidget()
         body_layout = QVBoxLayout(body)
@@ -241,9 +241,9 @@ class SettingsDialog(QDialog):
         if chosen:
             line.setText(chosen)
 
-    def values(self) -> Dict[str, Any]:
+    def values(self) -> dict[str, Any]:
         """The edited values, by dot-key. Empty path fields become None."""
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         for setting in settings_table():
             editor = self._editors[setting.key]
             if isinstance(editor, QCheckBox):

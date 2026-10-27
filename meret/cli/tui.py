@@ -1,43 +1,39 @@
 """Interactive TUI for meret (like k9s)."""
 
-import os
-import asyncio
-import logging
-import subprocess
-import platform
 import ctypes
+import logging
+import os
+import platform
+import subprocess
 from pathlib import Path
-from typing import Optional
 
 from rich.markup import escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import (
-    DataTable,
+    Button,
     DirectoryTree,
     Footer,
     Header,
     Input,
     Label,
-    ListView,
     ListItem,
+    ListView,
+    OptionList,
     Static,
     Tree,
-    Button,
-    OptionList,
 )
 from textual.widgets.directory_tree import DirEntry
 
-from meret.cli.deps import get_repo, resolve_db_path, DatabaseNotFound
+from meret.cli.deps import DatabaseNotFound, get_repo
 from meret.core import tagpaths
-from meret.core.models import FileEntry, FileType
-from meret.core.logger import log_uncaught_exceptions, setup_logging
-from meret.vfs import VirtualTree, NotFound
 from meret.core.locale import _
+from meret.core.logger import log_uncaught_exceptions, setup_logging
+from meret.core.models import FileEntry
+from meret.vfs import NotFound, VirtualTree
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +48,6 @@ def get_drives_winapi():
             drives.append(Path(drive))
     return drives
 
-from textual.widgets import OptionList
 
 class DriveSelector(ModalScreen[str]):
     """Simple drive selector."""
@@ -79,7 +74,7 @@ class FilePreview(Static):
         super().__init__(_("Select a file to preview"), id="preview")
         self.border_title = _("Preview")
     
-    def update_preview(self, path: Optional[Path], is_virtual: bool = False):
+    def update_preview(self, path: Path | None, is_virtual: bool = False):
         """Update preview content."""
         if path is None:
             self.update(f"[dim]{_('No selection')}[/dim]")
@@ -439,11 +434,11 @@ class MeretApp(App):
         Binding("?", "help", _("Help")),
     ]
     
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Path | None = None):
         super().__init__()
         self.db_path = db_path or Path(".")
-        self.selected_real: Optional[Path] = None
-        self.selected_virtual: Optional[str] = None
+        self.selected_real: Path | None = None
+        self.selected_virtual: str | None = None
         # Start from home directory for full filesystem access
         self.fs_root = Path.home()
         self.sort_by = _("name")  # name, size, date
@@ -845,8 +840,8 @@ class MeretApp(App):
                 try:
                     self.notify(_("Mounting at {path}...").format(path=path))
                     # Import and call directly instead of subprocess
-                    from meret.vfs.backends.mount import mount as do_mount
                     from meret.vfs import VirtualTree
+                    from meret.vfs.backends.mount import mount as do_mount
                     
                     repo = get_repo(self.db_path)
                     tree = VirtualTree(repo)
@@ -856,7 +851,7 @@ class MeretApp(App):
                     def mount_thread():
                         try:
                             do_mount(tree, Path(path))
-                        except Exception as e:
+                        except Exception:
                             logger.exception("mount at %s failed", path)
                             self.call_from_thread(
                                 lambda: self.notify(f"Mount error: {e}", severity="error")

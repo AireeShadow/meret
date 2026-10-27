@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, Set, Tuple, Optional
+from collections.abc import Callable
 
 from meret.core.models import FileEntry, Tag, TagNode
 
@@ -9,10 +9,10 @@ class AbstractRepository(ABC):
 
     # --- files ---
     @abstractmethod
-    def get_file_by_id(self, file_id: int) -> Optional[FileEntry]: ...
+    def get_file_by_id(self, file_id: int) -> FileEntry | None: ...
 
     @abstractmethod
-    def get_file_by_path(self, path: str) -> Optional[FileEntry]: ...
+    def get_file_by_path(self, path: str) -> FileEntry | None: ...
 
     @abstractmethod
     def save_file(self, file: FileEntry) -> int: ...
@@ -20,10 +20,10 @@ class AbstractRepository(ABC):
     @abstractmethod
     def save_files(
         self,
-        files: List[FileEntry],
+        files: list[FileEntry],
         chunk_size: int = 1000,
-        on_progress: Optional[Callable[[int, int], None]] = None,
-    ) -> Dict[str, int]:
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> dict[str, int]:
         """Batch write: one transaction per chunk_size files.
 
         Returns {"indexed": n, "updated": m, "errors": k}.
@@ -35,19 +35,19 @@ class AbstractRepository(ABC):
 
     # --- tags ---
     @abstractmethod
-    def add_tag(self, file_id: int, tag: str, colour: Optional[str] = None) -> int: ...
+    def add_tag(self, file_id: int, tag: str, colour: str | None = None) -> int: ...
 
     @abstractmethod
     def remove_tag(self, file_id: int, tag: str) -> bool: ...
 
     @abstractmethod
-    def set_file_tags(self, file_id: int, tags: List[str]) -> bool: ...
+    def set_file_tags(self, file_id: int, tags: list[str]) -> bool: ...
 
     @abstractmethod
     def rename_tag(self, old: str, new: str) -> bool: ...
 
     @abstractmethod
-    def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
+    def set_tag_parent(self, tag: str, parent: str | None) -> bool:
         """Move a tag under another parent (parent=None → to the root).
 
         False if the tag or the parent isn't found, or if it would create a cycle
@@ -55,19 +55,19 @@ class AbstractRepository(ABC):
         """
 
     @abstractmethod
-    def get_all_tags(self) -> List[Tag]: ...
+    def get_all_tags(self) -> list[Tag]: ...
 
     @abstractmethod
-    def get_tag_tree(self) -> List[TagNode]: ...
+    def get_tag_tree(self) -> list[TagNode]: ...
 
     @abstractmethod
-    def get_tag_usage(self, limit: int = 100) -> List[Tag]: ...
+    def get_tag_usage(self, limit: int = 100) -> list[Tag]: ...
 
     @abstractmethod
     def prune_orphan_tags(self) -> int: ...
 
     @abstractmethod
-    def create_tag(self, name: str, colour: Optional[str] = None) -> bool: ...
+    def create_tag(self, name: str, colour: str | None = None) -> bool: ...
 
     @abstractmethod
     def delete_tag(self, name: str) -> bool: ...
@@ -76,20 +76,20 @@ class AbstractRepository(ABC):
     @abstractmethod
     def search_by_tags(
         self,
-        tags: List[str],
+        tags: list[str],
         match_all: bool = False,
-        file_type: Optional[str] = None,
+        file_type: str | None = None,
         limit: int = 100,
-    ) -> List[FileEntry]: ...
+    ) -> list[FileEntry]: ...
 
     @abstractmethod
     def search_by_tag_ids(
         self,
-        groups: List[List[int]],
+        groups: list[list[int]],
         match_all: bool = False,
-        file_type: Optional[str] = None,
-        limit: Optional[int] = None,
-    ) -> List[FileEntry]:
+        file_type: str | None = None,
+        limit: int | None = None,
+    ) -> list[FileEntry]:
         """Files matching any tag id of a group; all groups if match_all.
 
         Unlike search_by_tags (which matches by name), this tells namesakes
@@ -97,20 +97,20 @@ class AbstractRepository(ABC):
         """
 
     @abstractmethod
-    def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]: ...
+    def search_by_name(self, query: str, limit: int = 100) -> list[FileEntry]: ...
 
     @abstractmethod
     def get_stats(self) -> dict: ...
 
     @abstractmethod
-    def known_paths(self) -> Set[str]:
+    def known_paths(self) -> set[str]:
         """All paths already known to the database.
 
         One query for the whole scan, so incremental mode doesn't issue a
         SELECT per file (otherwise it's the same story we had with writes).
         """
     @abstractmethod
-    def known_fingerprints(self) -> Dict[str, Tuple[int, float]]:
+    def known_fingerprints(self) -> dict[str, tuple[int, float]]:
         """{filepath: (size, mtime)} for every indexed file.
 
         Lets the incremental scan re-index files that changed on disk while
@@ -118,7 +118,7 @@ class AbstractRepository(ABC):
         """
 
     # --- change tracking ---
-    def data_version(self) -> Optional[int]:
+    def data_version(self) -> int | None:
         """A number that changes whenever the stored data changes.
 
         Readers that cache (the virtual FS) compare it to know when to refresh.

@@ -1,10 +1,9 @@
-import re
 import json
 import logging
+import re
 import sqlite3
 import threading
 from pathlib import Path
-from typing import Dict, List, Set, Tuple, Optional
 
 from meret.core import tagpaths
 from meret.core.logger import traced
@@ -26,7 +25,7 @@ def _iter_statements(script: str):
     so we must split them strictly one by one.
     """
     buf: list[str] = []
-    quote: Optional[str] = None
+    quote: str | None = None
     depth = 0  # BEGIN...END nesting depth
     i, n = 0, len(script)
 
@@ -107,13 +106,13 @@ class SQLiteRepository(AbstractRepository):
     def __init__(self, db_path: str):
         self.db_path = str(db_path)
         self.fts_enabled = True
-        self._watch: Optional[sqlite3.Connection] = None  # for data_version()
+        self._watch: sqlite3.Connection | None = None  # for data_version()
         self._watch_lock = threading.Lock()
         self._init_tables()
 
     #----------- helpers -------------
     @staticmethod
-    def _fingerprint(entry: FileEntry) -> Tuple[int, float]:
+    def _fingerprint(entry: FileEntry) -> tuple[int, float]:
         """(size, mtime) from the extracted metadata — the incremental scan key."""
         meta = entry.metadata or {}
         try:
@@ -206,7 +205,7 @@ class SQLiteRepository(AbstractRepository):
 
     # ---------- conversion ----------
     @staticmethod
-    def _tags_from_row(row) -> List[str]:
+    def _tags_from_row(row) -> list[str]:
         raw = row["tag_names"] if "tag_names" in row.keys() else ""
         return raw.split(_TAG_SEP) if raw else []
 
@@ -223,7 +222,7 @@ class SQLiteRepository(AbstractRepository):
             updated_at=row["updated_at"],
         )
 
-    _SELECT_FILES = f"""
+    _SELECT_FILES = """
         SELECT f.*, COALESCE(GROUP_CONCAT(t.name, char(31)), '') AS tag_names
         FROM files f
         LEFT JOIN file_tags ft ON ft.file_id = f.id
@@ -240,7 +239,7 @@ class SQLiteRepository(AbstractRepository):
             conn.execute("ALTER TABLE files ADD COLUMN mtime REAL DEFAULT 0")
 
     @_traced
-    def get_file_by_id(self, file_id: int) -> Optional[FileEntry]:
+    def get_file_by_id(self, file_id: int) -> FileEntry | None:
         with self._connect() as conn:
             row = conn.execute(
                 f"{self._SELECT_FILES} WHERE f.id = ? GROUP BY f.id", (file_id,)
@@ -248,7 +247,7 @@ class SQLiteRepository(AbstractRepository):
             return self._row_to_file(row) if row else None
 
     @_traced
-    def get_file_by_path(self, path: str) -> Optional[FileEntry]:
+    def get_file_by_path(self, path: str) -> FileEntry | None:
         with self._connect() as conn:
             row = conn.execute(
                 f"{self._SELECT_FILES} WHERE f.filepath = ? GROUP BY f.id", (path,)
@@ -282,10 +281,10 @@ class SQLiteRepository(AbstractRepository):
     @_traced
     def save_files(
         self,
-        files: List[FileEntry],
+        files: list[FileEntry],
         chunk_size: int = 1000,
         on_progress=None,
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Batch of files: one connection, a transaction per chunk, executemany."""
         stats = {"indexed": 0, "updated": 0, "errors": 0}
         if not files:
@@ -351,7 +350,7 @@ class SQLiteRepository(AbstractRepository):
         WHERE COALESCE(parent_id, 0) = COALESCE(?, 0) AND name_key = ?
     """
 
-    def _child_row(self, conn, parent_id: Optional[int], chunk: str):
+    def _child_row(self, conn, parent_id: int | None, chunk: str):
         return conn.execute(self._FIND_CHILD_SQL, (parent_id, chunk.casefold())).fetchone()
 
     def _tag_strict(self, conn, ref: str):
@@ -360,7 +359,7 @@ class SQLiteRepository(AbstractRepository):
         if not chunks:
             return None
         row = None
-        parent_id: Optional[int] = None
+        parent_id: int | None = None
         for chunk in chunks:
             row = self._child_row(conn, parent_id, chunk)
             if row is None:
@@ -389,12 +388,12 @@ class SQLiteRepository(AbstractRepository):
             (chunks[0].casefold(),),
         ).fetchone()
 
-    def _tag_id(self, conn, ref: str) -> Optional[int]:
+    def _tag_id(self, conn, ref: str) -> int | None:
         row = self._tag_row(conn, ref)
         return row["id"] if row else None
 
     def _ensure_tag(
-        self, conn, ref: str, colour: Optional[str] = None, reuse_any: bool = True
+        self, conn, ref: str, colour: str | None = None, reuse_any: bool = True
     ) -> int:
         """Returns the tag id, creating it and any missing parents along the path.
 
@@ -410,8 +409,8 @@ class SQLiteRepository(AbstractRepository):
             if row is not None:
                 return row["id"]
 
-        parent_id: Optional[int] = None
-        tag_id: Optional[int] = None
+        parent_id: int | None = None
+        tag_id: int | None = None
         for i, chunk in enumerate(chunks):
             row = self._child_row(conn, parent_id, chunk)
             if row is None:
@@ -431,7 +430,7 @@ class SQLiteRepository(AbstractRepository):
         inside the tag's subtree, and reparenting would create a loop.
         """
         seen: set[int] = set()
-        cur: Optional[int] = parent_id
+        cur: int | None = parent_id
         while cur is not None and cur not in seen:
             if cur == tag_id:
                 return True
@@ -441,7 +440,7 @@ class SQLiteRepository(AbstractRepository):
         return False
 
     @_traced
-    def add_tag(self, file_id: int, tag: str, colour: Optional[str] = None) -> int:
+    def add_tag(self, file_id: int, tag: str, colour: str | None = None) -> int:
         with self._connect() as conn:
             tag_id = self._ensure_tag(conn, tag, colour)
             conn.execute(
@@ -465,7 +464,7 @@ class SQLiteRepository(AbstractRepository):
             return cur.rowcount > 0
 
     @_traced
-    def set_file_tags(self, file_id: int, tags: List[str]) -> bool:
+    def set_file_tags(self, file_id: int, tags: list[str]) -> bool:
         with self._connect() as conn:
             conn.execute("DELETE FROM file_tags WHERE file_id = ?", (file_id,))
             for name in dict.fromkeys(tags):  # dedupe while preserving order
@@ -515,7 +514,7 @@ class SQLiteRepository(AbstractRepository):
     # ---------- tags: creation and hierarchy ----------
 
     @_traced
-    def create_tag(self, name: str, colour: Optional[str] = None) -> bool:
+    def create_tag(self, name: str, colour: str | None = None) -> bool:
         """Create a tag by path, building any missing parents.
 
         The path is strict: create_tag("a") creates a root "a" even if a nested
@@ -544,7 +543,7 @@ class SQLiteRepository(AbstractRepository):
             return True
 
     @_traced
-    def set_tag_parent(self, tag: str, parent: Optional[str]) -> bool:
+    def set_tag_parent(self, tag: str, parent: str | None) -> bool:
         with self._connect() as conn:
             row = self._tag_row(conn, tag)
             if row is None:
@@ -566,7 +565,7 @@ class SQLiteRepository(AbstractRepository):
 
     # ---------- tags: reading ----------
     @_traced
-    def get_all_tags(self) -> List[Tag]:
+    def get_all_tags(self) -> list[Tag]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT id, name, colour, parent_id FROM tags ORDER BY name_key"
@@ -574,7 +573,7 @@ class SQLiteRepository(AbstractRepository):
             return [Tag(**dict(r)) for r in rows]
 
     @_traced
-    def get_tag_usage(self, limit: int = 100) -> List[Tag]:
+    def get_tag_usage(self, limit: int = 100) -> list[Tag]:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT t.id, t.name, t.colour, t.parent_id,
@@ -586,10 +585,10 @@ class SQLiteRepository(AbstractRepository):
             return [Tag(**dict(r)) for r in rows]
 
     @_traced
-    def get_tag_tree(self) -> List[TagNode]:
+    def get_tag_tree(self) -> list[TagNode]:
         tags = self.get_all_tags()
         nodes = {t.id: TagNode(**t.model_dump()) for t in tags}
-        roots: List[TagNode] = []
+        roots: list[TagNode] = []
         for node in nodes.values():
             parent = nodes.get(node.parent_id)
             if parent is None or parent is node:
@@ -632,11 +631,11 @@ class SQLiteRepository(AbstractRepository):
     @_traced
     def search_by_tags(
         self,
-        tags: List[str],
+        tags: list[str],
         match_all: bool = False,
-        file_type: Optional[str] = None,
+        file_type: str | None = None,
         limit: int = 100,
-    ) -> List[FileEntry]:
+    ) -> list[FileEntry]:
         if not tags:
             sql = f"{self._SELECT_FILES} WHERE 1=1"
             params: list = []
@@ -673,16 +672,16 @@ class SQLiteRepository(AbstractRepository):
     @_traced
     def search_by_tag_ids(
         self,
-        groups: List[List[int]],
+        groups: list[list[int]],
         match_all: bool = False,
-        file_type: Optional[str] = None,
-        limit: Optional[int] = None,
-    ) -> List[FileEntry]:
+        file_type: str | None = None,
+        limit: int | None = None,
+    ) -> list[FileEntry]:
         groups = [g for g in groups if g]
         if not groups:
             return []
 
-        clauses: List[str] = []
+        clauses: list[str] = []
         params: list = []
         for group in groups:
             holes = ",".join("?" for _ in group)
@@ -708,7 +707,7 @@ class SQLiteRepository(AbstractRepository):
             return [self._row_to_file(r) for r in rows]
 
     @_traced
-    def search_by_name(self, query: str, limit: int = 100) -> List[FileEntry]:
+    def search_by_name(self, query: str, limit: int = 100) -> list[FileEntry]:
         with self._connect() as conn:
             if self.fts_enabled and query.strip():
                 # FTS5: prefix search by words
@@ -739,12 +738,12 @@ class SQLiteRepository(AbstractRepository):
             return {"total_files": total, "by_type": by_type, "total_tags": tags}
 
     @_traced
-    def known_paths(self) -> Set[str]:
+    def known_paths(self) -> set[str]:
         with self._connect() as conn:
             return {row[0] for row in conn.execute("SELECT filepath FROM files")}
 
     @_traced
-    def known_fingerprints(self) -> Dict[str, Tuple[int, float]]:
+    def known_fingerprints(self) -> dict[str, tuple[int, float]]:
         """{filepath: (size, mtime)} — one query for the whole incremental scan."""
         with self._connect() as conn:
             return {
@@ -753,7 +752,7 @@ class SQLiteRepository(AbstractRepository):
             }
 
     # ---------- change tracking ----------
-    def data_version(self) -> Optional[int]:
+    def data_version(self) -> int | None:
         """PRAGMA data_version on a dedicated long-lived connection.
 
         The pragma only moves for commits made by OTHER connections. That covers

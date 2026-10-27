@@ -5,11 +5,10 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-from pydantic import ValidationError
+from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from meret.core.config import (
     CONFIG_FILENAME,
@@ -20,7 +19,6 @@ from meret.core.config import (
     PathsConfig,
     ScanConfig,
     get_config,
-    reload_config,
 )
 
 

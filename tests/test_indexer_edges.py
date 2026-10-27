@@ -2,7 +2,6 @@
 
 import logging
 
-import pytest
 from PIL import Image
 
 from meret.core.indexer import Indexer

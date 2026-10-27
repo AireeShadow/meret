@@ -1,22 +1,20 @@
 """CLI commands for the virtual FS: ls / open / stat."""
 
 import os
-import sys
-import signal
 import platform
+import signal
 import subprocess
-
+import sys
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from meret.cli.app import app
-from meret.cli.deps import get_repo, DatabaseNotFound
-from meret.vfs import IsADirectory, NotFound, VirtualTree
+from meret.cli.deps import DatabaseNotFound, get_repo
 from meret.core.locale import _
+from meret.vfs import IsADirectory, NotFound, VirtualTree
 
 console = Console()
 
@@ -41,7 +39,7 @@ def _open_external(path: Path) -> None:
         subprocess.run(["xdg-open", str(path)], check=False)
 
 
-def _get_tree(db_path: Optional[Path]) -> VirtualTree:
+def _get_tree(db_path: Path | None) -> VirtualTree:
     """None = the usual lookup (config paths.default_db, then ./meret.db)."""
     return VirtualTree(get_repo(db_path))
 
@@ -49,7 +47,7 @@ def _get_tree(db_path: Optional[Path]) -> VirtualTree:
 @app.command("ls", help=_("List the contents of a virtual directory (tags = folders)."))
 def ls(
     vpath: str = typer.Argument("/", help=_("Virtual path, e.g. /travel")),
-    db_path: Optional[Path] = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
+    db_path: Path | None = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
     long: bool = typer.Option(False, "--long", "-l", help=_("Show sizes")),
 ):
     """List the contents of a virtual directory (tags = folders)."""
@@ -86,7 +84,7 @@ def ls(
 @app.command("open", help=_("Open a file with the system's default application."))
 def open_file(
     vpath: str = typer.Argument(..., help=_("Path to the file")),
-    db_path: Optional[Path] = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
+    db_path: Path | None = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
     path_only: bool = typer.Option(False, "--path", "-p", help=_("Only print the path")),
 ):
     """Open a file with the system's default application."""
@@ -115,7 +113,7 @@ def open_file(
 @app.command("stat", help=_("Info about a virtual FS node."))
 def stat_cmd(
     vpath: str = typer.Argument(..., help=_("Virtual path")),
-    db_path: Optional[Path] = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
+    db_path: Path | None = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
 ):
     """Info about a virtual FS node."""
     tree = _get_tree(db_path)
@@ -138,7 +136,7 @@ def stat_cmd(
 @app.command("mount", help=_("Mount tags as a drive/directory (read-only)."))
 def mount_cmd(
     mountpoint: Path = typer.Argument(..., help=_("Where to mount, e.g. M:")),
-    db_path: Optional[Path] = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
+    db_path: Path | None = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
 ):
     """Mount tags as a drive/directory (read-only)."""
     from meret.vfs.backends.mount import mount as _mount

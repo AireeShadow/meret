@@ -4,36 +4,35 @@ import logging
 import os
 import sys
 from collections import deque
+from collections.abc import Sequence
 from difflib import get_close_matches
 from pathlib import Path
-from typing import List, Optional, Sequence
 
 import click
 import typer
 from rich.console import Console
+from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.tree import Tree
-from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 from typer.core import TyperGroup
 
+from meret import __version__
+from meret.cli.deps import get_repo, resolve_db_path
 from meret.core import tagpaths
-from meret.core.locale import _, ngettext, set_locale, get_locale
+from meret.core.config import get_config
 from meret.core.indexer import PHASE_COLLECT, PHASE_EXTRACT, PHASE_INDEX, Indexer
-from meret.core.models import Tag
-from meret.core.repository import AbstractRepository
-from meret.core.config import get_config, CONFIG_FILENAME
+from meret.core.locale import _, set_locale
 from meret.core.logger import (
-    ENV_LEVEL,
     disable_console_logging,
     log_file_path,
     log_uncaught_exceptions,
     setup_logging,
 )
-from meret import __version__
-from meret.cli.deps import get_repo, resolve_db_path
+from meret.core.models import Tag
+from meret.core.repository import AbstractRepository
 
 
-def _language_in(args: Sequence[str]) -> Optional[str]:
+def _language_in(args: Sequence[str]) -> str | None:
     """The value of --lang / -l / --lang= in an argument list, if present."""
     for index, arg in enumerate(args):
         if arg in ("--lang", "-l") and index + 1 < len(args):
@@ -43,7 +42,7 @@ def _language_in(args: Sequence[str]) -> Optional[str]:
     return None
 
 
-def _apply_language_from_argv(argv: Optional[List[str]] = None) -> None:
+def _apply_language_from_argv(argv: list[str] | None = None) -> None:
     """Honour --lang before any command is built.
 
     Typer freezes every `help=` string the moment the decorators run, which is at
@@ -130,8 +129,8 @@ DB_OPTION = typer.Option(
 def main(
     ctx: typer.Context,
     verbose: bool = typer.Option(False, "--verbose", "-v"),
-    log_level: Optional[str] = typer.Option(None, "--log-level"),
-    language: Optional[str] = typer.Option(
+    log_level: str | None = typer.Option(None, "--log-level"),
+    language: str | None = typer.Option(
         None, "--lang", "-l",
         help=_("Language: en, ru, … (default: config locale.language, else the system's)"),
     ),
@@ -172,7 +171,7 @@ def logs(
 # ----- database -----
 @app.command(help=_("Create the database. The only command that creates it."))
 def init(
-    path: Optional[Path] = typer.Argument(
+    path: Path | None = typer.Argument(
         None, help=_("Directory for the database or path to a .db file (default: current dir)")
     ),
     force: bool = typer.Option(False, "--force", "-f", help=_("Recreate if the database exists")),
@@ -193,7 +192,7 @@ def init(
 
 
 @app.command(help=_("Show which database meret sees."))
-def where(db_path: Optional[Path] = DB_OPTION):
+def where(db_path: Path | None = DB_OPTION):
     """Show which database meret sees."""
     path = resolve_db_path(db_path)
     if path.exists():
@@ -207,7 +206,7 @@ def where(db_path: Optional[Path] = DB_OPTION):
 @app.command(help=_("Scan and index media."))
 def scan(
     library: Path = typer.Argument(..., help=_("What to scan")),
-    db_path: Optional[Path] = DB_OPTION,
+    db_path: Path | None = DB_OPTION,
     dry_run: bool = typer.Option(False, "--dry-run", "-n"),
     skip_existing: bool = typer.Option(
         False, "--skip-existing", "-s",
@@ -261,10 +260,10 @@ def scan(
 @app.command(help=_("Search by name and/or tags. A tag path also matches its whole subtree."))
 def search(
     query: str = typer.Argument("", help=_("Text in the file name")),
-    db_path: Optional[Path] = DB_OPTION,
-    tags: Optional[List[str]] = typer.Option(None, "--tag", "-g", help=_("Tag path: genre/mystery")),
+    db_path: Path | None = DB_OPTION,
+    tags: list[str] | None = typer.Option(None, "--tag", "-g", help=_("Tag path: genre/mystery")),
     match_all: bool = typer.Option(False, "--all", help=_("Files with ALL the tags")),
-    file_type: Optional[str] = typer.Option(None, "--type", "-t"),
+    file_type: str | None = typer.Option(None, "--type", "-t"),
 ):
     """Search by name and/or tags. A tag path also matches its whole subtree."""
     repo = get_repo(db_path)
@@ -307,8 +306,8 @@ def _print_tree(repo: AbstractRepository) -> None:
 
 
 def _ensure_path(
-    repo: AbstractRepository, path: str, colour: Optional[str] = None
-) -> Optional[Tag]:
+    repo: AbstractRepository, path: str, colour: str | None = None
+) -> Tag | None:
     """Tag by path; missing parents are created. None for an empty path."""
     path = tagpaths.normalize(path)
     if not path:
@@ -330,8 +329,8 @@ def _path_of(repo: AbstractRepository, name: str) -> str:
 @app.command(help=_("Add/remove tags on a file. A path creates any missing parents."))
 def tag(
     filepath: Path = typer.Argument(..., help=_("File")),
-    labels: List[str] = typer.Argument(..., help=_("Tag paths: genre/mystery")),
-    db_path: Optional[Path] = DB_OPTION,
+    labels: list[str] = typer.Argument(..., help=_("Tag paths: genre/mystery")),
+    db_path: Path | None = DB_OPTION,
     remove: bool = typer.Option(False, "--remove", "-r"),
 ):
     """Add/remove tags on a file. A path creates any missing parents."""
@@ -342,7 +341,7 @@ def tag(
         console.print(f"[red]{msg}[/red]")
         raise typer.Exit(1)
     
-    done: List[str] = []
+    done: list[str] = []
     for label in labels:
         found = (
             tagpaths.resolve(label, repo.get_all_tags()) if remove else _ensure_path(repo, label)
@@ -369,8 +368,8 @@ def tag(
 @app.command("tag-new", help=_("Create a tag and all of its missing parents along the path."))
 def tag_new(
     path: str = typer.Argument(..., help=_("Tag path: genre/mystery")),
-    colour: Optional[str] = typer.Option(None, "--colour", "-c"),
-    db_path: Optional[Path] = DB_OPTION,
+    colour: str | None = typer.Option(None, "--colour", "-c"),
+    db_path: Path | None = DB_OPTION,
 ):
     """Create a tag and all of its missing parents along the path."""
     repo = get_repo(db_path)
@@ -386,7 +385,7 @@ def tag_new(
 @app.command("tag-del", help=_("Delete a tag. Its children move up to its parent's level."))
 def tag_del(
     path: str = typer.Argument(..., help=_("Tag path")),
-    db_path: Optional[Path] = DB_OPTION,
+    db_path: Path | None = DB_OPTION,
 ):
     """Delete a tag. Its children move up to its parent's level."""
     repo = get_repo(db_path)
@@ -402,8 +401,8 @@ def tag_del(
 @app.command(help=_("Move a tag (by path) under a new parent. Hierarchy = folders in the virtual FS."))
 def parent(
     child: str = typer.Argument(..., help=_("Path of the tag to move")),
-    new_parent: Optional[str] = typer.Argument(None, help=_("New parent. Omit to move to the root")),
-    db_path: Optional[Path] = DB_OPTION,
+    new_parent: str | None = typer.Argument(None, help=_("New parent. Omit to move to the root")),
+    db_path: Path | None = DB_OPTION,
 ):
     """Move a tag (by path) under a new parent."""
     repo = get_repo(db_path)
@@ -443,7 +442,7 @@ def parent(
 
 
 @app.command("tags", help=_("Show tags as paths, with file counts."))
-def list_tags(db_path: Optional[Path] = DB_OPTION):
+def list_tags(db_path: Path | None = DB_OPTION):
     """Show tags as paths, with file counts."""
     repo = get_repo(db_path)
     usage = repo.get_tag_usage()
@@ -462,13 +461,13 @@ def list_tags(db_path: Optional[Path] = DB_OPTION):
 
 
 @app.command(help=_("Show the tag hierarchy as a tree."))
-def tree(db_path: Optional[Path] = DB_OPTION):
+def tree(db_path: Path | None = DB_OPTION):
     """Show the tag hierarchy as a tree."""
     _print_tree(get_repo(db_path))
 
 
 @app.command("tag-prune", help=_("Delete tags that have no files and no children."))
-def tag_prune(db_path: Optional[Path] = DB_OPTION):
+def tag_prune(db_path: Path | None = DB_OPTION):
     """Delete tags that have no files and no children."""
     n = get_repo(db_path).prune_orphan_tags()
     console.print(f"[green]✓ {_('Tags deleted: {n}').format(n=n)}[/green]")
@@ -476,7 +475,7 @@ def tag_prune(db_path: Optional[Path] = DB_OPTION):
 
 # ----- misc -----
 @app.command(help=_("Database statistics."))
-def stats(db_path: Optional[Path] = DB_OPTION):
+def stats(db_path: Path | None = DB_OPTION):
     """Database statistics."""
     s = get_repo(db_path).get_stats()
     console.print(_("Files: {files}, tags: {tags}").format(files=s["total_files"], tags=s["total_tags"]))
@@ -584,7 +583,7 @@ def config_set(
 @config_app.command("edit", help=_("Open config file in default editor."))
 def config_edit():
     """Open config file in default editor."""
-    from meret.core.config import get_config, CONFIG_FILENAME
+    from meret.core.config import get_config
     
     cfg = get_config()
     config_path = cfg.config_path
@@ -660,7 +659,7 @@ def config_path():
 
 @app.command("tui", help=_("Launch interactive TUI."))
 def tui(
-    db_path: Optional[Path] = DB_OPTION,
+    db_path: Path | None = DB_OPTION,
 ):
     """Launch interactive TUI."""
     from meret.cli.tui import MeretApp
@@ -677,7 +676,7 @@ def tui(
         raise typer.Exit(1)
 
 @app.command("gui", help=_("Launch the graphical interface."))
-def gui(db_path: Optional[Path] = DB_OPTION):
+def gui(db_path: Path | None = DB_OPTION):
     """Launch the graphical interface."""
     try:
         from meret.gui.app import run_gui
@@ -695,8 +694,7 @@ def gui(db_path: Optional[Path] = DB_OPTION):
 
 
 # ls / open / stat / mount / umount register themselves
-from meret.cli import vfs_cmds  # noqa: E402,F401
-
+from meret.cli import vfs_cmds  # noqa: F401
 
 if __name__ == "__main__":
     app()

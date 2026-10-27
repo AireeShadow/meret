@@ -1,12 +1,10 @@
 """Indexer tests: two phases — collect (listing) and extract (metadata)."""
 
-import pytest
 
 from PIL import Image
 
 from meret.core.extractors import VideoExtractor
 from meret.core.indexer import PHASE_COLLECT, PHASE_EXTRACT, Indexer
-
 
 # ---------- collect phase ----------
 

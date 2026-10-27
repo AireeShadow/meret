@@ -14,17 +14,16 @@ import logging
 import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Optional, List
+from typing import Any
 
 from meret.core.models import FileType
-
 
 logger = logging.getLogger(__name__)
 
 _ffprobe_missing_reported = False
 
 
-def _ffprobe(file_path: Path) -> Dict[str, Any]:
+def _ffprobe(file_path: Path) -> dict[str, Any]:
     """Runs ffprobe and returns its JSON.
 
     `-v error` (not quiet) so a failure carries ffprobe's own reason in stderr.
@@ -64,7 +63,6 @@ def _ffprobe(file_path: Path) -> Dict[str, Any]:
 class ExtractionError(Exception):
     """Metadata extraction error"""
 
-    pass
 
 
 class MetadataExtractor(ABC):
@@ -85,7 +83,7 @@ class MetadataExtractor(ABC):
         return file_path.suffix.lower() in self.supported_extensions
 
     @abstractmethod
-    def extract(self, file_path: Path) -> Dict[str, Any]:
+    def extract(self, file_path: Path) -> dict[str, Any]:
         """
         Extracts metadata from a file.
 
@@ -94,7 +92,7 @@ class MetadataExtractor(ABC):
         """
         ...
 
-    def _base_metadata(self, file_path: Path) -> Dict[str, Any]:
+    def _base_metadata(self, file_path: Path) -> dict[str, Any]:
         """Basic file info shared by all types"""
         try:
             stat = file_path.stat()
@@ -114,8 +112,8 @@ class ImageExtractor(MetadataExtractor):
     supported_extensions = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".webp", ".heic"}
     file_type = FileType.IMAGE
 
-    def extract(self, file_path: Path) -> Dict[str, Any]:
-        from PIL import Image, ExifTags
+    def extract(self, file_path: Path) -> dict[str, Any]:
+        from PIL import ExifTags, Image
 
         metadata = self._base_metadata(file_path)
 
@@ -143,7 +141,7 @@ class ImageExtractor(MetadataExtractor):
         return metadata
 
     @staticmethod
-    def _parse_exif(exif_data, exif_tags) -> Dict[str, Any]:
+    def _parse_exif(exif_data, exif_tags) -> dict[str, Any]:
         """Parses EXIF into a readable form"""
         parsed = {}
         for tag_id, value in exif_data.items():
@@ -163,7 +161,7 @@ class VideoExtractor(MetadataExtractor):
     supported_extensions = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".wmv", ".m4v"}
     file_type = FileType.VIDEO
 
-    def extract(self, file_path: Path) -> Dict[str, Any]:
+    def extract(self, file_path: Path) -> dict[str, Any]:
         metadata = self._base_metadata(file_path)
 
         try:
@@ -194,12 +192,12 @@ class VideoExtractor(MetadataExtractor):
         return metadata
 
     @staticmethod
-    def _probe(file_path: Path) -> Dict[str, Any]:
+    def _probe(file_path: Path) -> dict[str, Any]:
         """Runs ffprobe and returns JSON"""
         return _ffprobe(file_path)
 
     @staticmethod
-    def _parse_streams(streams: List[dict]) -> List[Dict[str, Any]]:
+    def _parse_streams(streams: list[dict]) -> list[dict[str, Any]]:
         """Keeps only the useful stream fields"""
         keep = {
             "codec_type",
@@ -220,7 +218,7 @@ class AudioExtractor(MetadataExtractor):
     supported_extensions = {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma", ".opus"}
     file_type = FileType.AUDIO
 
-    def extract(self, file_path: Path) -> Dict[str, Any]:
+    def extract(self, file_path: Path) -> dict[str, Any]:
         metadata = self._base_metadata(file_path)
 
         try:
@@ -259,7 +257,7 @@ class AudioExtractor(MetadataExtractor):
         return metadata
 
     @staticmethod
-    def _probe(file_path: Path) -> Dict[str, Any]:
+    def _probe(file_path: Path) -> dict[str, Any]:
         return _ffprobe(file_path)
 
 
@@ -272,8 +270,8 @@ class ExtractorRegistry:
         metadata = registry.extract(Path("video.mp4"))
     """
 
-    def __init__(self, extractors: Optional[List[MetadataExtractor]] = None):
-        self._extractors: List[MetadataExtractor] = extractors or [
+    def __init__(self, extractors: list[MetadataExtractor] | None = None):
+        self._extractors: list[MetadataExtractor] = extractors or [
             ImageExtractor(),
             VideoExtractor(),
             AudioExtractor(),
@@ -284,7 +282,7 @@ class ExtractorRegistry:
         self._extractors.append(extractor)
         logger.info("Registered extractor: %s", type(extractor).__name__)
 
-    def get_extractor(self, file_path: Path) -> Optional[MetadataExtractor]:
+    def get_extractor(self, file_path: Path) -> MetadataExtractor | None:
         """Returns a matching extractor or None"""
         for extractor in self._extractors:
             if extractor.can_extract(file_path):
@@ -296,7 +294,7 @@ class ExtractorRegistry:
         extractor = self.get_extractor(file_path)
         return extractor.file_type if extractor else FileType.UNKNOWN
 
-    def extract(self, file_path: Path) -> Optional[Dict[str, Any]]:
+    def extract(self, file_path: Path) -> dict[str, Any] | None:
         """
         Extracts metadata, automatically picking an extractor.
         Returns None if there is no matching extractor.

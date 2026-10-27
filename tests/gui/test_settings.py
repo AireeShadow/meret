@@ -6,7 +6,7 @@ from tests.gui.conftest import pump
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QCheckBox, QSpinBox  # noqa: E402
+from PySide6.QtWidgets import QCheckBox, QSpinBox
 
 
 @pytest.fixture

@@ -1,18 +1,18 @@
 """Tests for TUI components."""
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 import pytest_asyncio
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch, Mock
-
 from meret.cli.tui import (
-    MeretApp, 
-    TagDialog, 
-    CommandPalette, 
-    VirtualFileTree,
-    SortedDirectoryTree,
-    FilePreview,
+    CommandPalette,
     DriveSelector,
+    FilePreview,
+    MeretApp,
+    SortedDirectoryTree,
+    TagDialog,
+    VirtualFileTree,
 )
 from meret.core.models import FileEntry, FileType
 from tests.mocks import MockRepository
@@ -23,7 +23,6 @@ class TestVirtualFileTree:
     
     def test_root_data_is_set(self, tmp_path: Path, mock_repo: MockRepository):
         """Root node must have data='/' for proper navigation."""
-        from meret.vfs import VirtualTree
         
         # Setup: create a tag
         mock_repo.create_tag("travel")
@@ -265,7 +264,6 @@ class TestTagDialog:
     
     def test_tag_dialog_creates(self, tmp_path: Path):
         """TagDialog initializes correctly."""
-        from textual.app import App
         
         dialog = TagDialog(tmp_path / "test.jpg")
         assert dialog.file_path.name == "test.jpg"

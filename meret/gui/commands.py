@@ -8,7 +8,6 @@ call rather than at import time.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 ##: Qt keys, the counterpart of the TUI's bindings. A command without one would be
 #: reachable only from the palette, and the TUI binds every action.
-SHORTCUTS: Dict[str, str] = {
+SHORTCUTS: dict[str, str] = {
     "refresh": "F5",
     "scan": "F6",
     "search": "Ctrl+F",
@@ -47,7 +46,7 @@ SHORTCUTS: Dict[str, str] = {
 }
 
 
-def command_table() -> List[Tuple[str, str]]:
+def command_table() -> list[tuple[str, str]]:
     """(command, description) - the TUI's bindings and palette, verbatim.
 
     Minus home / up / select_drive / open_file: the real-FS panel is one tree from
@@ -74,7 +73,7 @@ def command_table() -> List[Tuple[str, str]]:
         ("quit", _("Quit")),
     ]
 
-def menu_table() -> List[Tuple[str, Tuple[Optional[str], ...]]]:
+def menu_table() -> list[tuple[str, tuple[str | None, ...]]]:
     """(menu, commands) - the menu bar: the same commands as the toolbar, grouped.
 
     A function, not a constant, for the same reason as command_table(): the menu
@@ -111,7 +110,7 @@ def short_label(command: str) -> str:
     }
     return short.get(command) or dict(command_table()).get(command, command)
 
-def matches(query: str) -> List[str]:
+def matches(query: str) -> list[str]:
     """Commands for the typed text: exact, then name prefix, then anywhere."""
     query = query.strip().lower()
     hits = [
@@ -122,7 +121,7 @@ def matches(query: str) -> List[str]:
     return sorted(hits, key=lambda command: (command != query, not command.startswith(query)))
 
 
-def _column_widths() -> Tuple[int, int]:
+def _column_widths() -> tuple[int, int]:
     """Palette column widths, taken from the data instead of hardcoded.
 
     A fixed width glues the columns the moment a key or a name outgrows it:
@@ -209,7 +208,7 @@ class CommandPalette(QDialog):
 
     # ---------- choosing ----------
 
-    def chosen(self) -> Optional[str]:
+    def chosen(self) -> str | None:
         """The command to run, or None when the palette was dismissed."""
         item = self._list.currentItem()
         return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
