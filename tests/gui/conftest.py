@@ -104,7 +104,21 @@ if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
             """Print a window every PERIOD seconds, from a daemon thread."""
             while True:
                 time.sleep(self.PERIOD)
-                print("\n" + self.take(), file=sys.stderr, flush=True)
+                self._emit(self.take())
+
+        @staticmethod
+        def _emit(text: str) -> None:
+            """Write straight to file descriptor 2.
+
+            Never through sys.stderr: pytest swaps it for every test and Textual
+            wraps it for the TUI ones, and the stream underneath is closed by the
+            time this thread wakes up - which raised "invalid handle" on Windows.
+            A closed descriptor is the only remaining failure, and that is silent.
+            """
+            try:
+                os.write(2, (text + "\n").encode("utf-8", "replace"))
+            except OSError:
+                pass
 
         def take(self, top: int = 6) -> str:
             """The window that just passed, then a fresh one."""
