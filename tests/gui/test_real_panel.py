@@ -103,6 +103,7 @@ def test_the_top_of_a_drive_is_where_walking_up_stops(window, tmp_path):
     assert not window.fs.rootIndex().isValid()
     assert pump_until(lambda: _top_count(window.fs) > 0)
 
+
 def test_the_panel_does_not_watch_the_filesystem(panel):
     """Watching every listed directory re-reads it on the GUI thread - seconds."""
     from PySide6.QtWidgets import QFileSystemModel
@@ -120,8 +121,8 @@ def test_refresh_leaves_the_panel_rooted_at_the_filesystem_top(panel):
     assert not panel.rootIndex().isValid()
 
 
-def test_the_panel_is_rooted_at_the_filesystem_top(panel):
-    """The drive list is the model's root: the panel must sit at it, not inside it."""
+def test_the_panel_waits_for_the_drive_list_before_checking_the_root(panel):
+    """The listing arrives from Qt's own thread: the root must survive the wait."""
     assert pump_until(lambda: panel._model.rowCount() > 0)
 
     assert panel._model.rootPath() == ""
@@ -135,6 +136,7 @@ def test_revealing_a_folder_leaves_the_panel_at_the_top(panel, tmp_path):
     assert panel._model.rootPath() == ""
     assert not panel.rootIndex().isValid()
 
+
 def test_reveal_does_not_list_a_path_it_already_knows(panel, tmp_path):
     """Every listing is resolved on the GUI thread: a known path must not be re-read."""
     assert panel.reveal(tmp_path)
@@ -144,6 +146,7 @@ def test_reveal_does_not_list_a_path_it_already_knows(panel, tmp_path):
 
     assert panel.reveal(tmp_path)
     assert calls == []
+
 
 def test_the_drives_stay_the_root_of_the_panel(panel):
     """The drive list is the model's root: the panel must sit at it, not inside it."""

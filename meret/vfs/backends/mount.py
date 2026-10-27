@@ -51,12 +51,12 @@ def _flush_streams() -> None:
     for handler in logging.getLogger().handlers:
         try:
             handler.flush()
-        except Exception:  # noqa: BLE001
+        except Exception:  # the handler may already be torn down
             pass
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.flush()
-        except Exception:  # noqa: BLE001 — the stream may already be closed
+        except Exception:  # the stream may already be closed
             pass
 
 
@@ -86,12 +86,20 @@ def _watch_stdin(is_done, on_quit) -> None:
     try:
         while not is_done():
             line = sys.stdin.readline()
-            if line == "":
-                return  # stdin is closed — quietly exit the thread
+            if line == "":  # stdin is closed — quietly exit the thread
+                return
             on_quit()
             return
-    except Exception:  # noqa: BLE001
+    except Exception:  # a broken stdin must not kill the thread
         return
+
+
+def _stop_fs(fs) -> None:
+    """Stops the FS while we are already on the way out — errors are noise."""
+    try:
+        fs.stop()
+    except Exception:  # the dispatcher may already be down
+        pass
 
 
 # ---------- Linux / macOS ----------
@@ -463,19 +471,13 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
     except KeyboardInterrupt:
         # A signal arrived during startup — our handlers aren't installed yet.
         _flush_streams()
-        try:
-            fs.stop()
-        except Exception:  # noqa: BLE001
-            pass
+        _stop_fs(fs)
         os._exit(0)
     except BaseException:
         # Startup failed: the dispatcher may already be running — clean up after ourselves.
         logger.exception("mount at %s failed to start", mountpoint)
         _flush_streams()
-        try:
-            fs.stop()
-        except Exception:  # noqa: BLE001
-            pass
+        _stop_fs(fs)
         raise
 
     _install_signal_handlers(lambda signum, frame: _request_shutdown("signal received"))

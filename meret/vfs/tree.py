@@ -7,7 +7,6 @@ import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-
 from typing import Self
 
 from meret.core import tagpaths
@@ -81,9 +80,6 @@ class SourceFile:
         """Idempotent: WinFsp may close the same handle twice."""
         with self._lock:
             self._file.close()
-
-    def __enter__(self) -> "SourceFile":
-        return self
 
     def __exit__(self, *exc) -> None:
         self.close()

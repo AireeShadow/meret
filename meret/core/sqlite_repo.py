@@ -206,7 +206,12 @@ class SQLiteRepository(AbstractRepository):
     # ---------- conversion ----------
     @staticmethod
     def _tags_from_row(row) -> list[str]:
-        raw = row["tag_names"] if "tag_names" in row else ""
+        """Tag names of a row, empty when the query has no tag_names column.
+
+        sqlite3.Row is not a dict: it has no .get(), so SIM401's advice
+        (`row.get("tag_names", "")`) would raise AttributeError here.
+        """
+        raw = row["tag_names"] if "tag_names" in row else ""  # noqa: SIM401
         return raw.split(_TAG_SEP) if raw else []
 
     def _row_to_file(self, row) -> FileEntry:
