@@ -2,7 +2,7 @@
 
 ![license](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
-![version](https://img.shields.io/badge/version-0.7.28-blue)
+![version](https://img.shields.io/badge/version-0.7.30-blue)
 ![tests](https://img.shields.io/badge/tests-passing-brightgreen)
 ![lint](https://img.shields.io/badge/lint-ruff-orange)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
