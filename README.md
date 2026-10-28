@@ -1,11 +1,21 @@
 # meret 🐍
 
+![license](https://img.shields.io/badge/license-GPL--3.0-blue)
+![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
+![version](https://img.shields.io/badge/version-0.7.28-blue)
+![tests](https://img.shields.io/badge/tests-passing-brightgreen)
+![lint](https://img.shields.io/badge/lint-ruff-orange)
+![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+
 Tagged media library: tags instead of folders. Tags form a hierarchy
 (`travel/beach`) that you browse like folders — in a terminal UI, from the command
 line, in a Qt window, or mounted as a read-only drive.
 
 One database, four ways in. Nothing is ever moved or renamed on disk: a tag is a row,
 and the hierarchy is only a way of looking at it.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed, and [docs/gui.md](docs/gui.md) for
+how the Qt layer is built.
 
 ## Requirements
 
@@ -371,6 +381,10 @@ Three rules keep the layers apart, each with a test behind it:
   (`tests/gui/test_architecture.py`).
 - The GUI's command table is the TUI's, minus the four commands the whole-filesystem
   panel replaced (`tests/gui/test_commands.py`).
+
+[`docs/gui.md`](docs/gui.md) explains why the window is built the way it is — the
+thread pool and its generations, the filesystem panel without a watcher, the deferred
+`raise_()`, and the traps that were paid for with a freeze.
 
 The GUI test suite runs headless (`QT_QPA_PLATFORM=offscreen`) and stubs every modal
 dialog: a dialog runs its own event loop, and nothing clicks in a headless run.
