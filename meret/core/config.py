@@ -103,18 +103,23 @@ class ConfigManager:
         return self._config
     
     def load(self) -> MeretConfig:
+        """Load configuration, falling back to the JSON sibling.
+
+        save() writes JSON when tomli-w is missing, so the .json next to the
+        .toml has to be read back — otherwise that save is lost on the next start.
         """
-        Load configuration from file.
-        Creates default config if file doesn't exist.
-        """
-        if not self.config_path.exists():
-            return self._create_default()
-        
+        source = self.config_path
+        if not source.exists():
+            fallback = self.config_path.with_suffix(".json")
+            if fallback.exists():
+                source = fallback
+            else:
+                return self._create_default()
+
         try:
-            content = self.config_path.read_text(encoding="utf-8")
-            
-            # Try TOML first, fallback to JSON
-            if self.config_path.suffix == ".toml":
+            content = source.read_text(encoding="utf-8")
+
+            if source.suffix == ".toml":
                 try:
                     import tomllib
                     data = tomllib.loads(content)
@@ -128,15 +133,15 @@ class ConfigManager:
                         data = json.loads(content)
             else:
                 data = json.loads(content)
-            
+
             config = MeretConfig.model_validate(data)
-            logger.debug("config loaded from %s", self.config_path)
+            logger.debug("config loaded from %s", source)
             return config
-            
+
         except Exception as e:
             # Log warning and return defaults on error
             logger.warning(
-                "Failed to load config from %s: %s. Using defaults.", self.config_path, e,
+                "Failed to load config from %s: %s. Using defaults.", source, e,
                 exc_info=True,
             )
             return self._create_default()
@@ -208,29 +213,34 @@ class ConfigManager:
     def set(self, key: str, value: Any) -> None:
         """Set config value by dot-notation key and save."""
         parts = key.split(".")
-        
+
         # Get current data
         data = self.config.model_dump()
-        
+
         # Navigate and set
         target = data
         for part in parts[:-1]:
             if part not in target:
                 raise AttributeError(f"Config has no attribute '{part}'")
             target = target[part]
-        
-        # Type conversion
-        final_key = parts[-1]
+
+        # Type conversion — int()/float() accept the leading minus that
+        # str.isdigit() rejects, so "-5" and "-5.0" convert too.
         if isinstance(value, str):
-            if value.lower() in ("true", "false"):
-                value = value.lower() == "true"
-            elif value.isdigit():
-                value = int(value)
-            elif "." in value and value.replace(".", "", 1).isdigit():
-                value = float(value)
-        
-        target[final_key] = value
-        
+            lowered = value.strip().lower()
+            if lowered in ("true", "false"):
+                value = lowered == "true"
+            else:
+                try:
+                    value = int(value)
+                except ValueError:
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        pass
+
+        target[parts[-1]] = value
+
         # Re-validate entire model
         self._config = MeretConfig.model_validate(data)
         self.save()

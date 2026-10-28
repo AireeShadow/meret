@@ -8,6 +8,8 @@ import sqlite3
 
 import pytest
 
+from tests.gui.conftest import pump_until
+
 pytest.importorskip("PySide6")
 
 
@@ -21,7 +23,18 @@ def window(tmp_path, qapp, qtbot):
     qtbot.addWidget(main)
     # The start-up listing is still in flight, and its callback ends in
     # _update_status(): it would overwrite a status line written before it lands.
-    qtbot.waitUntil(lambda: not main._tasks._inflight, timeout=2000)
+    #
+    # pump_until, not qtbot.waitUntil. Revealing the database folder expands its
+    # ancestors, and %TEMP% - an ancestor of every tmp_path - is resolved on the
+    # GUI thread with a stat per entry, so a single such event can outlast the
+    # whole timeout. qtbot.waitUntil re-checks the clock before it re-checks the
+    # callback, so a delivery that lands during that event is reported as a
+    # timeout. pump_until evaluates the predicate once more after its last pump,
+    # which is exactly the turn the delivery needs.
+    assert pump_until(lambda: not main._tasks._inflight, timeout_ms=15000), (
+        "the start-up listing never landed - the GUI thread is probably stuck in a "
+        "filesystem listing"
+    )
     return main
 
 

@@ -3,6 +3,7 @@ import logging
 import re
 import sqlite3
 import threading
+import contextlib
 from pathlib import Path
 
 from meret.core import tagpaths
@@ -135,9 +136,24 @@ class SQLiteRepository(AbstractRepository):
         conn.execute("PRAGMA busy_timeout = 5000")  # Wait up to 5 seconds
         return conn
 
+    @contextlib.contextmanager
+    def _session(self):
+        """One operation: commit on success, roll back on error, always close.
+
+        sqlite3.Connection.__exit__ commits but does NOT close, so the old
+        `with self._connect()` left every connection to the GC. This does both,
+        in the right order, and keeps _connect() for the long-lived watch handle.
+        """
+        conn = self._connect()
+        try:
+            with conn:  # commit on success, rollback on exception
+                yield conn
+        finally:
+            conn.close()
+
     def _init_tables(self) -> None:
         schema = SCHEMA_PATH.read_text(encoding="utf-8")
-        with self._connect() as conn:
+        with self._session() as conn:
             for stmt in _iter_statements(schema):
                 try:
                     conn.execute(stmt)
@@ -248,7 +264,7 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def get_file_by_id(self, file_id: int) -> FileEntry | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 f"{self._SELECT_FILES} WHERE f.id = ? GROUP BY f.id", (file_id,)
             ).fetchone()
@@ -256,7 +272,7 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def get_file_by_path(self, path: str) -> FileEntry | None:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = conn.execute(
                 f"{self._SELECT_FILES} WHERE f.filepath = ? GROUP BY f.id", (path,)
             ).fetchone()
@@ -264,7 +280,7 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def save_file(self, file: FileEntry) -> int:
-        with self._connect() as conn:
+        with self._session() as conn:
             size, mtime = self._fingerprint(file)
             cur = conn.execute(
                 self._SAVE_FILE_SQL,
@@ -299,7 +315,7 @@ class SQLiteRepository(AbstractRepository):
             return stats
 
         total = len(files)
-        with self._connect() as conn:
+        with self._session() as conn:
             known = {row[0] for row in conn.execute("SELECT filepath FROM files")}
 
             for start in range(0, total, chunk_size):
@@ -344,7 +360,7 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def delete_file(self, file_id: int) -> bool:
-        with self._connect() as conn:
+        with self._session() as conn:
             cur = conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
             conn.commit()
             return cur.rowcount > 0
@@ -449,7 +465,7 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def add_tag(self, file_id: int, tag: str, colour: str | None = None) -> int:
-        with self._connect() as conn:
+        with self._session() as conn:
             tag_id = self._ensure_tag(conn, tag, colour)
             conn.execute(
                 "INSERT OR IGNORE INTO file_tags (file_id, tag_id) VALUES (?, ?)",
@@ -460,7 +476,7 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def remove_tag(self, file_id: int, tag: str) -> bool:
-        with self._connect() as conn:
+        with self._session() as conn:
             tag_id = self._tag_id(conn, tag)
             if tag_id is None:
                 return False
@@ -473,7 +489,7 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def set_file_tags(self, file_id: int, tags: list[str]) -> bool:
-        with self._connect() as conn:
+        with self._session() as conn:
             conn.execute("DELETE FROM file_tags WHERE file_id = ?", (file_id,))
             for name in dict.fromkeys(tags):  # dedupe while preserving order
                 tag_id = self._ensure_tag(conn, name)
@@ -487,7 +503,7 @@ class SQLiteRepository(AbstractRepository):
     @_traced
     def rename_tag(self, old: str, new: str) -> bool:
         """Renaming = ONE row. If a sibling with that name exists, they are merged."""
-        with self._connect() as conn:
+        with self._session() as conn:
             src = self._tag_row(conn, old)
             if src is None:
                 return False
@@ -528,7 +544,7 @@ class SQLiteRepository(AbstractRepository):
         The path is strict: create_tag("a") creates a root "a" even if a nested
         namesake exists somewhere. False if a tag already exists at this path.
         """
-        with self._connect() as conn:
+        with self._session() as conn:
             if self._tag_strict(conn, name) is not None:
                 return False
             self._ensure_tag(conn, name, colour, reuse_any=False)
@@ -538,7 +554,7 @@ class SQLiteRepository(AbstractRepository):
     @_traced
     def delete_tag(self, name: str) -> bool:
         """Deletes a tag: children move up to its parent, links go away via cascade."""
-        with self._connect() as conn:
+        with self._session() as conn:
             row = self._tag_row(conn, name)
             if row is None:
                 return False
@@ -552,7 +568,7 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def set_tag_parent(self, tag: str, parent: str | None) -> bool:
-        with self._connect() as conn:
+        with self._session() as conn:
             row = self._tag_row(conn, tag)
             if row is None:
                 return False
@@ -574,7 +590,7 @@ class SQLiteRepository(AbstractRepository):
     # ---------- tags: reading ----------
     @_traced
     def get_all_tags(self) -> list[Tag]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 "SELECT id, name, colour, parent_id FROM tags ORDER BY name_key"
             ).fetchall()
@@ -582,7 +598,7 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def get_tag_usage(self, limit: int = 100) -> list[Tag]:
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(
                 """SELECT t.id, t.name, t.colour, t.parent_id,
                           COUNT(ft.file_id) AS usage_count
@@ -625,7 +641,7 @@ class SQLiteRepository(AbstractRepository):
         A section tag ("genre") usually has no files of its own, only children,
         so it must not be touched.
         """
-        with self._connect() as conn:
+        with self._session() as conn:
             cur = conn.execute(
                 """DELETE FROM tags
                    WHERE id NOT IN (SELECT DISTINCT tag_id FROM file_tags)
@@ -652,7 +668,7 @@ class SQLiteRepository(AbstractRepository):
                 params.append(file_type)
             sql += " GROUP BY f.id LIMIT ?"
             params.append(limit)
-            with self._connect() as conn:
+            with self._session() as conn:
                 return [self._row_to_file(r) for r in conn.execute(sql, params).fetchall()]
 
         placeholders = ",".join("?" for _ in tags)
@@ -673,7 +689,7 @@ class SQLiteRepository(AbstractRepository):
         sql += " LIMIT ?"
         params.append(limit)
 
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(sql, params).fetchall()
             return [self._row_to_file(r) for r in rows]
 
@@ -710,13 +726,13 @@ class SQLiteRepository(AbstractRepository):
             sql += " LIMIT ?"
             params.append(limit)
 
-        with self._connect() as conn:
+        with self._session() as conn:
             rows = conn.execute(sql, params).fetchall()
             return [self._row_to_file(r) for r in rows]
 
     @_traced
     def search_by_name(self, query: str, limit: int = 100) -> list[FileEntry]:
-        with self._connect() as conn:
+        with self._session() as conn:
             if self.fts_enabled and query.strip():
                 # FTS5: prefix search by words
                 safe = " ".join(f'"{w}"*' for w in query.split())
@@ -739,7 +755,7 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def get_stats(self) -> dict:
-        with self._connect() as conn:
+        with self._session() as conn:
             total = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
             by_type = dict(conn.execute("SELECT type, COUNT(*) FROM files GROUP BY type"))
             tags = conn.execute("SELECT COUNT(*) FROM tags").fetchone()[0]
@@ -747,13 +763,13 @@ class SQLiteRepository(AbstractRepository):
 
     @_traced
     def known_paths(self) -> set[str]:
-        with self._connect() as conn:
+        with self._session() as conn:
             return {row[0] for row in conn.execute("SELECT filepath FROM files")}
 
     @_traced
     def known_fingerprints(self) -> dict[str, tuple[int, float]]:
         """{filepath: (size, mtime)} — one query for the whole incremental scan."""
-        with self._connect() as conn:
+        with self._session() as conn:
             return {
                 row["filepath"]: (row["size_bytes"] or 0, row["mtime"] or 0.0)
                 for row in conn.execute("SELECT filepath, size_bytes, mtime FROM files")

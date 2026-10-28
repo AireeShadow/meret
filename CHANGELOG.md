@@ -7,6 +7,21 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## [0.7.31] — 2026-10-28
+
+### Fixed
+
+- **The `window` fixture in `tests/gui/test_db_switch.py` timed out on the module's
+  first test, about one run in six.** The fixture waited for the start-up listing with
+  `qtbot.waitUntil`, which re-checks the clock *before* it re-checks the callback.
+  Revealing the database folder expands its ancestors, and `%TEMP%` — an ancestor of
+  every `tmp_path` — is resolved on the GUI thread with a `stat` per entry, so one such
+  event can outlast the whole 2 s budget: the listing landed inside that event and was
+  still reported as a timeout. The fixture waits with `pump_until` now, which evaluates
+  the predicate once more after its last pump — exactly the turn a landing delivery
+  needs — and fails with a sentence instead of a bare `TimeoutError`. It is the same
+  helper `tests/gui/test_real_panel.py` already uses for the start-up reveal.
+
 ## [0.7.30] — 2026-10-28
 
 ### Fixed
