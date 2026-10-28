@@ -21,12 +21,18 @@ def conn():
 
 
 def test_in_on_a_row_tests_values_not_column_names(conn):
-    """The trap itself: `in row` is about values, so a column name is not "in" it."""
-    row = conn.execute("SELECT 'tag_names' AS tag_names, 2 AS other").fetchone()
+    """The trap itself: `in row` is about values, so a column name is not "in" it.
 
+    keys() is held in a local, exactly as _tags_from_row does it: writing
+    `"other" in row.keys()` would invite SIM118 to "fix" it back into the trap.
+    """
+    row = conn.execute("SELECT 'tag_names' AS tag_names, 2 AS other").fetchone()
+    columns = row.keys()
+
+    assert columns == ["tag_names", "other"]
     assert "tag_names" in row  # True only because a VALUE happens to equal it
     assert "other" not in row  # a column name that is not a value
-    assert "other" in row.keys()
+    assert "other" in columns
 
 
 def test_no_tag_names_column_means_no_tags(conn):
