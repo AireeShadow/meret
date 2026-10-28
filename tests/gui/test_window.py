@@ -256,7 +256,8 @@ def test_init_db_creates_the_database_when_it_is_missing(tmp_path, qapp, qtbot, 
     window._init_db()
 
     assert asked == []  # nothing to ask about
-    assert window._db_path.is_file()
+    # The file is created on the pool, and the window is pointed at it afterwards
+    qtbot.waitUntil(lambda: window._db_path.is_file(), timeout=2000)
 
 
 def test_init_db_recreates_the_database_here(tmp_path, qapp, qtbot, monkeypatch):
@@ -279,7 +280,9 @@ def test_init_db_recreates_the_database_here(tmp_path, qapp, qtbot, monkeypatch)
     window._init_db()
 
     assert window._db_path == db
-    assert window._repo.get_all_tags() == []  # wiped, not merged
+    # The wipe and the reopen run on the pool: wait for the tags to be gone, not
+    # for the path, which never changed
+    qtbot.waitUntil(lambda: window._repo.get_all_tags() == [], timeout=3000)
 
 
 def test_init_db_can_put_the_database_in_another_folder(tmp_path, qapp, qtbot, monkeypatch):
@@ -301,7 +304,7 @@ def test_init_db_can_put_the_database_in_another_folder(tmp_path, qapp, qtbot, m
     )
     window._init_db()
 
-    assert window._db_path == elsewhere / "meret.db"
+    qtbot.waitUntil(lambda: window._db_path == elsewhere / "meret.db", timeout=2000)
     assert window._db_path.is_file()
     # and the window works on the new file, not on the old one
     file_id = window._repo.save_file(

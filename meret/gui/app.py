@@ -1034,18 +1034,39 @@ class MainWindow(QMainWindow):
             self._create_elsewhere()
 
     def _use_db(self, path: Path, fresh: bool = False) -> None:
-        """Point the whole window at another database, empty when `fresh`.
+        """Point the whole window at another database, off the GUI thread.
+
+        Opening and wiping both retry with a sleep while a task in flight still holds
+        the file - up to half a second of a frozen window. So the work goes to the
+        pool and the swap happens in the callback: it touches Qt, so it has to stay
+        here. The task is sticky, because the switch must land even if the user
+        browses while it runs.
+        """
+        path = Path(path)
+        old = self._repo
+        self._tasks.run(
+            self._prepare_db,
+            on_done=lambda repo: self._switch_to(repo, path),
+            on_failed=self._on_db_failed,
+            args=(old, path, fresh),
+            sticky=True,
+        )
+
+    def _prepare_db(self, old, path: Path, fresh: bool):
+        """Pool side: wipe when asked, then open. Neither touches Qt."""
+        if fresh:
+            self._wipe(old, path)
+        return self._open_db(path)
+
+    def _switch_to(self, repo, path: Path) -> None:
+        """The new database is open: swap it in and re-read everything.
 
         Nothing is set to None on the way: a task in flight can call back at any
         moment, and it reads self._repo and self._tree.
         """
-        path = Path(path)
-        if fresh:
-            self._wipe(self._repo, path)
-
-        self._repo = self._open_db(path)
+        self._repo = repo
         self._db_path = path
-        self._tree = VirtualTree(self._repo)
+        self._tree = VirtualTree(repo)
         self._thumbs = ThumbnailCache(size=self._thumbs.size, scope=str(self._db_path))
 
         self.tags.set_tree(self._tree)
@@ -1053,12 +1074,20 @@ class MainWindow(QMainWindow):
         self.open_folder("/")
         self._show_preview()
 
+    def _on_db_failed(self, error: Exception) -> None:
+        """A database that would not open is a status line, not a crash.
+
+        The old database stays in place: nothing was swapped yet.
+        """
+        logger.warning("cannot switch database: %s", error)
+        self._status_label.setText(_("Error: {error}").format(error=error))
+
     def _open_db(self, path: Path):
         """Open a repository, waiting out a lock left by a task in flight.
 
-        A scan writes while it runs, so its connection can hold the file for a moment.
-        Connections are opened per operation, so the wait is short and the retry is
-        only a safety net.
+        Runs on the pool, so the sleep below is a wait, never a freeze. A scan writes
+        while it runs, so its connection can hold the file for a moment; connections
+        are opened per operation, so the wait is short and the retry is a safety net.
         """
         for _attempt in range(10):
             try:
@@ -1073,11 +1102,11 @@ class MainWindow(QMainWindow):
     def _wipe(self, old, path: Path) -> None:
         """Empty the database through SQL, leaving its file alone.
 
-        Deleting the file would leave a brand-new database in `delete` journal mode,
-        and switching that to WAL wants an exclusive lock that PRAGMA journal_mode
-        does not wait for - that was the `database is locked`. Dropping the objects
-        keeps the file, and its WAL mode, exactly where they are, and the schema is
-        rebuilt by the repository itself.
+        Runs on the pool, like _open_db. Deleting the file would leave a brand-new
+        database in `delete` journal mode, and switching that to WAL wants an
+        exclusive lock that PRAGMA journal_mode does not wait for - that was the
+        `database is locked`. Dropping the objects keeps the file, and its WAL mode,
+        exactly where they are, and the schema is rebuilt by the repository itself.
         """
         closer = getattr(old, "close", None)
         if closer is not None:
