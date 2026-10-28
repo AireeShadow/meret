@@ -154,3 +154,129 @@ def test_the_drives_stay_the_root_of_the_panel(panel):
 
     assert panel._model.rootPath() == ""
     assert not panel.rootIndex().isValid()
+
+def test_show_filesystem_reads_the_top_again(panel):
+    """A no-op setRootPath("") returns early: the root has to be forced to re-read.
+
+    The bug: the panel reported a single row instead of the drive list, because the
+    root was never read at all - index() was valid, so nothing re-rooted the model.
+    """
+    from PySide6.QtCore import QDir
+
+    calls = []
+    panel._model.setRootPath = lambda path: calls.append(path)
+
+    panel.show_filesystem()
+
+    assert calls == [QDir.homePath(), ""]
+
+def test_reveal_does_not_list_a_path_it_already_knows(panel, tmp_path):
+    """A known path must not be listed again: only the way back to the top moves.
+
+    _restore_top() is not a listing of the target - it steps through the home folder
+    and back, which is the only way to get the model's own root read at all.
+    """
+    from PySide6.QtCore import QDir
+
+    assert panel.reveal(tmp_path)
+
+    calls = []
+    panel._model.setRootPath = lambda *args: calls.append(args)
+
+    assert panel.reveal(tmp_path)
+
+    assert calls == [(QDir.homePath(),), ("",)]  # the top, never the target
+
+# ---------- drives: a dead one must not hide the others ----------
+
+
+def _top_paths(panel) -> list[str]:
+    model = panel.model()
+    return [model.filePath(model.index(r, 0, QModelIndex())) for r in range(_top_count(panel))]
+
+
+def _a_real_drive() -> str:
+    """A drive that exists here: "C:/" on Windows, "/" on Unix."""
+    import os
+
+    from PySide6.QtCore import QDir
+
+    return next(d.absolutePath() for d in QDir.drives() if os.path.exists(d.absolutePath()))
+
+
+def test_a_reachable_drive_gets_its_row_at_once(panel):
+    """No waiting for Qt's own drive listing - that is the whole point."""
+    drive = _a_real_drive()
+    panel._add_drive(drive, True)
+    assert drive in _top_paths(panel)
+
+
+def test_an_unreachable_drive_is_left_to_qt_and_probed_again_later(panel):
+    panel._probing.add("Q:/")
+    panel._add_drive("Q:/", False)
+    assert "Q:/" not in panel._probing
+    assert "Q:/" not in _top_paths(panel)
+
+
+def test_one_probe_per_drive_and_none_twice(panel, monkeypatch):
+    """A refresh while a dead drive is still thinking must not stack threads on it."""
+    import meret.gui.app as gui
+    from PySide6.QtCore import QDir
+
+    started = []
+
+    class FakeThread:
+        def __init__(self, target, args, name, daemon):
+            started.append(args[0])
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(gui.threading, "Thread", FakeThread)
+    panel._probing.clear()
+    panel._probe_drives()
+    panel._probe_drives()
+    assert sorted(started) == sorted(d.absolutePath() for d in QDir.drives())
+
+
+def test_a_slow_drive_does_not_hold_back_the_others(qapp, qtbot, monkeypatch):
+    """The bug: a disconnected network drive took ~21 s to answer, and Qt hands the
+    drives over in one batch, so for 21 s only one drive was on screen."""
+    import threading
+
+    import meret.gui.app as gui
+    from PySide6.QtCore import QDir, QFileInfo
+
+    real = _a_real_drive()
+    slow = "Q:/"
+    released = threading.Event()
+
+    class TwoDrives(QDir):
+        @staticmethod
+        def drives():
+            return [QFileInfo(real), QFileInfo(slow)]
+
+    def reachable(path):
+        if path == slow:
+            released.wait(10)  # stands in for Windows giving up on a dead drive
+            return False
+        return True
+
+    monkeypatch.setattr(gui, "QDir", TwoDrives)
+    monkeypatch.setattr(gui.RealFsPanel, "_reachable", staticmethod(reachable))
+    panel = gui.RealFsPanel()
+    qtbot.addWidget(panel)
+    try:
+        assert pump_until(lambda: real in _top_paths(panel), timeout_ms=1000)
+        assert slow in panel._probing  # still thinking - and nobody waited for it
+    finally:
+        released.set()
+    assert pump_until(lambda: slow not in panel._probing, timeout_ms=2000)
+
+
+def test_the_top_is_sorted_by_name_ascending(panel):
+    """setSortingEnabled() alone sorted descending: drives from Z down to C."""
+    from PySide6.QtCore import Qt
+
+    assert panel.header().sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
+    assert panel.header().sortIndicatorSection() == 0

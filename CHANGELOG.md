@@ -7,6 +7,26 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## [0.7.30] — 2026-10-28
+
+### Fixed
+
+- **The filesystem panel showed only `C:` for about 21 seconds after start.** Not a
+  lost drive list, a late one: Qt lists the drives on its own thread, `stat`s each one
+  and hands them over in a single batch, and a disconnected network drive takes Windows
+  ~21 s to give up on. It came and went because Windows caches that failure for a
+  while. Each drive is now probed on its own thread and added as soon as it answers,
+  so every reachable drive is on screen in about 0.1 s; only drives that cannot be
+  reached still wait for Qt's batch.
+- **The panel started sorted Z to A**, drives from the last letter down:
+  `setSortingEnabled()` adopts the header's default descending indicator. It starts by
+  name, ascending, matching the window's first sort mode.
+
+### Changed
+
+- Refreshing the panel probes the drives again, so a drive plugged in since start
+  shows up; Qt reads the drive list only once per model.
+
 ## [0.7.29] — 2026-10-27
 
 ### Fixed
@@ -48,8 +68,9 @@ rather than as comparison links.
 ## Version log
 
 Plain one-line entries, newest first, carried over from the old `CHANGELOG`. From
-0.7.27 down they are historical and unedited.
+0.7.28 down they are historical and unedited.
 
+- 0.7.28 - test fixes
 - 0.7.27 - pool for open and wipe
 - 0.7.26 - fix for tests
 - 0.7.25 - ruff checks fixes (part 3)
