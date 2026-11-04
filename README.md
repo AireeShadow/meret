@@ -2,7 +2,7 @@
 
 ![license](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
-![version](https://img.shields.io/badge/version-0.8.1-blue)
+![version](https://img.shields.io/badge/version-0.8.2-blue)
 ![tests](https://img.shields.io/badge/tests-passing-brightgreen)
 ![lint](https://img.shields.io/badge/lint-ruff-orange)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
@@ -251,12 +251,18 @@ Three environment variables turn on diagnostics; all three are off by default.
 MERET_WATCHDOG=1 meret gui        # every thread's stack every 3 s, plus an event rate
 MERET_WATCH_FS=1 meret gui        # keep the filesystem watcher on (stock QFileSystemModel)
 MERET_SETTINGS_MODELESS=1 meret gui   # settings as a modeless window
+MERET_MEDIA_LOG=1 meret gui
 ```
 
 `MERET_WATCHDOG` prints a line a second with the event rate, the slowest event and who
 holds the focus, from a separate thread — so the output keeps coming while the GUI
 thread is the thing that is stuck. A rate of `0 events/s` means the thread is blocked
 outside event handling, not looping.
+
+A fourth one is about output rather than stalls: the FFmpeg backend normally logs its
+version, codecs and every container misdetection to the terminal, and a window has no
+console for any of it. `MERET_MEDIA_LOG=1 meret gui` puts that log back when playback
+itself is what is broken.
 
 ## Configuration
 

@@ -102,11 +102,18 @@ All three are off by default.
 | `MERET_WATCHDOG=1` | dumps every thread's Python stack every 3 s and runs `TracedApplication`: an event rate, the slowest event and its widget chain, the focus owner |
 | `MERET_WATCH_FS=1` | keeps the filesystem watcher (stock `QFileSystemModel`) |
 | `MERET_SETTINGS_MODELESS=1` | settings as a modeless window |
+| `MERET_MEDIA_LOG=1` | keeps the FFmpeg backend's log, which is off by default |
 
 The watchdog report is printed from a **daemon thread**, so it keeps coming while the
 GUI thread is the thing that is stuck. Read it as: `0 events/s` means the thread is
 blocked outside event handling; thousands of events per second means a layout or paint
 storm. The two need opposite fixes, and the rate tells them apart.
+
+`MERET_MEDIA_LOG` is the only one that is not a stall diagnostic: the FFmpeg backend
+logs its version, its codec table and every misdetection to stderr, and a window has no
+console to show any of it. `quiet_media_logs()` sets `QT_LOGGING_RULES` before
+`QApplication` exists — the rules are read at construction — and leaves `warning` and
+`critical` on, so a file that will not open still says so.
 
 ## Testing rules
 

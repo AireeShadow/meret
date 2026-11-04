@@ -5,6 +5,7 @@ zero width once the splitter became a tab page, because every stretch factor was
 left at zero and all the extra width went to the left panel.
 """
 
+import os
 import pytest
 
 from tests.gui.conftest import pump_until
@@ -36,6 +37,31 @@ def image_file(tmp_path):
 
     path = tmp_path / "picture.png"
     Image.new("RGB", (40, 30), (120, 90, 200)).save(path)
+    return path
+
+
+@pytest.fixture
+def video_file(tmp_path):
+    """A real one-second clip: an empty file makes ffmpeg complain about a moov atom."""
+    import subprocess
+
+    path = tmp_path / "clip.mp4"
+    done = subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=32x32:d=1",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ],
+        capture_output=True,
+    )
+    if done.returncode != 0 or not path.exists():
+        pytest.skip("ffmpeg is not on PATH, so no sample clip can be built")
     return path
 
 
@@ -76,18 +102,14 @@ def test_double_click_shows_an_image_in_the_viewer(window, image_file):
     assert not window.viewer._image.pixmap().isNull()
 
 
-def test_a_video_extension_goes_to_the_player(window, tmp_path):
+def test_a_video_extension_goes_to_the_player(window, video_file):
     """Video suffixes are played, not handed to QPixmap.
 
     isHidden(), not isVisible(): the window is never shown here, so every child is
     invisible regardless - what matters is that the viewer asked for the video to be
-    shown and hid the image. An empty .mp4 is enough for that, ffmpeg's
-    "moov atom not found" notwithstanding.
+    shown and hid the image.
     """
-    video = tmp_path / "clip.mp4"
-    video.write_bytes(b"")
-
-    window.viewer.open_file(str(video))
+    window.viewer.open_file(str(video_file))
 
     assert window.viewer._is_video is True
     assert not window.viewer._video.isHidden()
@@ -116,12 +138,10 @@ def test_double_click_on_a_folder_descends(window):
 # ---------- leaving the tab ----------
 
 
-def test_leaving_the_viewer_stops_playback(window, tmp_path):
+def test_leaving_the_viewer_stops_playback(window, video_file):
     """A hidden video must not keep playing sound behind the browser tab."""
-    video = tmp_path / "clip.mp4"
-    video.write_bytes(b"")
     window.tabs.setCurrentWidget(window.viewer)
-    window.viewer.open_file(str(video))
+    window.viewer.open_file(str(video_file))
 
     window.tabs.setCurrentIndex(0)
 
@@ -218,3 +238,39 @@ def test_every_control_glyph_is_vendored():
     for name in ("previous", "play", "pause", "stop", "next"):
         path = icons.ICON_DIR / f"{name}{icons.ICON_SUFFIX}"
         assert path.is_file(), f"{path.name} is missing - run scripts/fetch_icons.py"
+
+
+def test_the_media_backend_chatter_is_off_by_default(monkeypatch):
+    """A window has no console: the backend's start-up lines are noise there."""
+    from meret.gui.app import QUIET_MEDIA_RULES, quiet_media_logs
+
+    monkeypatch.delenv("MERET_MEDIA_LOG", raising=False)
+    monkeypatch.delenv("QT_LOGGING_RULES", raising=False)
+
+    quiet_media_logs()
+
+    assert QUIET_MEDIA_RULES in os.environ["QT_LOGGING_RULES"]
+
+
+def test_the_quiet_rules_can_be_appended_to(monkeypatch):
+    """A rule the user already set must survive, not be replaced."""
+    from meret.gui.app import quiet_media_logs
+
+    monkeypatch.delenv("MERET_MEDIA_LOG", raising=False)
+    monkeypatch.setenv("QT_LOGGING_RULES", "meret.debug=true")
+
+    quiet_media_logs()
+
+    assert os.environ["QT_LOGGING_RULES"].startswith("meret.debug=true;")
+
+
+def test_meret_media_log_turns_the_category_back_on(monkeypatch):
+    """The escape hatch: one variable, and the full backend log is back."""
+    from meret.gui.app import quiet_media_logs
+
+    monkeypatch.setenv("MERET_MEDIA_LOG", "1")
+    monkeypatch.delenv("QT_LOGGING_RULES", raising=False)
+
+    quiet_media_logs()
+
+    assert "qt.multimedia.*=true" in os.environ["QT_LOGGING_RULES"]

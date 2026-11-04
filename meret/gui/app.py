@@ -137,6 +137,24 @@ _DISABLED_PALETTE = {
     "HighlightedText": "#9aa0a6",
 }
 
+#: Qt logging rules that keep the FFmpeg backend quiet. It announces its version, its
+#: codecs and every misdetection on stderr, which for a window with no console is noise
+#: in whatever terminal started it. Warnings and errors stay: a file that will not open
+#: is still worth reading. MERET_MEDIA_LOG=1 turns the whole category back on.
+QUIET_MEDIA_RULES = "qt.multimedia.ffmpeg*.debug=false;qt.multimedia.ffmpeg*.info=false"
+
+
+def quiet_media_logs() -> None:
+    """Silence the media backend before Qt loads it.
+
+    QT_LOGGING_RULES is read when the application is created, so this has to run
+    before QApplication - a rule set afterwards misses the plugin's own start-up
+    lines. A value already in the environment is kept and ours is appended to it.
+    """
+    rule = "qt.multimedia.*=true" if os.environ.get("MERET_MEDIA_LOG") else QUIET_MEDIA_RULES
+    existing = os.environ.get("QT_LOGGING_RULES", "")
+    os.environ["QT_LOGGING_RULES"] = f"{existing};{rule}" if existing else rule
+
 
 def _apply_theme(app: QApplication | None, theme: str) -> None:
     """`system` keeps the platform look; `dark` sets a Fusion palette."""
@@ -1748,6 +1766,7 @@ def run_gui(db_path: Path, argv: list[str] | None = None) -> int:
     the suite cannot reproduce leaves no other trace, and "the loop stopped" and
     "the loop is spinning" need opposite fixes - the trace tells them apart.
     """
+    quiet_media_logs()
     watch = bool(os.environ.get("MERET_WATCHDOG"))
     if watch:
         faulthandler.dump_traceback_later(3.0, repeat=True)

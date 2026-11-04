@@ -15,6 +15,12 @@ import pytest
 # Must be set before Qt is imported for the first time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# Qt's FFmpeg backend prints its version, its codecs and every misdetection on stderr;
+# a suite run has no use for any of it. Warnings and errors still come through.
+os.environ.setdefault(
+    "QT_LOGGING_RULES", "qt.multimedia.ffmpeg*.debug=false;qt.multimedia.ffmpeg*.info=false"
+)
+
 try:  # PySide6 is an optional extra, so never importorskip() at module level
     from PySide6.QtWidgets import QApplication
 except ImportError:  # pragma: no cover - exercised without the gui extra

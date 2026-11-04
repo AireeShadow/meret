@@ -7,6 +7,39 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.8.2\] — 2026-11-05
+
+### Changed
+
+- **The FFmpeg backend no longer writes to stderr.** Opening the window printed the
+  backend's version, its whole codec table and every container misdetection into the
+  terminal that started it — a window has no console of its own, so that output had
+  nowhere useful to go and buried the `meret` log commands next to it. The noise is
+  turned off with `QT_LOGGING_RULES` (`qt.multimedia.ffmpeg*.info=false` and
+  `*.debug=false`), set by `quiet_media_logs()` **before** `QApplication` is created:
+  the rules are read at application construction, and a rule applied later misses the
+  plugin's own start-up lines. A rule already in the environment is appended to, never
+  replaced, so a developer's own `QT_LOGGING_RULES` survives.
+- Only `info` and `debug` are silenced. `warning` and `critical` still come through:
+  a file that will not open, and the reason, is exactly the line worth reading.
+- `MERET_MEDIA_LOG=1` restores the whole `qt.multimedia.*` category for a run. It is
+  the escape hatch when playback misbehaves and the codec negotiation has to be seen;
+  documented next to the other three variables.
+
+### Added
+
+- `tests/gui/test_media_logs.py` coverage, in `test_viewer.py`: the rule is set by
+  default, an existing rule is appended to, and `MERET_MEDIA_LOG` overrides both.
+- A `video_file` fixture builds a real one-second clip with `ffmpeg` (`lavfi` colour
+  source, `yuv420p`) and skips when `ffmpeg` is not on `PATH`. Two tests open a video
+  and an empty `.mp4` made them print `moov atom not found` on every run.
+
+### Fixed
+
+- The suite no longer prints FFmpeg's container guessing. `tests/gui/conftest.py` sets
+  the same logging rule next to `QT_QPA_PLATFORM`, before the first Qt import, so the
+  noise cannot be re-enabled by import order.
+
 ## \[0.8.1\] — 2026-11-05
 
 ### Added
