@@ -7,6 +7,32 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.8.4\] — 2026-11-05
+
+### Fixed
+
+- **Three tests asserted a spelling only one platform produces**, so the Linux leg of
+  the matrix was red while a Windows checkout was green.
+  - `test_vfs_commands_are_registered_in_the_real_cli` looked for `" ls "` in
+    `meret --help`. Rich draws the help inside a panel, so on a narrow terminal a
+    command sits against a border or wraps and the spaces around it are not fixed.
+    The ANSI-stripped output is matched word by word now.
+  - `test_a_slow_drive_does_not_hold_back_the_others` spelled the fake drive `Q:/`,
+    but `QFileInfo("Q:/").absolutePath()` resolves against the working directory on
+    Unix (`.../Q:`), so the probe never saw the string the test wrote and the "slow"
+    drive answered at once. Both the fake probe and the assertions match on `"Q:"`.
+  - `test_load_existing_json_config` asserted `workers == 16`, while
+    `ScanConfig.validate_workers` caps the value at `cpu_count() * 2`. The
+    expectation is computed with the same cap now, so a four-core runner no longer
+    fails a config that loaded correctly.
+
+### Changed
+
+- `asyncio_default_fixture_loop_scope = "function"` is set in
+  `[tool.pytest.ini_options]`. `pytest-asyncio` prints a deprecation warning on every
+  run without it, and the warning sat in the middle of the CI log where a real one
+  would be missed. `function` is the scope the plugin will default to.
+
 ## \[0.8.3\] — 2026-11-05
 
 ### Changed

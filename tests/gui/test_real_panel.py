@@ -233,7 +233,12 @@ def test_one_probe_per_drive_and_none_twice(panel, monkeypatch):
 
 def test_a_slow_drive_does_not_hold_back_the_others(qapp, qtbot, monkeypatch):
     """The bug: a disconnected network drive took ~21 s to answer, and Qt hands the
-    drives over in one batch, so for 21 s only one drive was on screen."""
+    drives over in one batch, so for 21 s only one drive was on screen.
+
+    Paths are matched by "Q:", not by "Q:/": on Unix QFileInfo("Q:/").absolutePath()
+    resolves against the working directory into ".../Q:", so the string the probe
+    receives is not the one the test spelled.
+    """
     import threading
 
     import meret.gui.app as gui
@@ -249,7 +254,7 @@ def test_a_slow_drive_does_not_hold_back_the_others(qapp, qtbot, monkeypatch):
             return [QFileInfo(real), QFileInfo(slow)]
 
     def reachable(path):
-        if path == slow:
+        if "Q:" in path:
             released.wait(10)  # stands in for Windows giving up on a dead drive
             return False
         return True
@@ -260,10 +265,11 @@ def test_a_slow_drive_does_not_hold_back_the_others(qapp, qtbot, monkeypatch):
     qtbot.addWidget(panel)
     try:
         assert pump_until(lambda: real in _top_paths(panel), timeout_ms=1000)
-        assert slow in panel._probing  # still thinking - and nobody waited for it
+        # still thinking - and nobody waited for it
+        assert any("Q:" in path for path in panel._probing)
     finally:
         released.set()
-    assert pump_until(lambda: slow not in panel._probing, timeout_ms=2000)
+    assert pump_until(lambda: not any("Q:" in path for path in panel._probing), timeout_ms=2000)
 
 
 def test_the_top_is_sorted_by_name_ascending(panel):

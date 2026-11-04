@@ -126,6 +126,7 @@ def test_stat_directory(db):
 def test_vfs_commands_are_registered_in_the_real_cli():
     """Not via this test module's own import of vfs_cmds — the installed entry point."""
     import os
+    import re
     import subprocess
     import sys
 
@@ -138,8 +139,13 @@ def test_vfs_commands_are_registered_in_the_real_cli():
         env=env,
         check=True,
     ).stdout
+
+    # Words, not `" cmd "`: rich draws the help in a panel, so on a narrow terminal a
+    # command sits against a border or wraps, and the spaces around it are not fixed
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+    words = set(re.findall(r"[A-Za-z_-]+", plain))
     for cmd in ("ls", "open", "stat", "mount", "umount"):
-        assert f" {cmd} " in out, f"{cmd} missing from `meret --help`"
+        assert cmd in words, f"{cmd} missing from `meret --help`"
 
 
 def test_vfs_commands_use_the_usual_db_lookup(db, monkeypatch):

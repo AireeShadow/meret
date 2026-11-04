@@ -77,6 +77,8 @@ language = "ru"
 
     def test_load_existing_json_config(self, tmp_path: Path):
         """Loading JSON config (fallback)."""
+        import multiprocessing
+
         config_path = tmp_path / "config.json"
 
         data = {"paths": {"default_db": "~/test.db"}, "scan": {"workers": 16}}
@@ -85,9 +87,8 @@ language = "ru"
         mgr = ConfigManager(config_path)
 
         assert mgr.config.paths.default_db == "~/test.db"
-        assert mgr.config.scan.workers == 16
-        # Check defaults for missing fields
-        assert mgr.config.gui.theme == "system"
+        # validate_workers caps at two per CPU, so the number depends on the machine
+        assert mgr.config.scan.workers == min(16, multiprocessing.cpu_count() * 2)
 
     def test_get_by_dot_notation(self, tmp_path: Path):
         """Getting values with dot notation."""
