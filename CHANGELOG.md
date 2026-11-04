@@ -7,6 +7,37 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.8.0\] — 2026-11-05
+
+### Added
+
+- **A viewer tab.** The central widget is a `QTabWidget`: `Browser` holds the panels,
+  the grid and the preview exactly as before, `Viewer` shows one file large — an image
+  in a `QLabel`, a video through `QMediaPlayer` with play/pause and a position slider.
+  A double-click on a file opens it there instead of handing it to the system.
+- `meret/gui/viewer.py`: `ViewerView`, the page itself. `VIDEO_SUFFIXES` decides what
+  is played; everything else goes to `QPixmap`. Images are re-fitted on resize, and a
+  file that will not decode names itself instead of leaving the page blank.
+- `tests/gui/test_viewer.py`: the tab count and order, the double-click paths, the
+  broken-image message, and playback stopping when the tab is left.
+- Locale entries for `Browser`, `Viewer`, `Nothing opened`, `Cannot open {path}`,
+  `Play` and `Pause` in both catalogs.
+
+### Changed
+
+- `QAction` is imported from `QtGui`. Qt 6 moved it there, and PySide6 keeps no
+  alias in `QtWidgets`, so an import from the wrong module fails at start-up and the
+  CLI reports it as a missing PySide6.
+- The grid gets a minimum width and the splitter gets its stretch factors back: with
+  all three at zero, becoming a tab page collapsed the grid and the preview to zero
+  width — the browser looked empty and a white strip sat at the top.
+- `setSizes` is re-asserted once after the first layout pass, since a page has no real
+  width before it.
+
+### Fixed
+
+- Leaving the viewer stops playback, so a hidden video keeps no sound and no source.
+
 ## \[0.7.32\] — 2026-10-29
 
 ### Added

@@ -841,3 +841,21 @@ msgstr "Настройки сохранены в {path}"
 
 msgid "Settings unchanged"
 msgstr "Настройки не изменены"
+
+msgid "Browser"
+msgstr "Browser"
+
+msgid "Viewer"
+msgstr "Viewer"
+
+msgid "Nothing opened"
+msgstr "Nothing opened"
+
+msgid "Cannot open {path}"
+msgstr "Cannot open {path}"
+
+msgid "Play"
+msgstr "Play"
+
+msgid "Pause"
+msgstr "Pause"

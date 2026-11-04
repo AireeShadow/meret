@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QStatusBar,
     QStyle,
+    QTabWidget,
     QToolBar,
     QTreeView,
     QTreeWidget,
@@ -64,6 +65,7 @@ from meret.gui.commands import (
 from meret.gui.settings import SettingsDialog, apply_settings
 from meret.gui.thumbnails import Reason, Thumbnail, ThumbnailCache
 from meret.gui.workers import TaskRunner
+from meret.gui.viewer import ViewerView
 from meret.vfs.tree import Node, VirtualTree
 
 logger = logging.getLogger(__name__)
@@ -606,21 +608,51 @@ class MainWindow(QMainWindow):
         self.grid.setMovement(QListWidget.Movement.Static)
         self.grid.setUniformItemSizes(True)
         self.grid.setSpacing(6)
+        self.grid.setMinimumWidth(240)
         self.grid.setIconSize(QSize(self._thumbs.size, self._thumbs.size))
         self.grid.itemSelectionChanged.connect(self._show_preview)
-        self.grid.itemDoubleClicked.connect(self._open_external)
+        self.grid.itemDoubleClicked.connect(self._open_in_viewer)
 
         splitter.addWidget(self.grid)
         splitter.addWidget(self.preview)
+        # Load-bearing. The splitter is resized twice - once when it becomes a page
+        # of the tab widget, once with the window - and with every stretch factor at
+        # zero the extra width all goes to the left pane: the grid and the preview
+        # collapse to nothing and the browser looks empty.
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 3)
         splitter.setStretchFactor(2, 2)
-        self.setCentralWidget(splitter)
+        splitter.setSizes([280, 720, 420])
+
+        # The browser (panels + grid + preview) is one tab, the viewer another
+        self.tabs = QTabWidget(self)
+        self.tabs.addTab(splitter, _("Browser"))
+        self.viewer = ViewerView(self)
+        self.tabs.addTab(self.viewer, _("Viewer"))
+        # Leaving the viewer tab stops playback, so a hidden video keeps silent
+        self.tabs.currentChanged.connect(self._on_tab_changed)
+        self.setCentralWidget(self.tabs)
+
+        # The page gets its real width only after the first layout pass: ask once
+        # more, or the splitter keeps whatever sizes it was built with
+        QTimer.singleShot(0, lambda: self._apply_split(splitter))
 
         self._status_label = QLabel(_("No selection"), self)
         bar = QStatusBar(self)
         bar.addPermanentWidget(self._status_label)
         self.setStatusBar(bar)
+
+    @staticmethod
+    def _apply_split(splitter: QSplitter) -> None:
+        """Re-assert the pane widths once the page has its final size.
+
+        A singleShot outlives the widget it was started from, so the C++ object
+        behind the splitter can already be gone by the time this runs.
+        """
+        try:
+            splitter.setSizes([280, 720, 420])
+        except RuntimeError:
+            return
 
     def _build_actions(self) -> None:
         """One QAction per command, with its key and its glyph.
@@ -1500,6 +1532,24 @@ class MainWindow(QMainWindow):
         vpath = item.data(self.ROLE_VPATH)
         if vpath:
             self.open_folder(vpath)
+
+    def _open_in_viewer(self, item: QListWidgetItem) -> None:
+        """Double-click: open the file in the viewer tab, or descend into a folder."""
+        source = item.data(self.ROLE_SOURCE)
+        if not source:
+            vpath = item.data(self.ROLE_VPATH)
+            if vpath:
+                self.open_folder(vpath)
+            return
+
+        self.tabs.setCurrentWidget(self.viewer)
+        self.viewer.open_file(str(source))
+
+    def _on_tab_changed(self, index: int) -> None:
+        """A hidden video must not keep playing: stop it when the tab goes away."""
+        widget = self.tabs.widget(index)
+        if widget is not self.viewer:
+            self.viewer.stop()
 
     def _on_real_activated(self, path: str) -> None:
         """A real file: jump to its first tag folder, or hand it to the system."""
