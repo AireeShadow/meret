@@ -115,7 +115,8 @@ def _parse_po(text: str, source: str = "<po>") -> dict[str, str]:
     """
     catalog: dict[str, str] = {}
     entry: dict[str, Any] = {}
-    field: str | None = None
+    #: the keyword being read: a plain field name, or ("msgstr", plural form)
+    field: str | tuple[str, int] | None = None
     fuzzy = False
     defined: dict[tuple, int] = {}  # (msgctxt, msgid) -> line of its first definition
 
@@ -132,7 +133,7 @@ def _parse_po(text: str, source: str = "<po>") -> dict[str, str]:
         key = item["msgid"]
         if "msgid_plural" in item:
             key += "\0" + item["msgid_plural"]
-            forms = item.get("msgstr", {})
+            forms: dict[int, str] = item.get("msgstr", {})
             values = [forms.get(i, "") for i in range(max(forms, default=0) + 1)]
             value = "\0".join(values)
             translated = any(values)
@@ -151,7 +152,7 @@ def _parse_po(text: str, source: str = "<po>") -> dict[str, str]:
                 defined[ident],
             )
         else:
-            defined[ident] = item.get("_line")
+            defined[ident] = int(item.get("_line") or 0)
 
         if not (is_header or (translated and not was_fuzzy)):
             return

@@ -286,6 +286,7 @@ class VirtualTree:
 
         # files = files tagged with this tag (by id: namesakes are distinct)
         if tag is not None:
+            assert tag.id is not None  # a tag read from the table always has one
             files = self.repo.search_by_tag_ids([[tag.id]])
             file_names = self._dedupe([f.filename for f in files])
             for name, f in zip(file_names, files, strict=True):

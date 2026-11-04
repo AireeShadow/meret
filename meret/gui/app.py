@@ -20,8 +20,9 @@ import sys
 import threading
 import time
 from pathlib import Path
+from functools import partial
 
-from PySide6.QtCore import QDir, QModelIndex, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QDir, QCoreApplication, QModelIndex, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -156,9 +157,13 @@ def quiet_media_logs() -> None:
     os.environ["QT_LOGGING_RULES"] = f"{existing};{rule}" if existing else rule
 
 
-def _apply_theme(app: QApplication | None, theme: str) -> None:
-    """`system` keeps the platform look; `dark` sets a Fusion palette."""
-    if app is None or theme == "system":
+def _apply_theme(app: QCoreApplication | None, theme: str) -> None:
+    """`system` keeps the platform look; `dark` sets a Fusion palette.
+
+    QCoreApplication, not QApplication, because instance() hands back the base type:
+    a caller should not have to cast, and an app without a palette is simply left be.
+    """
+    if not isinstance(app, QApplication) or theme == "system":
         return
     app.setStyle("Fusion")
     if theme != "dark":
@@ -203,9 +208,12 @@ class TagTree(QTreeWidget):
     ROLE_TAG_ID = Qt.ItemDataRole.UserRole + 11
     LOADING = Qt.ItemDataRole.UserRole + 12
 
-    def __init__(self, tree: VirtualTree, tasks: TaskRunner, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, tree: VirtualTree | None, tasks: TaskRunner, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
-        self._tree = tree
+        # None only while a database switch is in the air
+        self._tree: VirtualTree | None = tree
         self._tasks = tasks
         self._generation = 0
         self.setHeaderHidden(True)
@@ -233,14 +241,21 @@ class TagTree(QTreeWidget):
 
         Sticky: the folder generation is bumped on every navigation, and a tag
         listing must not be dropped just because the grid re-read a folder.
+
+        Nested defs, not lambdas: TaskRunner.run takes Callable[..., Any], so mypy
+        has nothing to infer a lambda's arguments from.
         """
+        assert self._tree is not None
         item.setData(0, self.LOADING, True)
+
+        def done(nodes: list[Node]) -> None:
+            self._filled(item, nodes, generation)
+
+        def failed(error: Exception) -> None:
+            self._failed(item, error, generation)
+
         self._tasks.run(
-            self._tree.listdir,
-            on_done=lambda nodes, item=item, gen=generation: self._filled(item, nodes, gen),
-            on_failed=lambda error, item=item, gen=generation: self._failed(item, error, gen),
-            args=(vpath,),
-            sticky=True,
+            self._tree.listdir, on_done=done, on_failed=failed, args=(vpath,), sticky=True
         )
 
     def _filled(self, item: QTreeWidgetItem, nodes: list[Node], generation: int) -> None:
@@ -546,7 +561,8 @@ class MainWindow(QMainWindow):
         # State first: the first paint happens on the last line of __init__
         self._repo = repo
         self._db_path = Path(db_path)
-        self._tree = VirtualTree(repo)
+        # None only for the moment set_tree() is given nothing, see TagTree.set_tree
+        self._tree: VirtualTree | None = VirtualTree(repo)
         # The scope keeps two databases from sharing thumbnail keys: a file id is
         # only unique inside one of them
         self._thumbs = ThumbnailCache(size=config.thumbnail_size, scope=str(self._db_path))
@@ -647,8 +663,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(splitter, _("Browser"))
         self.viewer = ViewerView(self)
         # Stepping is the window's: the viewer has no idea what a folder is
-        self.viewer.next_requested.connect(lambda: self._step_file(1))
-        self.viewer.previous_requested.connect(lambda: self._step_file(-1))
+        self.viewer.next_requested.connect(self._next_file)
+        self.viewer.previous_requested.connect(self._previous_file)
         self.tabs.addTab(self.viewer, _("Viewer"))
         # Leaving the viewer tab stops playback, so a hidden video keeps silent
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -656,7 +672,7 @@ class MainWindow(QMainWindow):
 
         # The page gets its real width only after the first layout pass: ask once
         # more, or the splitter keeps whatever sizes it was built with
-        QTimer.singleShot(0, lambda: self._apply_split(splitter))
+        QTimer.singleShot(0, partial(self._apply_split, splitter))
 
         self._status_label = QLabel(_("No selection"), self)
         bar = QStatusBar(self)
@@ -776,6 +792,9 @@ class MainWindow(QMainWindow):
 
     def _refresh(self) -> None:
         """Re-read tags, the filesystem panel and the current view after any write."""
+        # None only while a database switch is in the air, and a switch always ends
+        # in open_folder()
+        assert self._tree is not None
         self._tree.invalidate()
         self.tags.reload()
         # The panel no longer notices changes by itself, so it has to be told.
@@ -790,6 +809,7 @@ class MainWindow(QMainWindow):
 
     def open_folder(self, path: str) -> None:
         """Show a virtual folder: its subfolders and its files."""
+        assert self._tree is not None
         self._vpath = VirtualTree.normalize(path)
         self._search = None
         self._selection.clear()
@@ -801,10 +821,17 @@ class MainWindow(QMainWindow):
         self._update_status()
 
         generation = self._tasks.bump()
+
+        def done(nodes: list[Node]) -> None:
+            self._show_nodes(nodes, generation)
+
+        def failed(error: Exception) -> None:
+            self._show_error(self._vpath, error)
+
         self._tasks.run(
             self._tree.listdir,
-            on_done=lambda nodes: self._show_nodes(nodes, generation),
-            on_failed=lambda error: self._show_error(self._vpath, error),
+            on_done=done,
+            on_failed=failed,
             args=(self._vpath,),
             generation=generation,
         )
@@ -876,7 +903,7 @@ class MainWindow(QMainWindow):
         if not todo:
             # nothing to wait for: rows without a file id must not stall the queue
             if self._queue:
-                QTimer.singleShot(0, lambda: self._pump(generation))
+                QTimer.singleShot(0, partial(self._pump, generation))
             return
 
         left = len(todo)
@@ -890,7 +917,7 @@ class MainWindow(QMainWindow):
             if left <= 0 and self._queue:
                 self._pump(generation)
 
-        def failed(error: Exception, item: QListWidgetItem) -> None:
+        def failed(item: QListWidgetItem, error: Exception) -> None:
             """A decoder that raised is not a crash: keep the placeholder, count it."""
             logger.warning("thumbnail failed for %s: %s", item.text(), error)
             landed(item, None)
@@ -898,8 +925,8 @@ class MainWindow(QMainWindow):
         for file_id, source, mtime, item in todo:
             self._tasks.run(
                 self._thumbs.load_result,
-                on_done=lambda result, item=item: landed(item, result),
-                on_failed=lambda error, item=item: failed(error, item),
+                on_done=partial(landed, item),
+                on_failed=partial(failed, item),
                 args=(Path(source),),
                 kwargs={"file_id": file_id, "mtime": mtime},
                 generation=generation,
@@ -924,7 +951,7 @@ class MainWindow(QMainWindow):
 
     def _set_icon(self, item: QListWidgetItem, result: Thumbnail) -> None:
         """A decoded thumbnail replaces the placeholder; a failure explains itself."""
-        if result.ok:
+        if result.ok and result.image is not None:
             item.setIcon(QIcon(QPixmap.fromImage(result.image)))
             item.setToolTip(self._file_tooltip(item))
             return
@@ -1071,20 +1098,22 @@ class MainWindow(QMainWindow):
         if query.startswith("tag:"):
             tag = query[4:]
 
-            def work():
+            def work() -> list[FileEntry]:
                 return self._repo.search_by_tags([tag])
         else:
 
-            def work():
+            def work() -> list[FileEntry]:
                 return self._repo.search_by_name(query)
 
         generation = self._tasks.bump()
-        self._tasks.run(
-            work,
-            on_done=lambda files: self._show_files(files, generation),
-            on_failed=lambda error: self._show_error(query, error),
-            generation=generation,
-        )
+
+        def done(files: list[FileEntry]) -> None:
+            self._show_files(files, generation)
+
+        def failed(error: Exception) -> None:
+            self._show_error(query, error)
+
+        self._tasks.run(work, on_done=done, on_failed=failed, generation=generation)
 
     def _show_files(self, files: list[FileEntry], generation: int) -> None:
         """Fill the grid from search results instead of a folder listing."""
@@ -1523,11 +1552,12 @@ class MainWindow(QMainWindow):
             self.preview.setText(item.text())
             return
 
+        def done(result: Thumbnail) -> None:
+            self._set_preview(result, item.text(), token)
+
         self._tasks.run(
             self._thumbs.load_result,
-            on_done=lambda result, token=token, name=item.text(): self._set_preview(
-                result, name, token
-            ),
+            on_done=done,
             args=(Path(source),),
             kwargs={
                 "file_id": item.data(self.ROLE_FILE_ID),
@@ -1539,7 +1569,7 @@ class MainWindow(QMainWindow):
     def _set_preview(self, result: Thumbnail, name: str, token: int) -> None:
         if token != self._preview_token:
             return  # a newer selection has already painted
-        if not result.ok:
+        if not result.ok or result.image is None:
             self.preview.setPixmap(QPixmap())
             reason = _reason_text(result.reason)
             self.preview.setText(f"{name}\n{reason}" if reason else name)
@@ -1595,6 +1625,14 @@ class MainWindow(QMainWindow):
         self.grid.setCurrentRow(index)
         self.grid.scrollToItem(item)
         self._open_in_viewer(item)
+
+    def _next_file(self) -> None:
+        """Viewer 'next': one row down in the grid."""
+        self._step_file(1)
+
+    def _previous_file(self) -> None:
+        """Viewer 'previous': one row up in the grid."""
+        self._step_file(-1)
 
     def _on_tab_changed(self, index: int) -> None:
         """A hidden video must not keep playing: stop it when the tab goes away."""
@@ -1710,7 +1748,7 @@ class TracedApplication(QApplication):
     @staticmethod
     def _chain(receiver) -> str:
         """The receiver and its ancestors: a busy widget has to name its window."""
-        names = []
+        names: list[str] = []
         node = receiver
         while node is not None and len(names) < 6:
             names.append(type(node).__name__)

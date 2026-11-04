@@ -2,7 +2,7 @@
 
 ![license](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
-![version](https://img.shields.io/badge/version-0.8.2-blue)
+![version](https://img.shields.io/badge/version-0.8.3-blue)
 ![tests](https://img.shields.io/badge/tests-passing-brightgreen)
 ![lint](https://img.shields.io/badge/lint-ruff-orange)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
@@ -397,6 +397,7 @@ dialog: a dialog runs its own event loop, and nothing clicks in a headless run.
 
 ## Milestones
 
+- 0.8 - internal viewer
 - 0.7 — GUI (current)
 - 0.6 — localization
 - 0.5 — TUI

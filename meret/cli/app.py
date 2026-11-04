@@ -7,6 +7,7 @@ from collections import deque
 from collections.abc import Sequence
 from difflib import get_close_matches
 from pathlib import Path
+from typing import Any
 
 import click
 import typer
@@ -67,8 +68,10 @@ class TranslatedGroup(TyperGroup):
     that is the method replaced here.
     """
 
-    def resolve_command(self, ctx: click.Context, args):
-        # The group callback has not run yet, so --lang has to be applied here
+    def resolve_command(self, ctx: Any, args):
+        # The group callback has not run yet, so --lang has to be applied here.
+        # Any, not click.Context: typer vendors its own click, and the two Context
+        # classes are unrelated to mypy.
         self._apply_language(ctx, args)
 
         cmd_name = args[0]
@@ -99,7 +102,7 @@ class TranslatedGroup(TyperGroup):
         if language:
             set_locale(language)
 
-    def _unknown_command(self, ctx: click.Context, name: str) -> str:
+    def _unknown_command(self, ctx: Any, name: str) -> str:
         """The message, with suggestions when the typo is close to a real command."""
         available = sorted(self.list_commands(ctx))
         matches = get_close_matches(name, available) if available else []
@@ -342,6 +345,8 @@ def tag(
         msg = _("File is not in the database: {path}").format(path=filepath)
         console.print(f"[red]{msg}[/red]")
         raise typer.Exit(1)
+    # a row read from the table always has an id; the model makes it optional
+    assert entry.id is not None
 
     done: list[str] = []
     for label in labels:
@@ -360,6 +365,7 @@ def tag(
         done.append(full)
 
     updated = repo.get_file_by_id(entry.id)
+    assert updated is not None
     msg = (_("Removed: {tags}") if remove else _("Added: {tags}")).format(tags=", ".join(done))
     console.print(f"[green]✓ {msg}[/green]")
 

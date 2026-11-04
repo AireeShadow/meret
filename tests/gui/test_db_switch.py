@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from tests.gui.conftest import pump_until
+from tests.gui.conftest import pump, pump_until
 
 pytest.importorskip("PySide6")
 
@@ -34,11 +34,12 @@ def window(tmp_path, qapp, qtbot):
         "the start-up reveal never finished - the panel is stuck expanding %TEMP%"
     )
 
-    # Then the start-up listing: its callback ends in _update_status(), and it would
-    # overwrite a status line the test wrote before it lands.
-    assert pump_until(lambda: not main._tasks._inflight, timeout_ms=15000), (
-        "the start-up listing never landed"
-    )
+    # Then the start-up listing, whose callback ends in _update_status() and would
+    # overwrite a status line the test wrote before it lands. Waiting on the pool
+    # itself beats polling a predicate: no guessed budget, and the delivery below is
+    # a single pump instead of a race with the next version probe.
+    assert main._tasks.wait(60000), "the start-up listing never finished"
+    pump(20)
     return main
 
 

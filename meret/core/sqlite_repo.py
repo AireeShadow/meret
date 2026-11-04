@@ -65,7 +65,12 @@ def _iter_statements(script: str):
             continue
 
         if ch.isalpha() or ch == "_":
-            word = _WORD.match(script, i).group(0)
+            match = _WORD.match(script, i)
+            if match is None:  # cannot happen: the branch guarantees a word start
+                buf.append(ch)
+                i += 1
+                continue
+            word = match.group(0)
             buf.append(word)
             i += len(word)
             upper = word.upper()
@@ -234,8 +239,10 @@ class SQLiteRepository(AbstractRepository):
         return raw.split(_TAG_SEP) if raw else []
 
     def _row_to_file(self, row) -> FileEntry:
+        """A file row as a model. The id is always there in a row, so it is coerced:
+        sqlite3.Row types every column as `int | None` and that would spread."""
         return FileEntry(
-            id=row["id"],
+            id=int(row["id"]),
             filename=row["filename"],
             filepath=row["filepath"],
             labels=self._tags_from_row(row),
@@ -300,7 +307,7 @@ class SQLiteRepository(AbstractRepository):
             row = conn.execute(
                 "SELECT id FROM files WHERE filepath = ?", (file.filepath,)
             ).fetchone()
-            return row["id"]
+            return int(row["id"])
 
     @_traced
     def save_files(
@@ -415,7 +422,7 @@ class SQLiteRepository(AbstractRepository):
 
     def _tag_id(self, conn, ref: str) -> int | None:
         row = self._tag_row(conn, ref)
-        return row["id"] if row else None
+        return int(row["id"]) if row else None
 
     def _ensure_tag(self, conn, ref: str, colour: str | None = None, reuse_any: bool = True) -> int:
         """Returns the tag id, creating it and any missing parents along the path.
@@ -430,10 +437,10 @@ class SQLiteRepository(AbstractRepository):
         if reuse_any and len(chunks) == 1:
             row = self._tag_row(conn, chunks[0])
             if row is not None:
-                return row["id"]
+                return int(row["id"])
 
         parent_id: int | None = None
-        tag_id: int | None = None
+        tag_id = 0
         for i, chunk in enumerate(chunks):
             row = self._child_row(conn, parent_id, chunk)
             if row is None:
@@ -442,7 +449,7 @@ class SQLiteRepository(AbstractRepository):
                     (chunk, chunk.casefold(), colour if i == len(chunks) - 1 else None, parent_id),
                 )
                 row = self._child_row(conn, parent_id, chunk)
-            tag_id = row["id"]
+            tag_id = int(row["id"])
             parent_id = tag_id
         return tag_id
 
@@ -593,7 +600,15 @@ class SQLiteRepository(AbstractRepository):
             rows = conn.execute(
                 "SELECT id, name, colour, parent_id FROM tags ORDER BY name_key"
             ).fetchall()
-            return [Tag(**dict(r)) for r in rows]
+            return [
+                Tag(
+                    id=int(r["id"]),
+                    name=r["name"],
+                    colour=r["colour"],
+                    parent_id=int(r["parent_id"]) if r["parent_id"] is not None else None,
+                )
+                for r in rows
+            ]
 
     @_traced
     def get_tag_usage(self, limit: int = 100) -> list[Tag]:
@@ -605,15 +620,29 @@ class SQLiteRepository(AbstractRepository):
                    GROUP BY t.id ORDER BY usage_count DESC, t.name_key LIMIT ?""",
                 (limit,),
             ).fetchall()
-            return [Tag(**dict(r)) for r in rows]
+            return [
+                Tag(
+                    id=int(r["id"]),
+                    name=r["name"],
+                    colour=r["colour"],
+                    parent_id=int(r["parent_id"]) if r["parent_id"] is not None else None,
+                    usage_count=r["usage_count"],
+                )
+                for r in rows
+            ]
 
     @_traced
     def get_tag_tree(self) -> list[TagNode]:
         tags = self.get_all_tags()
-        nodes = {t.id: TagNode(**t.model_dump()) for t in tags}
+        nodes: dict[int, TagNode] = {}
+        for tag in tags:
+            if tag.id is None:  # rows read from the table always have one
+                continue
+            nodes[tag.id] = TagNode(**tag.model_dump())
+
         roots: list[TagNode] = []
         for node in nodes.values():
-            parent = nodes.get(node.parent_id)
+            parent = nodes.get(node.parent_id) if node.parent_id is not None else None
             if parent is None or parent is node:
                 roots.append(node)
             else:
@@ -624,7 +653,7 @@ class SQLiteRepository(AbstractRepository):
         stack = list(roots)
         while stack:
             n = stack.pop()
-            if n.id in reachable:
+            if n.id is None or n.id in reachable:
                 continue
             reachable.add(n.id)
             stack.extend(n.children)

@@ -153,7 +153,10 @@ def test_thumbnails_are_batched_and_the_queue_refills_on_completion(tmp_path, qa
     def fake_run(
         work, on_done=None, on_failed=None, args=(), kwargs=None, generation=None, sticky=False
     ):
-        submitted.append(args[0])
+        # The version poll submits without args, so the index is only safe when there
+        # is one - it is not part of what this test counts
+        if args:
+            submitted.append(args[0])
         landed.append(lambda: on_done(None))  # None: nothing is painted
 
     window._tasks.run = fake_run

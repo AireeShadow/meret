@@ -47,9 +47,19 @@ _TILES: dict[str, tuple[str, str]] = {
 }
 
 
+def _app() -> QApplication | None:
+    """The running application as a QApplication.
+
+    instance() is typed to return a QCoreApplication, and only QApplication has a
+    palette and a device pixel ratio.
+    """
+    app = QApplication.instance()
+    return app if isinstance(app, QApplication) else None
+
+
 def _palette_colour() -> QColor:
     """The palette's text colour: the tint that keeps glyphs visible in dark mode."""
-    app = QApplication.instance()
+    app = _app()
     if app is None:
         return QColor("#e6e6e6")
     return app.palette().color(QPalette.ColorRole.WindowText)
@@ -57,7 +67,7 @@ def _palette_colour() -> QColor:
 
 def _ratio() -> float:
     """Device pixel ratio, so a HiDPI screen gets a sharp glyph, not a blurry one."""
-    app = QApplication.instance()
+    app = _app()
     return float(app.devicePixelRatio()) if app is not None else 1.0
 
 

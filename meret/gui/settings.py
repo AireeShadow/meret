@@ -86,7 +86,11 @@ def bounds(setting: Setting) -> tuple[int, int]:
     Capped: a spin box does not need a billion, and a smaller range keeps its width
     hint steady while the body is being shown.
     """
-    field = MeretConfig.model_fields[setting.section].annotation.model_fields[setting.name]
+    section = MeretConfig.model_fields[setting.section].annotation
+    # The section models are real classes: the Optional comes from the generic form
+    # model_fields is typed with, not from anything at runtime
+    assert section is not None
+    field = section.model_fields[setting.name]
     low, high = 0, 100_000
     for rule in field.metadata:
         if (ge := getattr(rule, "ge", None)) is not None:
@@ -251,6 +255,8 @@ class SettingsDialog(QDialog):
             elif isinstance(editor, QComboBox):
                 result[setting.key] = editor.currentText()
             else:
+                # the text kinds are all QLineEdit, path rows keep the line itself
+                assert isinstance(editor, QLineEdit)
                 text = editor.text().strip()
                 result[setting.key] = (text or None) if setting.kind == "path" else text
         return result

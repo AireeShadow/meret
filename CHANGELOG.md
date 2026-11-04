@@ -7,6 +7,39 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.8.3\] — 2026-11-05
+
+### Changed
+
+- **The advisory `mypy` job is green.** 61 findings, worked down by root rather than
+  one `type: ignore` at a time: modules without stubs are `ignore_missing_imports`,
+  the Typer and Textual override codes are relaxed where the bindings describe their
+  own internals, and the rest was real. `TagTree` and `MainWindow._tree` are typed
+  `VirtualTree | None` because `set_tree(None)` is a real state, and `QApplication`
+  is narrowed from `QCoreApplication` instead of being cast at two call sites.
+- **`sqlite3.Row` types every column `int | None`, and that infected the whole
+  graph.** Ids are coerced where a row becomes a model (`_row_to_file`, `get_all_tags`,
+  `get_tag_usage`, `_tag_id`, `_ensure_tag`, `save_file`), so `tagpaths`, `vfs/tree`,
+  `cli/app` and the GUI stopped carrying `int | None` through every signature.
+  `tagpaths.path_of` takes `dict[int | None, Tag]` for the same reason: `Tag.id` is
+  optional by design, and a path walk starts at the tag, not at its key.
+- Lambdas handed to `TaskRunner.run` and `QTimer.singleShot` became nested functions
+  and `functools.partial`. `run` takes `Callable[..., Any]`, so mypy had nothing to
+  infer a lambda's parameters from — and an untyped lambda is where a wrong argument
+  order hides, which is exactly what happened to `failed` in `_pump`.
+
+### Fixed
+
+- `QPixmap.fromImage` is only called with a real image: a `Thumbnail` carries
+  `QImage | None`, and both `_set_icon` and `_set_preview` checked `ok` alone.
+- `_iter_statements` handles the impossible `None` from `_WORD.match` instead of
+  assuming it, and `defined[ident]` in the `.po` parser takes an `int`.
+- **Two GUI tests waited on time instead of on an effect.** `test_db_switch`'s fixture
+  blocked on the task pool (`wait()`), so the start-up listing no longer races a
+  guessed budget, and the failed-listing test pumps until the row appears.
+  `test_window`'s `fake_run` stub assumed every task has an argument; the version
+  probe has none.
+
 ## \[0.8.2\] — 2026-11-05
 
 ### Changed

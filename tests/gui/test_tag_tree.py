@@ -2,7 +2,7 @@
 
 import pytest
 
-from tests.gui.conftest import pump
+from tests.gui.conftest import pump, pump_until
 
 pytest.importorskip("PySide6")
 
@@ -120,9 +120,11 @@ def test_a_failed_listing_is_visible(tmp_path, qapp, qtbot, tagged):
     qtbot.addWidget(main)
     _break_every_listing(main)
     main.tags.reload()
-    pump(50)
 
-    assert main.tags.topLevelItemCount() == 1
+    # The row is built by a delivery, so wait for the effect, not for a fixed slice
+    assert pump_until(lambda: main.tags.topLevelItemCount() == 1, timeout_ms=2000), (
+        "the failed root listing never produced a row"
+    )
     shown = main.tags.topLevelItem(0).text(0)
     assert shown and shown != "…"
 

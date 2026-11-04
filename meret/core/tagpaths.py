@@ -35,10 +35,10 @@ def index_by_parent(
     return {(t.parent_id, key(t)): t for t in tags}
 
 
-def path_of(tag: Tag, by_id: dict[int, Tag]) -> str:
+def path_of(tag: Tag, by_id: dict[int | None, Tag]) -> str:
     """Full tag path. Robust to cycles."""
     names: list[str] = []
-    seen: set[int] = set()
+    seen: set[int | None] = set()
     cur: Tag | None = tag
     while cur is not None and cur.id not in seen:
         seen.add(cur.id)
@@ -114,10 +114,10 @@ def subtree_ids(path: str, tags: Iterable[Tag]) -> list[int]:
     """Ids of the tag (by path/name) and all of its descendants."""
     tags = list(tags)
     node = resolve(path, tags)
-    if node is None:
+    if node is None or node.id is None:
         return []
 
-    ids = {node.id}
+    ids: set[int | None] = {node.id}
     changed = True
     while changed:
         changed = False
@@ -125,7 +125,7 @@ def subtree_ids(path: str, tags: Iterable[Tag]) -> list[int]:
             if t.parent_id in ids and t.id not in ids:
                 ids.add(t.id)
                 changed = True
-    return sorted(ids)
+    return sorted(i for i in ids if i is not None)
 
 
 def subtree_names(path: str, tags: Iterable[Tag]) -> list[str]:

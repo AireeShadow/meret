@@ -59,7 +59,7 @@ def _db_file(given: Path | str) -> Path:
     return (p / DB_NAME if p.is_dir() else p).resolve()
 
 
-def resolve_db_path(path: Path | None = None) -> Path:
+def resolve_db_path(path: Path | str | None = None) -> Path:
     """
     Resolve database path from CLI arg, environment or config.
 

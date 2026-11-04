@@ -67,6 +67,12 @@ ignore = [
 
     # ---- decisions, not oversights ----
 
+    # assert is the narrowing idiom: mypy reads `assert entry.id is not None` and
+    # types the rest of the function, and the assert also names the invariant out
+    # loud ("a row read from the table always has one"). A cast would lose the
+    # runtime check, a raise would add four lines per site, and there is no -O run
+    # to strip the asserts anyway. Tests use them for the same reason.
+    "S101",
     # 259 hits. Importing inside a function is load-bearing here: meret/gui must not
     # drag PySide6 into core, cli/app.py reads --lang from sys.argv before the typer
     # decorators freeze their help strings, and conftest sets QT_QPA_PLATFORM before
@@ -105,11 +111,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests: leftovers and the shape of pytest itself, not production code. S101 is the
-# same idea - assert IS the pytest idiom, and there is no -O run to strip it.
+# Tests: leftovers and the shape of pytest itself, not production code. S101 is now
+# ignored everywhere (see above), so it is no longer repeated here.
 # PLW0108: a lambda beside the call it feeds reads better than a bound method.
 # E741: `l` is fine where the scope is three lines long.
-"tests/**" = ["B017", "F841", "RUF059", "SIM102", "S101", "PLR2004", "PLW0108", "E741"]
+"tests/**" = ["B017", "F841", "RUF059", "SIM102", "PLR2004", "PLW0108", "E741"]
 
 [tool.ruff.lint.pylint]
 # The Qt panel helpers take their widget's fields as arguments (name, source,
@@ -144,3 +150,37 @@ output_file = "meret/locales/messages.pot"
 
 [tool.setuptools.package-data]
 meret = ["locales/**/*.mo", "locales/**/*.po"]
+
+[tool.mypy]
+python_version = "3.11"
+# The job is advisory, but it has to be about our own code: these two keep the
+# output readable instead of listing the same avoidable shape twice.
+warn_unused_ignores = true
+show_error_codes = true
+
+# Modules with no stubs and no py.typed marker. Analysed as Any, which is what they
+# are to us: the mount backends and fsspec never reach core or the GUI.
+[[tool.mypy.overrides]]
+module = ["fsspec", "fsspec.*", "fuse", "winfspy", "winfspy.*"]
+ignore_missing_imports = true
+
+# Typer's translated group overrides click hooks, and Textual's annotations describe
+# its own internals rather than the subclass surface the TUI builds on: an override
+# typed `Context` is a `click.core.Context`, `Screen.dismiss` takes `str | None`, and
+# `InputDialog.label` is assigned as an attribute. Matching upstream's private shapes
+# would be a rewrite, so the two files relax the codes instead.
+[[tool.mypy.overrides]]
+module = ["meret.cli.app"]
+disable_error_code = ["override", "attr-defined"]
+
+[[tool.mypy.overrides]]
+module = ["meret.cli.tui"]
+disable_error_code = [
+    "attr-defined",
+    "method-assign",
+    "operator",
+    "index",
+    "assignment",
+    "arg-type",
+    "union-attr",
+]
