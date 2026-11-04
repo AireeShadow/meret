@@ -37,13 +37,14 @@ from meret.vfs import NotFound, VirtualTree
 
 logger = logging.getLogger(__name__)
 
+
 def get_drives_winapi():
     """Get drives using Windows API — instant."""
     drives = []
     buf = ctypes.create_string_buffer(260)
     ctypes.windll.kernel32.GetLogicalDriveStringsA(260, buf)
     for i in range(0, 260, 4):
-        drive = buf.raw[i:i+4].decode('ascii').rstrip('\x00')
+        drive = buf.raw[i : i + 4].decode("ascii").rstrip("\x00")
         if drive:
             drives.append(Path(drive))
     return drives
@@ -51,45 +52,56 @@ def get_drives_winapi():
 
 class DriveSelector(ModalScreen[str]):
     """Simple drive selector."""
-    
+
     def compose(self) -> ComposeResult:
         yield Label(_("Select Drive:"))
         self.options = OptionList()
         yield self.options
-    
+
     def on_mount(self):
         self.drives = get_drives_winapi()
         for drive in self.drives:
             self.options.add_option(str(drive))  # Just "C:\", "D:\", etc.
-    
+
     def on_option_list_option_selected(self, event: OptionList.OptionSelected):
         # Extract drive letter from text
-        text = str(event.option.prompt if hasattr(event.option, 'prompt') else event.option)
+        text = str(event.option.prompt if hasattr(event.option, "prompt") else event.option)
         self.dismiss(Path(text))
+
 
 class FilePreview(Static):
     """Preview panel for selected file."""
-    
+
     def __init__(self):
         super().__init__(_("Select a file to preview"), id="preview")
         self.border_title = _("Preview")
-    
+
     def update_preview(self, path: Path | None, is_virtual: bool = False):
         """Update preview content."""
         if path is None:
             self.update(f"[dim]{_('No selection')}[/dim]")
             return
-        
+
         if is_virtual:
-            self.update(f"[cyan]{_('Virtual:')}[/cyan] {{path}}\n[dim]{_('Use o to open real file')}[/dim]".format(path=path))
+            self.update(
+                (
+                    f"[cyan]{_('Virtual:')}[/cyan] {{path}}\n"
+                    f"[dim]{_('Use o to open real file')}[/dim]"
+                ).format(path=path)
+            )
         else:
             try:
                 stat = path.stat()
                 size = self._human_size(stat.st_size)
-                self.update(f"[green]{{name}}[/green]\n{_('Size:')} {{size}}\n{_('Modified:')} {{mtime}}".format(name=path.name, size=size, mtime=stat.st_mtime))
+                self.update(
+                    (
+                        f"[green]{{name}}[/green]\n{_('Size:')} {{size}}\n"
+                        f"{_('Modified:')} {{mtime}}"
+                    ).format(name=path.name, size=size, mtime=stat.st_mtime)
+                )
             except OSError:
                 self.update(f"[red]{_('Cannot access file')}[/red]")
-    
+
     def _human_size(self, size: int) -> str:
         """Convert bytes to human readable."""
         for unit in ("B", "KB", "MB", "GB"):
@@ -101,7 +113,7 @@ class FilePreview(Static):
 
 class VirtualFileTree(Tree):
     """Tree widget for virtual tag-based filesystem."""
-    
+
     def __init__(self, db_path: Path):
         super().__init__("/", id="virtual_tree")
         self.db_path = db_path
@@ -111,12 +123,13 @@ class VirtualFileTree(Tree):
     def on_mount(self) -> None:
         """Called when widget is mounted - safe to load data."""
         self._load_tree()
-    
+
     def _load_tree(self):
         """Load virtual tree structure."""
-        
+
         try:
             from meret.cli.deps import get_repo
+
             repo = get_repo(self.db_path)
             self.virtual_tree = VirtualTree(repo)
             self.root.expand()
@@ -127,56 +140,66 @@ class VirtualFileTree(Tree):
         except Exception as e:
             logger.exception("virtual panel: loading %s failed", self.db_path)
             self.root.remove_children()
-            self.root.add_leaf(f"[red]{_('Error: {error}')}[/red] [dim]({_('meret logs')})[/dim]".format(error=escape(str(e))))
-    
+            self.root.add_leaf(
+                f"[red]{_('Error: {error}')}[/red] [dim]({_('meret logs')})[/dim]".format(
+                    error=escape(str(e))
+                )
+            )
+
     def _populate_node(self, node, vpath: str):
         """Populate tree node with virtual directory contents."""
         try:
             entries = self.virtual_tree.listdir(vpath)
-            
+
             # Clear existing
             node.remove_children()
-            
+
             if not entries:
                 node.add_leaf(f"[dim]({_('empty')})[/dim]")
                 return
-            
+
             # Add directories
             for entry in entries:
                 if entry.is_dir:
                     if not entry.vpath:
-                        node.add_leaf(f"[red]{_('Error: empty vpath for {name}')}[/red]".format(name=entry.name))
+                        node.add_leaf(
+                            f"[red]{_('Error: empty vpath for {name}')}[/red]".format(
+                                name=entry.name
+                            )
+                        )
                         continue
-                        
+
                     child = node.add(entry.name + "/", data=entry.vpath)
                     child.add("[dim]...[/dim]")
                 else:
                     if not entry.vpath:
-                        node.add_leaf(f"[red]{_('Error: empty vpath for {name}')}[/red]".format(name=entry.name))
+                        node.add_leaf(
+                            f"[red]{_('Error: empty vpath for {name}')}[/red]".format(
+                                name=entry.name
+                            )
+                        )
                         continue
-                        
+
                     node.add_leaf(entry.name, data=entry.vpath)
-                    
+
         except Exception as e:
             logger.exception("virtual panel: listing %s failed", vpath)
             node.add_leaf(f"[red]Error: {escape(str(e))}[/red]")
-
 
     def on_tree_node_expanded(self, event: Tree.NodeExpanded):
         """Lazy load children when node expanded."""
         node = event.node
         logger.debug("virtual panel: expanding %s", node.data)
-        
+
         vpath = node.data
         if not vpath:
             self.notify(f"Error: no vpath for node {node.label}", severity="error")
             return
-        
-        needs_load = (
-            not node.children 
-            or (len(node.children) == 1 and "..." in str(node.children[0].label))
+
+        needs_load = not node.children or (
+            len(node.children) == 1 and "..." in str(node.children[0].label)
         )
-        
+
         if needs_load:
             node.remove_children()
             self._populate_node(node, vpath)
@@ -184,24 +207,24 @@ class VirtualFileTree(Tree):
 
 class TagDialog(ModalScreen[str]):
     """Dialog for entering tag name."""
-    
+
     BINDINGS = [
         Binding("escape", "dismiss", _("Cancel")),
         Binding("enter", "submit", _("OK")),
     ]
-    
+
     def __init__(self, file_path: Path):
         super().__init__()
         self.file_path = file_path
-    
+
     def compose(self) -> ComposeResult:
         yield Label(_("Tag file: {name}").format(name=self.file_path.name))
         yield Input(placeholder=_(_("Enter tag (e.g., vacation/beach)")), id="tag_input")
         yield Label(f"[dim]{_('Press Enter to confirm, Esc to cancel')}[/dim]")
-    
+
     def on_input_submitted(self, event: Input.Submitted):
         self.dismiss(event.value)
-    
+
     def action_submit(self):
         inp = self.query_one("#tag_input", Input)
         self.dismiss(inp.value)
@@ -209,24 +232,24 @@ class TagDialog(ModalScreen[str]):
 
 class SearchScreen(ModalScreen[list[FileEntry]]):
     """Search results screen."""
-    
+
     BINDINGS = [
         Binding("escape", "dismiss", _("Close")),
         Binding("enter", "select", _("Select")),
     ]
-    
+
     def __init__(self, repo, query: str):
         super().__init__()
         self.repo = repo
         self.query = query
         self.results: list[FileEntry] = []
-    
+
     def compose(self) -> ComposeResult:
         yield Label(_("Search: {query}").format(query=self.query))
         self.list_view = ListView(id="results")
         yield self.list_view
         yield Label(f"[dim]{_('Up/Down to navigate, Enter to select, Esc to close')}[/dim]")
-    
+
     def on_mount(self):
         """Perform search."""
         try:
@@ -235,13 +258,13 @@ class SearchScreen(ModalScreen[list[FileEntry]]):
                 self.results = self.repo.search_by_tags([tag])
             else:
                 self.results = self.repo.search_by_name(self.query)
-            
+
             for f in self.results[:50]:
                 self.list_view.append(ListItem(Label(f"{f.filename} [{f.type.value}]")))
         except Exception as e:
             logger.exception("search %r failed", self.query)
             self.list_view.append(ListItem(Label(f"[red]Error: {escape(str(e))}[/red]")))
-    
+
     def on_list_view_selected(self, event: ListView.Selected):
         idx = event.list_view.index
         if 0 <= idx < len(self.results):
@@ -274,11 +297,11 @@ class ConfirmDialog(ModalScreen[bool]):
 
 class InputDialog(ModalScreen[str]):
     """Generic input dialog."""
-    
+
     def __init__(self, prompt: str):
         super().__init__()
         self.prompt = prompt
-    
+
     def compose(self) -> ComposeResult:
         with Vertical(id="input-dialog"):
             yield Label(self.label)
@@ -286,10 +309,10 @@ class InputDialog(ModalScreen[str]):
             with Horizontal(id="input-buttons"):
                 yield Button(_("Cancel"), id="cancel", variant="error")
                 yield Button(_("OK"), id="ok", variant="success")
-    
+
     def on_input_submitted(self, event: Input.Submitted):
         self.dismiss(event.value)
-    
+
     def on_key(self, event):
         if event.key == "escape":
             self.dismiss(None)
@@ -362,37 +385,37 @@ class CommandPalette(ModalScreen[str]):
 
 class MeretApp(App):
     """Main TUI application for meret."""
-    
+
     CSS = """
     Screen { align: center middle; }
-    
+
     Horizontal {
         width: 100%;
         height: 1fr;  /* what's left after preview/path bar — 100% pushed them off-screen */
     }
-    
+
     DirectoryTree {
         width: 50%;
         border: solid green;
     }
-    
+
     VirtualFileTree {
         width: 50%;
         border: solid cyan;
     }
-    
+
     FilePreview {
         height: 20%;
         border: solid yellow;
     }
-    
+
     #path_bar {
         height: 1;
         background: $surface;
         color: $text;
         content-align: center middle;
     }
-    
+
     CommandPalette {
         align: center middle;
         width: 60;
@@ -400,20 +423,20 @@ class MeretApp(App):
         border: solid blue;
         background: $surface;
     }
-    
+
     Input {
         margin: 1;
     }
-    
+
     ListView {
         margin: 1;
     }
-    
+
     Footer {
         height: 1;
     }
     """
-    
+
     BINDINGS = [
         Binding("q", "quit", _("Quit")),
         Binding(":", "command_palette", _("Command")),
@@ -433,7 +456,7 @@ class MeretApp(App):
         Binding("/", "search", _("Search")),
         Binding("?", "help", _("Help")),
     ]
-    
+
     def __init__(self, db_path: Path | None = None):
         super().__init__()
         self.db_path = db_path or Path(".")
@@ -443,7 +466,7 @@ class MeretApp(App):
         self.fs_root = Path.home()
         self.sort_by = _("name")  # name, size, date
         self.sort_reverse = False
-    
+
     def on_mount(self) -> None:
         logger.info("TUI started: db=%s fs_root=%s", self.db_path, self.fs_root)
 
@@ -467,24 +490,26 @@ class MeretApp(App):
 
         with Horizontal():
             # Left panel: Use SortedDirectoryTree from start!
-            self.real_tree = SortedDirectoryTree(self.fs_root, sort_by=self.sort_by, reverse=self.sort_reverse)
+            self.real_tree = SortedDirectoryTree(
+                self.fs_root, sort_by=self.sort_by, reverse=self.sort_reverse
+            )
             self.real_tree.border_title = _("Real Filesystem ({path})").format(path=self.fs_root)
             yield self.real_tree
-            
+
             # Right panel: Virtual filesystem
             self.virt_tree = VirtualFileTree(self.db_path)
             yield self.virt_tree
-        
+
         # Bottom panel: Preview/info
         self.preview = FilePreview()
         yield self.preview
-        
+
         # Path bar showing current selection
         self.path_bar = Static(f"{_('DB:')} {self.db_path} | {_('Selected:')} -", id="path_bar")
         yield self.path_bar
-        
+
         yield Footer()
-    
+
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected):
         """Handle real file selection: Enter/click opens it."""
         self.selected_real = event.path
@@ -504,19 +529,19 @@ class MeretApp(App):
         self.selected_virtual = None
         self.preview.update_preview(event.path, is_virtual=False)
         self._update_path_bar()
-    
+
     def _update_path_bar(self):
         """Update path display."""
         sel = str(self.selected_real) if self.selected_real else "-"
         self.path_bar.update(f"{_('DB:')} {self.db_path} | {_('Selected:')} {sel}")
-        
+
     def on_tree_node_selected(self, event: Tree.NodeSelected):
         """Handle virtual file selection - ALSO open on Enter."""
-        if hasattr(event.node, 'data') and event.node.data:
+        if hasattr(event.node, "data") and event.node.data:
             self.selected_real = None
             self.selected_virtual = event.node.data
             self.preview.update_preview(Path(event.node.data), is_virtual=True)
-            
+
             node_label = str(event.node.label)
             if not event.node.allow_expand and not node_label.endswith("/"):
                 self.action_open_file()
@@ -531,6 +556,7 @@ class MeretApp(App):
         elif self.focused == self.virt_tree and self.selected_virtual:
             try:
                 from meret.vfs import VirtualTree
+
                 repo = get_repo(self.db_path)
                 tree = VirtualTree(repo)
                 node = tree.stat(self.selected_virtual)
@@ -540,15 +566,16 @@ class MeretApp(App):
                     self.action_open_file()
             except Exception:
                 logger.exception("select/open %s failed", self.selected_virtual)
-    
+
     def action_command_palette(self):
         """Open command palette."""
+
         def on_command(cmd: str | None):
             if cmd:
                 self.run_command(cmd)
-        
+
         self.push_screen(CommandPalette(), on_command)
-    
+
     def run_command(self, cmd: str):
         """Execute a command picked in the palette."""
         actions = {
@@ -566,10 +593,12 @@ class MeretApp(App):
         logger.info("palette: %s", cmd)
         action = actions.get(cmd)
         if action is None:
-            self.notify(_("'{cmd}' isn't available in the TUI yet").format(cmd=cmd), severity="warning")
+            self.notify(
+                _("'{cmd}' isn't available in the TUI yet").format(cmd=cmd), severity="warning"
+            )
             return
         action()
-    
+
     def action_scan(self):
         """Scan current directory."""
         if self.selected_real and self.selected_real.is_dir():
@@ -577,43 +606,47 @@ class MeretApp(App):
             self._run(["meret", "scan", str(self.selected_real), "--db", str(self.db_path)])
             self.virt_tree._load_tree()
             self.notify(_("Scan complete!"))
-    
+
     def action_open_file(self):
         """Open selected file with default app."""
         if self.selected_real and self.selected_real.is_file():
-            if os.name == 'nt':
+            if os.name == "nt":
                 os.startfile(self.selected_real)
             else:
                 self._run(["xdg-open", str(self.selected_real)])
             logger.info("opened %s", self.selected_real)
             self.notify(_("Opened {name}").format(name=self.selected_real.name))
-            
+
         elif self.selected_virtual:
             try:
                 from meret.vfs import VirtualTree
-                
+
                 repo = get_repo(self.db_path)
                 tree = VirtualTree(repo)
                 real_path = tree.real_path(self.selected_virtual)
-                
-                if os.name == 'nt':
+
+                if os.name == "nt":
                     os.startfile(real_path)
                 else:
                     self._run(["xdg-open", str(real_path)])
 
                 logger.info("opened %s -> %s", self.selected_virtual, real_path)
-                self.notify(_("Opened {virtual} → {real}").format(virtual=self.selected_virtual, real=real_path.name))
+                self.notify(
+                    _("Opened {virtual} → {real}").format(
+                        virtual=self.selected_virtual, real=real_path.name
+                    )
+                )
 
             except Exception as e:
                 logger.exception("opening %s failed", self.selected_virtual)
                 self.notify(f"Error opening: {e}", severity="error")
-    
+
     def action_tag(self):
         """Tag selected file."""
         if not self.selected_real or not self.selected_real.is_file():
             self.notify(_("Select a real file first!"), severity="error")
             return
-        
+
         def on_tag(tag: str | None):
             if tag:
                 try:
@@ -621,15 +654,16 @@ class MeretApp(App):
                     entry = repo.get_file_by_path(str(self.selected_real))
                     if not entry:
                         from meret.core.models import FileEntry, FileType
+
                         entry = FileEntry(
                             filename=self.selected_real.name,
                             filepath=str(self.selected_real),
-                            type=FileType.UNKNOWN
+                            type=FileType.UNKNOWN,
                         )
                         file_id = repo.save_file(entry)
                     else:
                         file_id = entry.id
-                    
+
                     repo.add_tag(file_id, tag)
                     logger.info("tagged %s with %r", self.selected_real, tag)
                     self.notify(_("Tagged with '{tag}'").format(tag=tag))
@@ -638,34 +672,40 @@ class MeretApp(App):
                 except Exception as e:
                     logger.exception("tagging %s with %r failed", self.selected_real, tag)
                     self.notify(f"Error: {e}", severity="error")
-        
+
         self.push_screen(TagDialog(self.selected_real), on_tag)
-    
+
     def action_search(self):
         """Search dialog."""
+
         def on_query(query: str | None):
             if query:
+
                 def on_result(result: FileEntry | None):
                     if result:
                         self.notify(_("Selected: {filename}").format(filename=result.filename))
-                
+
                 try:
                     repo = get_repo(self.db_path)
                     self.push_screen(SearchScreen(repo, query), on_result)
                 except DatabaseNotFound:
                     self.notify(_("No database!"), severity="error")
-        
+
         self.push_screen(InputDialog("Search (name or 'tag:xxx'):"), on_query)
-    
+
     def action_stats(self):
         """Show database stats."""
         try:
             repo = get_repo(self.db_path)
             stats = repo.get_stats()
-            self.notify(_("Files: {files}, Tags: {tags}").format(files=stats["total_files"], tags=stats["total_tags"]))
+            self.notify(
+                _("Files: {files}, Tags: {tags}").format(
+                    files=stats["total_files"], tags=stats["total_tags"]
+                )
+            )
         except DatabaseNotFound:
             self.notify(_("No database!"), severity="error")
-    
+
     def action_tree(self):
         """The tag tree is the virtual panel: reload it and move focus there."""
         self.virt_tree._load_tree()
@@ -730,24 +770,24 @@ class MeretApp(App):
     def action_config(self):
         """Open config editor."""
         self._run(["meret", "config", "edit"])
-    
+
     def action_init_db(self):
         """Initialize database."""
         self._run(["meret", "init", str(self.db_path)])
         self.virt_tree._load_tree()
         self.notify(_("Database initialized!"))
-    
+
     def action_refresh(self):
         """Refresh both panels."""
         self.real_tree.reload()
         self.virt_tree._load_tree()
         self.notify(_("Refreshed"))
-    
+
     def action_go_home(self):
         """Navigate to home directory."""
         self.fs_root = Path.home()
         self._refresh_fs_tree()
-    
+
     def action_go_up(self):
         """Go to parent directory."""
         here = self.fs_root.expanduser().resolve()
@@ -771,21 +811,21 @@ class MeretApp(App):
         self.sort_by = modes[(idx + 1) % len(modes)]
         self.notify(_("Sort by: {mode}").format(mode=self.sort_by))
         self._refresh_fs_tree()
-        
+
     def action_select_drive(self):
         """Show drive selector (Windows only)."""
         if platform.system() != "Windows":
             self.notify(_("Drive selection only available on Windows"), severity="warning")
             return
-        
+
         def on_drive_selected(drive: Path | None):
             if drive:
                 self.fs_root = drive
                 self._refresh_fs_tree()
                 self.notify(_("Switched to {drive}").format(drive=drive))
-                if hasattr(self, 'real_tree'):
+                if hasattr(self, "real_tree"):
                     self.real_tree.focus()
-        
+
         self.push_screen(DriveSelector(), on_drive_selected)
 
     def _refresh_fs_tree(self):
@@ -794,7 +834,7 @@ class MeretApp(App):
         The same widget is reused: setting `path` makes DirectoryTree reload
         (always_update=True, so a sort change on the same folder reloads too).
         """
-        if not hasattr(self, 'real_tree'):
+        if not hasattr(self, "real_tree"):
             return
 
         logger.info("real panel -> %s (sort=%s)", self.fs_root, self.sort_by)
@@ -804,36 +844,37 @@ class MeretApp(App):
         self.real_tree.border_title = f"Real Filesystem ({self.fs_root}) · {self.sort_by}"
         self.real_tree.path = self.fs_root
         self.real_tree.focus()
-    
+
     def action_help(self):
         """Show help."""
         help_text = f"""
         [b]Meret TUI Help[/b]
 
-        [green]{_('Navigation')}:[/green]
-        ↑/↓            {_('Navigate')}
-        Enter          {_('Open file')} / {_('expand folder')}
-        .. or u/Bksp   {_('Go to parent directory')}
-        h or ~         {_('Go to home directory')}
-        D              {_('Select drive')} (Windows)
-        S              {_('Cycle sort: name / size / date')}
-        q              {_('Quit')}
+        [green]{_("Navigation")}:[/green]
+        ↑/↓            {_("Navigate")}
+        Enter          {_("Open file")} / {_("expand folder")}
+        .. or u/Bksp   {_("Go to parent directory")}
+        h or ~         {_("Go to home directory")}
+        D              {_("Select drive")} (Windows)
+        S              {_("Cycle sort: name / size / date")}
+        q              {_("Quit")}
 
-        [green]{_('Commands')}:[/green]
-        :              {_('Command palette')}
-        /              {_('Search')}
-        s              {_('Scan selected directory')}
-        t              {_('Tag selected file')}
-        d              {_('Delete tag (virtual panel)')}
-        r              {_('Refresh')}
-        m / U          {_('Mount')} / {_('unmount')}
-        c              {_('Config')}
-        i              {_('Init DB')}
+        [green]{_("Commands")}:[/green]
+        :              {_("Command palette")}
+        /              {_("Search")}
+        s              {_("Scan selected directory")}
+        t              {_("Tag selected file")}
+        d              {_("Delete tag (virtual panel)")}
+        r              {_("Refresh")}
+        m / U          {_("Mount")} / {_("unmount")}
+        c              {_("Config")}
+        i              {_("Init DB")}
         """
         self.notify(help_text, timeout=10)
 
     def action_mount(self):
         """Mount virtual filesystem."""
+
         def on_mountpoint(path: str | None):
             if path:
                 try:
@@ -841,12 +882,13 @@ class MeretApp(App):
                     # Import and call directly instead of subprocess
                     from meret.vfs import VirtualTree
                     from meret.vfs.backends.mount import mount as do_mount
-                    
+
                     repo = get_repo(self.db_path)
                     tree = VirtualTree(repo)
-                    
+
                     # Run in thread so TUI doesn't freeze
                     import threading
+
                     def mount_thread():
                         try:
                             do_mount(tree, Path(path))
@@ -855,13 +897,13 @@ class MeretApp(App):
                             # Bound here on purpose: `e` of an outer except is deleted
                             # when that block ends, and this lambda runs later still
                             message = f"Mount error: {exc}"
-                            self.call_from_thread(
-                                lambda: self.notify(message, severity="error")
-                            )
-                    
+                            self.call_from_thread(lambda: self.notify(message, severity="error"))
+
                     threading.Thread(target=mount_thread, daemon=True).start()
-                    self.notify(_("Mounting at {path}... (Ctrl+C in console to exit)").format(path=path))
-                    
+                    self.notify(
+                        _("Mounting at {path}... (Ctrl+C in console to exit)").format(path=path)
+                    )
+
                 except ImportError as e:
                     logger.warning("mount: no driver: %s", e)
                     self.notify(_("Missing driver: {error}").format(error=e), severity="error")
@@ -869,12 +911,12 @@ class MeretApp(App):
                 except Exception as e:
                     logger.exception("mount at %s failed", path)
                     self.notify(f"Error: {e}", severity="error")
-        
-        self.push_screen(InputDialog("Enter mount point (e.g., M: or /mnt/meret):"), on_mountpoint)
 
+        self.push_screen(InputDialog("Enter mount point (e.g., M: or /mnt/meret):"), on_mountpoint)
 
     def action_umount(self):
         """Unmount filesystem."""
+
         def on_unmount(path: str | None):
             if path:
                 try:
@@ -883,12 +925,13 @@ class MeretApp(App):
                 except Exception as e:
                     logger.exception("umount %s failed", path)
                     self.notify(f"Error: {e}", severity="error")
-        
+
         self.push_screen(InputDialog("Enter mount point to unmount:"), on_unmount)
 
     def action_home(self):
         """Go to home directory."""
         self.action_go_home()
+
 
 class ParentEntry(DirEntry):
     """Data of the '..' row. Selecting it moves the panel one level up."""
@@ -944,6 +987,7 @@ class SortedDirectoryTree(DirectoryTree):
 def main():
     """Entry point for TUI."""
     import sys
+
     setup_logging(console=False)
     log_uncaught_exceptions()
     db_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")

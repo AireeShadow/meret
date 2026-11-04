@@ -73,8 +73,8 @@ def test_the_key_is_stable_for_the_same_input(cache):
 @pytest.mark.parametrize(
     "other",
     [
-        (2, 100.0, 64),   # another file
-        (1, 100.5, 64),   # edited: a stale thumbnail must not survive
+        (2, 100.0, 64),  # another file
+        (1, 100.5, 64),  # edited: a stale thumbnail must not survive
         (1, 100.0, 128),  # another size
     ],
 )
@@ -121,9 +121,7 @@ def test_the_default_size_comes_from_the_config(tmp_path, monkeypatch, qapp):
 def test_cache_dir_is_created(tmp_path, monkeypatch):
     from meret.gui import thumbnails
 
-    monkeypatch.setattr(
-        thumbnails.platformdirs, "user_cache_dir", lambda name: str(tmp_path / "c")
-    )
+    monkeypatch.setattr(thumbnails.platformdirs, "user_cache_dir", lambda name: str(tmp_path / "c"))
 
     path = thumbnails.cache_dir()
 

@@ -1,0 +1,54 @@
+# Hooks that must run before a commit lands. Install once with:
+#
+#     pip install pre-commit
+#     pre-commit install
+#
+# Everything here is fast and offline. The suite itself is not a hook: it belongs
+# to CI, and a 500-test run before every commit is a run people start skipping.
+minimum_pre_commit_version: "3.0.0"
+
+default_language_version:
+  python: python3.11
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.3
+    hooks:
+      # The linter, with the fixes it is allowed to make on its own.
+      - id: ruff-check
+        args: [--fix]
+      # The formatter. ruff-format is black-compatible, so [tool.black] in
+      # pyproject.toml and this agree on line-length 100 by construction.
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      # The README badge is a copy of meret/__init__.py. Fix it here rather than
+      # let it drift until a release page disagrees with the package.
+      - id: sync-version
+        name: README badge follows meret/__init__.py
+        entry: python scripts/sync_version.py
+        language: python
+        files: ^(README\.md|meret/__init__\.py)$
+        pass_filenames: false
+
+      # The changelog heading carries a date and prose, so it is checked, not
+      # fixed. Both hooks call the same stdlib-only script.
+      - id: version-guards
+        name: version guards (badge and changelog heading)
+        entry: python scripts/sync_version.py --check
+        language: python
+        files: ^(README\.md|CHANGELOG\.md|meret/__init__\.py)$
+        pass_filenames: false

@@ -95,8 +95,7 @@ def main(argv=None) -> int:
     problems = [
         problem
         for problem in (
-            fetch_one(command, stems, args.force)
-            for command, stems in sorted(GLYPHS.items())
+            fetch_one(command, stems, args.force) for command, stems in sorted(GLYPHS.items())
         )
         if problem
     ]

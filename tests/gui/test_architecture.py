@@ -1,5 +1,6 @@
 # tests/gui/test_architecture.py
 """The GUI layer: Qt stays in meret/gui, and nothing below it depends on it."""
+
 import ast
 from pathlib import Path
 

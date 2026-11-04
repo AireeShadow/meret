@@ -9,6 +9,7 @@ Mounting and unmounting shell out to `meret mount` / `meret umount` instead of
 importing a backend, so opening a window never drags FUSE or WinFsp in.
 """
 
+import contextlib
 import faulthandler
 import gc
 import logging
@@ -182,9 +183,7 @@ class TagTree(QTreeWidget):
     ROLE_TAG_ID = Qt.ItemDataRole.UserRole + 11
     LOADING = Qt.ItemDataRole.UserRole + 12
 
-    def __init__(
-        self, tree: VirtualTree, tasks: TaskRunner, parent: QWidget | None = None
-    ) -> None:
+    def __init__(self, tree: VirtualTree, tasks: TaskRunner, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._tree = tree
         self._tasks = tasks
@@ -218,12 +217,8 @@ class TagTree(QTreeWidget):
         item.setData(0, self.LOADING, True)
         self._tasks.run(
             self._tree.listdir,
-            on_done=lambda nodes, item=item, gen=generation: self._filled(
-                item, nodes, gen
-            ),
-            on_failed=lambda error, item=item, gen=generation: self._failed(
-                item, error, gen
-            ),
+            on_done=lambda nodes, item=item, gen=generation: self._filled(item, nodes, gen),
+            on_failed=lambda error, item=item, gen=generation: self._failed(item, error, gen),
             args=(vpath,),
             sticky=True,
         )
@@ -285,9 +280,7 @@ class RealFsPanel(QTreeView):
         self._started = time.monotonic()
         self._probing: set[str] = set()  # drives whose probe has not answered yet
         self._model = QFileSystemModel(self)
-        self._model.setFilter(
-            QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot
-        )
+        self._model.setFilter(QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot)
         # The watcher is the freeze: QFileSystemModel watches every directory it has
         # ever listed, and a change anywhere in one of them makes it re-read that
         # directory on the GUI thread with a stat per entry - 6.4 seconds in a single
@@ -297,9 +290,7 @@ class RealFsPanel(QTreeView):
             self._model.setOption(QFileSystemModel.Option.DontWatchForChanges, True)
             self._model.setOption(QFileSystemModel.Option.DontResolveSymlinks, True)
             # A directory icon is an SHGetFileInfo call per entry on Windows
-            self._model.setOption(
-                QFileSystemModel.Option.DontUseCustomDirectoryIcons, True
-            )
+            self._model.setOption(QFileSystemModel.Option.DontUseCustomDirectoryIcons, True)
         self.setModel(self._model)
         self.setHeaderHidden(True)
         # Rows are one line high and never wrap, so the view can skip asking every
@@ -336,7 +327,7 @@ class RealFsPanel(QTreeView):
         the view: a model or a view left rooted at the revealed folder shows that one
         drive and hides the rest.
         """
-        target= str(Path(path))
+        target = str(Path(path))
         started = time.perf_counter()
 
         index = self._model.index(target)
@@ -412,12 +403,15 @@ class RealFsPanel(QTreeView):
         reachable = self._reachable(path)
         elapsed = time.perf_counter() - started
         if elapsed > 1:
-            logger.info("drive %s took %.1f s to answer (%s)", path, elapsed,
-                        "reachable" if reachable else "not reachable")
-        try:
+            logger.info(
+                "drive %s took %.1f s to answer (%s)",
+                path,
+                elapsed,
+                "reachable" if reachable else "not reachable",
+            )
+        # the panel may have been closed while the drive was still thinking
+        with contextlib.suppress(RuntimeError):
             self._drive_ready.emit(path, reachable)
-        except RuntimeError:  # the panel was closed while the drive was thinking
-            pass
 
     def _add_drive(self, path: str, reachable: bool) -> None:
         """GUI thread: a probe answered. A reachable drive gets its row right away."""
@@ -451,9 +445,7 @@ class RealFsPanel(QTreeView):
         in whatever test happens to be pumping events at that moment, not here.
         """
         try:
-            logger.info(
-                "filesystem panel: %d entries at the top", self._model.rowCount()
-            )
+            logger.info("filesystem panel: %d entries at the top", self._model.rowCount())
         except RuntimeError:
             return
 
@@ -537,9 +529,7 @@ class MainWindow(QMainWindow):
         self._tree = VirtualTree(repo)
         # The scope keeps two databases from sharing thumbnail keys: a file id is
         # only unique inside one of them
-        self._thumbs = ThumbnailCache(
-            size=config.thumbnail_size, scope=str(self._db_path)
-        )
+        self._thumbs = ThumbnailCache(size=config.thumbnail_size, scope=str(self._db_path))
         self._tasks = TaskRunner(self)
         self._queue: list[tuple] = []
         self._selection: set[str] = set()
@@ -649,9 +639,7 @@ class MainWindow(QMainWindow):
                 action.setToolTip(f"{description} ({shortcut})")
             else:
                 action.setToolTip(description)
-            action.triggered.connect(
-                lambda _checked=False, name=command: self.run_command(name)
-            )
+            action.triggered.connect(lambda _checked=False, name=command: self.run_command(name))
             self.addAction(action)
             self._actions[command] = action
 
@@ -727,9 +715,7 @@ class MainWindow(QMainWindow):
         }
         handler = handlers.get(cmd)
         if handler is None:
-            self._status_label.setText(
-                _("'{cmd}' isn't available in the GUI yet").format(cmd=cmd)
-            )
+            self._status_label.setText(_("'{cmd}' isn't available in the GUI yet").format(cmd=cmd))
             return
         handler()
 
@@ -906,9 +892,7 @@ class MainWindow(QMainWindow):
     def _show_error(self, path: str, error: Exception) -> None:
         """A listing that failed must be visible, never a silently empty grid."""
         logger.warning("cannot list %s: %s", path, error)
-        self._status_label.setText(
-            _("Cannot open {path}: {error}").format(path=path, error=error)
-        )
+        self._status_label.setText(_("Cannot open {path}: {error}").format(path=path, error=error))
 
     # ---------- commands ----------
 
@@ -935,9 +919,7 @@ class MainWindow(QMainWindow):
             self._status_label.setText(_("Select a real file first!"))
             return
 
-        name, accepted = QInputDialog.getText(
-            self, _("Tag"), _("Enter tag (e.g., vacation/beach)")
-        )
+        name, accepted = QInputDialog.getText(self, _("Tag"), _("Enter tag (e.g., vacation/beach)"))
         if not accepted or not name.strip():
             return
         for file_id, _path in targets:
@@ -951,9 +933,7 @@ class MainWindow(QMainWindow):
             self._status_label.setText(_("Select a real file first!"))
             return
 
-        name, accepted = QInputDialog.getText(
-            self, _("Remove tag from file"), _("Tag path")
-        )
+        name, accepted = QInputDialog.getText(self, _("Remove tag from file"), _("Tag path"))
         if not accepted or not name.strip():
             return
         for file_id, _path in targets:
@@ -1021,9 +1001,7 @@ class MainWindow(QMainWindow):
 
     def _search_query(self) -> None:
         """Ask for a query: a name, or `tag:travel` - the TUI's own rule."""
-        query, accepted = QInputDialog.getText(
-            self, _("Search"), _("Text in the file name")
-        )
+        query, accepted = QInputDialog.getText(self, _("Search"), _("Text in the file name"))
         if not accepted or not query.strip():
             return
         self._run_search(query.strip())
@@ -1039,9 +1017,13 @@ class MainWindow(QMainWindow):
 
         if query.startswith("tag:"):
             tag = query[4:]
-            work = lambda: self._repo.search_by_tags([tag])
+
+            def work():
+                return self._repo.search_by_tags([tag])
         else:
-            work = lambda: self._repo.search_by_name(query)
+
+            def work():
+                return self._repo.search_by_name(query)
 
         generation = self._tasks.bump()
         self._tasks.run(
@@ -1057,9 +1039,7 @@ class MainWindow(QMainWindow):
             return
         for entry in files:
             mtime = self._entry_mtime(entry)
-            item = self._add_file_item(
-                entry.filename, entry.filepath, entry.id, mtime, entry.type
-            )
+            item = self._add_file_item(entry.filename, entry.filepath, entry.id, mtime, entry.type)
             self._queue.append((entry.id, entry.filepath, mtime, item))
         self._update_status()
         self._pump(generation)
@@ -1094,9 +1074,7 @@ class MainWindow(QMainWindow):
         box.setText(_("A database already exists here:"))
         box.setInformativeText(str(self._db_path))
         here = box.addButton(_("Recreate here"), QMessageBox.ButtonRole.AcceptRole)
-        elsewhere = box.addButton(
-            _("Choose a folder..."), QMessageBox.ButtonRole.ActionRole
-        )
+        elsewhere = box.addButton(_("Choose a folder..."), QMessageBox.ButtonRole.ActionRole)
         cancel = box.addButton(_("Cancel"), QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(here)
         box.setEscapeButton(cancel)
@@ -1241,9 +1219,7 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(
             self,
             _("Initialize new database"),
-            _("A database already exists there:\n{path}\n\nRecreate it?").format(
-                path=target
-            ),
+            _("A database already exists there:\n{path}\n\nRecreate it?").format(path=target),
         )
         return answer == QMessageBox.StandardButton.Yes
 
@@ -1320,9 +1296,7 @@ class MainWindow(QMainWindow):
 
         if gui.thumbnail_size != self._thumbs.size:
             self.grid.setIconSize(QSize(gui.thumbnail_size, gui.thumbnail_size))
-            self._thumbs = ThumbnailCache(
-                size=gui.thumbnail_size, scope=str(self._db_path)
-            )
+            self._thumbs = ThumbnailCache(size=gui.thumbnail_size, scope=str(self._db_path))
 
     def _stats(self) -> None:
         """Database statistics, read off the event loop."""
@@ -1440,14 +1414,10 @@ class MainWindow(QMainWindow):
         self._sort_index = (self._sort_index + 1) % len(modes)
         column = (0, 1, 3)[self._sort_index]
         order = (
-            Qt.SortOrder.AscendingOrder
-            if self._sort_index == 0
-            else Qt.SortOrder.DescendingOrder
+            Qt.SortOrder.AscendingOrder if self._sort_index == 0 else Qt.SortOrder.DescendingOrder
         )
         self.fs.sortByColumn(column, order)
-        self._status_label.setText(
-            _("Sort by: {mode}").format(mode=modes[self._sort_index])
-        )
+        self._status_label.setText(_("Sort by: {mode}").format(mode=modes[self._sort_index]))
 
     def _help(self) -> None:
         """Every command with its key: the TUI's footer, as a dialog."""
@@ -1464,8 +1434,7 @@ class MainWindow(QMainWindow):
         lines.append("")
         lines.append(f"{_('Commands')}:")
         lines.extend(
-            line(name) for name, _description in command_table()
-            if name not in NAVIGATION_COMMANDS
+            line(name) for name, _description in command_table() if name not in NAVIGATION_COMMANDS
         )
         QMessageBox.information(self, _("Help"), "\n".join(lines))
 
@@ -1476,8 +1445,7 @@ class MainWindow(QMainWindow):
         self._selection = {
             key
             for key in (
-                item.data(self.ROLE_VPATH) or item.data(self.ROLE_SOURCE)
-                for item in selected
+                item.data(self.ROLE_VPATH) or item.data(self.ROLE_SOURCE) for item in selected
             )
             if key
         }
@@ -1542,9 +1510,7 @@ class MainWindow(QMainWindow):
 
         entry = self._repo.get_file_by_path(str(target))
         if entry is None:
-            self._status_label.setText(
-                _("File is not in the database: {path}").format(path=target)
-            )
+            self._status_label.setText(_("File is not in the database: {path}").format(path=target))
             return
 
         if entry.labels:
@@ -1580,6 +1546,7 @@ class MainWindow(QMainWindow):
         self._poll.stop()
         self._tasks.shutdown()
         super().closeEvent(event)
+
 
 class TracedApplication(QApplication):
     """An application that counts events and names whatever floods them.
@@ -1634,8 +1601,7 @@ class TracedApplication(QApplication):
                 self._worst_where = f"{pair[0]}/{pair[1]}"
             if spent >= self.SLOW_MS:
                 print(
-                    f"[watchdog] slow: {pair[1]} took {spent:.0f} ms in"
-                    f" {self._chains[pair]}",
+                    f"[watchdog] slow: {pair[1]} took {spent:.0f} ms in {self._chains[pair]}",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -1690,7 +1656,7 @@ class TracedApplication(QApplication):
         """A widget's class, or a dash when there is none."""
         return "-" if widget is None else type(widget).__name__
 
-    
+
 def run_gui(db_path: Path, argv: list[str] | None = None) -> int:
     """Open the database, show the window, run the event loop. Returns the exit code.
 

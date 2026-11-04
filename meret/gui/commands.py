@@ -73,6 +73,7 @@ def command_table() -> list[tuple[str, str]]:
         ("quit", _("Quit")),
     ]
 
+
 def menu_table() -> list[tuple[str, tuple[str | None, ...]]]:
     """(menu, commands) - the menu bar: the same commands as the toolbar, grouped.
 
@@ -101,6 +102,7 @@ def menu_table() -> list[tuple[str, tuple[str | None, ...]]]:
         (_("Help"), ("command_palette", "help")),
     ]
 
+
 def short_label(command: str) -> str:
     """Text for a toolbar button. Falls back to the full description."""
     short = {
@@ -110,6 +112,7 @@ def short_label(command: str) -> str:
     }
     return short.get(command) or dict(command_table()).get(command, command)
 
+
 def matches(query: str) -> list[str]:
     """Commands for the typed text: exact, then name prefix, then anywhere."""
     query = query.strip().lower()
@@ -118,9 +121,8 @@ def matches(query: str) -> list[str]:
         for command, description in command_table()
         if query in command or query in description.lower()
     ]
-    return sorted(
-        hits, key=lambda command: (command != query, not command.startswith(query))
-    )
+    return sorted(hits, key=lambda command: (command != query, not command.startswith(query)))
+
 
 def _column_widths() -> tuple[int, int]:
     """Palette column widths, taken from the data instead of hardcoded.

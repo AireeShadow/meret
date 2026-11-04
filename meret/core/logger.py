@@ -11,6 +11,7 @@ Third-party libraries (winfspy, PIL, asyncio, ...) are recorded from WARNING up,
 so e.g. winfspy's "Unhandled exception" tracebacks from a mount land in the file.
 """
 
+import contextlib
 import logging
 import os
 import reprlib
@@ -64,10 +65,8 @@ class _SharedRotatingFileHandler(RotatingFileHandler):
     """
 
     def doRollover(self) -> None:
-        try:
+        with contextlib.suppress(OSError):
             super().doRollover()
-        except OSError:
-            pass
 
 
 class _StderrHandler(logging.StreamHandler):
@@ -116,6 +115,7 @@ def setup_logging(
     root.setLevel(logging.WARNING)  # third-party noise stays out
     logging.getLogger(APP_NAME).setLevel(meret_level)  # meret controls its own level
     return path
+
 
 def log_uncaught_exceptions() -> None:
     """Crashes go to the log file too, not just to a terminal that may be long gone.
@@ -191,7 +191,13 @@ def traced(logger: logging.Logger, level: int = logging.DEBUG) -> Callable[[F], 
 
         def emit(msg: str, *args: Any) -> None:
             record = logger.makeRecord(
-                logger.name, level, code.co_filename, code.co_firstlineno, msg, args, None,
+                logger.name,
+                level,
+                code.co_filename,
+                code.co_firstlineno,
+                msg,
+                args,
+                None,
                 func=fn.__qualname__,
             )
             logger.handle(record)
@@ -209,8 +215,14 @@ def traced(logger: logging.Logger, level: int = logging.DEBUG) -> Callable[[F], 
                 result = fn(*args, **kwargs)
             except Exception as exc:
                 ms = (time.perf_counter() - start) * 1000
-                emit("%s(%s) raised %s: %s after %.1f ms",
-                     fn.__name__, shown, type(exc).__name__, exc, ms)
+                emit(
+                    "%s(%s) raised %s: %s after %.1f ms",
+                    fn.__name__,
+                    shown,
+                    type(exc).__name__,
+                    exc,
+                    ms,
+                )
                 raise
             ms = (time.perf_counter() - start) * 1000
             emit("%s(%s) -> %s in %.1f ms", fn.__name__, shown, _summary(result), ms)

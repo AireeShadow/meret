@@ -5,6 +5,7 @@ Everything test modules import directly (pump) is defined unconditionally at
 module level - never inside a fixture and never after a call that can raise.
 """
 
+import contextlib
 import os
 import time
 from collections.abc import Callable, Iterator
@@ -66,8 +67,8 @@ def pump_until(predicate: Callable[[], bool], timeout_ms: int = 2000) -> bool:
         pump(10)
     return predicate()
 
-if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
 
+if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
     import threading
 
     from PySide6.QtCore import QObject
@@ -114,10 +115,8 @@ if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
             time this thread wakes up - which raised "invalid handle" on Windows.
             A closed descriptor is the only remaining failure, and that is silent.
             """
-            try:
+            with contextlib.suppress(OSError):
                 os.write(2, (text + "\n").encode("utf-8", "replace"))
-            except OSError:
-                pass
 
         def take(self, top: int = 6) -> str:
             """The window that just passed, then a fresh one."""
@@ -177,6 +176,7 @@ if HAS_QT:  # the tally needs a real Qt; the rest of the file imports without it
         yield None
         counter.stop()
 
+
 @pytest.fixture(autouse=True)
 def quiet_dialogs(monkeypatch) -> None:
     """No modal dialog may block a test: each one runs its own event loop.
@@ -213,6 +213,7 @@ def quiet_dialogs(monkeypatch) -> None:
         "open",
         lambda self: self.finished.emit(QDialog.DialogCode.Rejected),
     )
+
 
 if not HAS_PYTEST_QT:  # pragma: no cover - only when pytest-qt is absent
 

@@ -14,9 +14,7 @@ def captured(monkeypatch):
     monkeypatch.setattr(
         QMessageBox,
         "information",
-        staticmethod(
-            lambda parent, title, text, *a, **k: box.update(title=title, text=text)
-        ),
+        staticmethod(lambda parent, title, text, *a, **k: box.update(title=title, text=text)),
     )
     return box
 
@@ -65,6 +63,7 @@ def test_no_two_commands_share_a_key():
 
     keys = [key for key in SHORTCUTS.values() if key]
     assert len(set(keys)) == len(keys)
+
 
 def test_help_columns_are_separated(window, captured):
     """A key wider than the column used to run straight into the description."""

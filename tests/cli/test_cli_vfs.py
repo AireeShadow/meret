@@ -132,7 +132,11 @@ def test_vfs_commands_are_registered_in_the_real_cli():
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "COLUMNS": "200"}
     out = subprocess.run(
         [sys.executable, "-m", "meret", "--help"],
-        capture_output=True, text=True, encoding="utf-8", env=env, check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        check=True,
     ).stdout
     for cmd in ("ls", "open", "stat", "mount", "umount"):
         assert f" {cmd} " in out, f"{cmd} missing from `meret --help`"

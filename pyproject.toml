@@ -43,6 +43,7 @@ line-length = 100
 line-length = 100
 
 [tool.ruff.lint]
+select = ["E", "F", "W", "B", "S", "PL", "RUF", "SIM", "TRY", "BLE"]
 ignore = [
     # typer.Argument()/Option() in defaults is the documented Typer style, and _()
     # there has to run at import time so the help text is translated.
@@ -63,11 +64,61 @@ ignore = [
     # SourceFile keeps its handle open for the object's whole life and closes it in
     # close(); a `with` would defeat that.
     "SIM115",
+
+    # ---- decisions, not oversights ----
+
+    # 259 hits. Importing inside a function is load-bearing here: meret/gui must not
+    # drag PySide6 into core, cli/app.py reads --lang from sys.argv before the typer
+    # decorators freeze their help strings, and conftest sets QT_QPA_PLATFORM before
+    # the first Qt import. Hoisting them all to the top would undo the architecture.
+    "PLC0415",
+    # Same reason, and it is the rule that already guards the three traps above.
+    "E402",
+    # The strings are deliberately not ASCII: "∕" (U+2215) stands in for the slashes
+    # a filesystem forbids, and the CLI prints ✓ ✗ ⚠ … —
+    "RUF001",
+    # raise ValueError("...") with a message is the house style; a class per bad
+    # value would be more names than the callers need.
+    "TRY003",
+    # Module-level singletons and latches: the config manager, the "ffprobe is
+    # missing" flag.
+    "PLW0603",
+    # Every process is started with an argv list and no shell: S603, S606, S607 and
+    # S404 are all the same "PATH-resolved toolchain" call.
+    "S603",
+    "S606",
+    "S607",
+    "S404",
+    # SQL is assembled from trusted constant fragments with ? placeholders - nothing
+    # from user input is interpolated.
+    "S608",
+    # sha1 keys a thumbnail cache file; nothing depends on it being strong.
+    "S324",
+    # scripts/fetch_icons.py urlopen()s a constant https URL.
+    "S310",
+    # PLR2004: what it fires on is byte units (1024), a config-size threshold and a
+    # traceback depth. A constant per module would add names, not clarity.
+    "PLR2004",
+    # TRY300: `return` at the tail of a `try` is where it reads; moving it to an
+    # `else` pushes the interesting line away from the code it belongs to.
+    "TRY300",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Tests: leftovers and the shape of pytest itself, not production code.
-"tests/**" = ["B017", "F841", "RUF059", "SIM102"]
+# Tests: leftovers and the shape of pytest itself, not production code. S101 is the
+# same idea - assert IS the pytest idiom, and there is no -O run to strip it.
+# PLW0108: a lambda beside the call it feeds reads better than a bound method.
+# E741: `l` is fine where the scope is three lines long.
+"tests/**" = ["B017", "F841", "RUF059", "SIM102", "S101", "PLR2004", "PLW0108", "E741"]
+
+[tool.ruff.lint.pylint]
+# The Qt panel helpers take their widget's fields as arguments (name, source,
+# file_id, mtime, file_type, vpath), and the SQL splitter and the listing builders
+# are long by nature. Raising the limits beats sprinkling noqa over two files.
+max-args = 8
+max-positional-args = 8
+max-branches = 18
+max-statements = 80
 
 [tool.hatch.build.targets.wheel]
 packages = ["meret"]

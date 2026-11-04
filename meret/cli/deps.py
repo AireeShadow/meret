@@ -40,9 +40,16 @@ class DatabaseNotFound(Exception):
         _console.print(f" {_('looked here:')} [yellow]{self.path}[/yellow]")
         _console.print()
         _console.print(f"[dim]{_('What to do:')}[/dim]")
-        _console.print(f" • {_('create a database in the current directory:')} [green]meret init[/green]")
-        _console.print(f" • {_('pass the path explicitly:')} [green]meret scan --db /path/to/meret.db ...[/green]")
-        _console.print(f" • {_('or set the environment variable:')} [green]MERET_DB=/path/to/meret.db[/green]")
+        _console.print(
+            f" • {_('create a database in the current directory:')} [green]meret init[/green]"
+        )
+        _console.print(
+            f" • {_('pass the path explicitly:')} "
+            "[green]meret scan --db /path/to/meret.db ...[/green]"
+        )
+        _console.print(
+            f" • {_('or set the environment variable:')} [green]MERET_DB=/path/to/meret.db[/green]"
+        )
         _console.print()
 
 

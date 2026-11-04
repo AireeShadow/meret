@@ -51,7 +51,7 @@ def _ffprobe(file_path: Path) -> dict[str, Any]:
     except FileNotFoundError:
         if not _ffprobe_missing_reported:  # once, not once per file
             _ffprobe_missing_reported = True
-            logger.error("ffprobe not found on PATH: video/audio metadata is unavailable")
+            logger.exception("ffprobe not found on PATH: video/audio metadata is unavailable")
         raise
     except subprocess.CalledProcessError as e:
         raise ExtractionError(
@@ -62,7 +62,6 @@ def _ffprobe(file_path: Path) -> dict[str, Any]:
 
 class ExtractionError(Exception):
     """Metadata extraction error"""
-
 
 
 class MetadataExtractor(ABC):
@@ -134,8 +133,12 @@ class ImageExtractor(MetadataExtractor):
                     metadata["exif"] = self._parse_exif(exif, ExifTags)
 
         except Exception as e:
-            logger.warning("Image extraction failed for %s: %s", file_path, e,
-                           exc_info=logger.isEnabledFor(logging.DEBUG))
+            logger.warning(
+                "Image extraction failed for %s: %s",
+                file_path,
+                e,
+                exc_info=logger.isEnabledFor(logging.DEBUG),
+            )
             metadata["error"] = str(e)
 
         return metadata
@@ -144,14 +147,11 @@ class ImageExtractor(MetadataExtractor):
     def _parse_exif(exif_data, exif_tags) -> dict[str, Any]:
         """Parses EXIF into a readable form"""
         parsed = {}
-        for tag_id, value in exif_data.items():
+        for tag_id, raw in exif_data.items():
             tag_name = exif_tags.TAGS.get(tag_id, str(tag_id))
             # bytes aren't JSON-serializable — convert them
-            if isinstance(value, bytes):
-                value = value.decode("utf-8", errors="replace")
-            else:
-                value = str(value)
-            parsed[tag_name] = value
+            text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+            parsed[tag_name] = text
         return parsed
 
 
@@ -185,8 +185,12 @@ class VideoExtractor(MetadataExtractor):
                     break
 
         except Exception as e:
-            logger.warning("Video extraction failed for %s: %s", file_path, e,
-                           exc_info=logger.isEnabledFor(logging.DEBUG))
+            logger.warning(
+                "Video extraction failed for %s: %s",
+                file_path,
+                e,
+                exc_info=logger.isEnabledFor(logging.DEBUG),
+            )
             metadata["error"] = str(e)
 
         return metadata
@@ -250,8 +254,12 @@ class AudioExtractor(MetadataExtractor):
                     break
 
         except Exception as e:
-            logger.warning("Audio extraction failed for %s: %s", file_path, e,
-                           exc_info=logger.isEnabledFor(logging.DEBUG))
+            logger.warning(
+                "Audio extraction failed for %s: %s",
+                file_path,
+                e,
+                exc_info=logger.isEnabledFor(logging.DEBUG),
+            )
             metadata["error"] = str(e)
 
         return metadata

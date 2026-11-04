@@ -19,10 +19,15 @@ def dump(model: QFileSystemModel, label: str) -> None:
     root = QModelIndex()
     rows = model.rowCount(root)
     print(f"--- {label}")
-    print(f"    rootPath={model.rootPath()!r} rowCount={rows} canFetchMore={model.canFetchMore(root)}")
+    print(
+        f"    rootPath={model.rootPath()!r} rowCount={rows} canFetchMore={model.canFetchMore(root)}"
+    )
     for row in range(min(rows, 12)):
         index = model.index(row, 0, root)
-        print(f"    [{row}] filePath={model.filePath(index)!r} name={model.fileInfo(index).fileName()!r}")
+        print(
+            f"    [{row}] filePath={model.filePath(index)!r} "
+            f"name={model.fileInfo(index).fileName()!r}"
+        )
 
 
 def main() -> int:

@@ -44,8 +44,8 @@ VIDEO_SUFFIXES = frozenset(
 class Reason:
     """Why a thumbnail is missing. The caller turns this into a tooltip."""
 
-    NO_TOOL = "no-tool"        # ffmpeg is not on PATH, so a video has no frame
-    NO_FRAME = "no-frame"      # ffmpeg ran and gave nothing usable
+    NO_TOOL = "no-tool"  # ffmpeg is not on PATH, so a video has no frame
+    NO_FRAME = "no-frame"  # ffmpeg ran and gave nothing usable
     NO_DECODER = "no-decoder"  # this kind of file has no preview at all
     UNREADABLE = "unreadable"  # the file is gone or cannot be read
 
@@ -92,13 +92,20 @@ def _video_frame(source: Path) -> tuple[Image.Image | None, str]:
         command = [
             binary,
             "-nostdin",
-            "-loglevel", "error",
-            "-ss", seek,
-            "-i", str(source),
-            "-frames:v", "1",
-            "-vf", f"scale='min({MAX_SIZE},iw)':-2",
-            "-f", "image2pipe",
-            "-vcodec", "png",
+            "-loglevel",
+            "error",
+            "-ss",
+            seek,
+            "-i",
+            str(source),
+            "-frames:v",
+            "1",
+            "-vf",
+            f"scale='min({MAX_SIZE},iw)':-2",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "png",
             "-",
         ]
         try:

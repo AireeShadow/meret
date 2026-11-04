@@ -45,6 +45,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class LocaleConfig:
     """Immutable locale configuration."""
+
     language: str
     encoding: str = "UTF-8"
     date_format: str | None = None
@@ -144,7 +145,10 @@ def _parse_po(text: str, source: str = "<po>") -> dict[str, str]:
         if ident in defined:
             logger.warning(
                 "%s:%s: duplicate msgid %r (first defined at line %s)",
-                source, item.get("_line"), item["msgid"], defined[ident],
+                source,
+                item.get("_line"),
+                item["msgid"],
+                defined[ident],
             )
         else:
             defined[ident] = item.get("_line")
@@ -173,8 +177,10 @@ def _parse_po(text: str, source: str = "<po>") -> dict[str, str]:
         else:
             keyword, _, rest = line.partition(" ")
             chunk = ast.literal_eval(rest.strip())
-            if keyword in ("msgctxt", "msgid") and "msgid" in entry and (
-                keyword == "msgctxt" or "msgstr" in entry
+            if (
+                keyword in ("msgctxt", "msgid")
+                and "msgid" in entry
+                and (keyword == "msgctxt" or "msgstr" in entry)
             ):
                 flush()  # a new entry without a blank line in between
             if keyword.startswith("msgstr["):

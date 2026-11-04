@@ -21,6 +21,7 @@ on the drive letter, IRPs keep arriving and stop() can hang forever. So:
 4. a second Ctrl+C (or Enter) exits immediately.
 """
 
+import contextlib
 import errno
 import itertools
 import logging
@@ -49,15 +50,13 @@ POLL_INTERVAL = 0.2
 def _flush_streams() -> None:
     """os._exit() doesn't flush buffers — do it manually (log handlers too)."""
     for handler in logging.getLogger().handlers:
-        try:
+        # the handler may already be torn down
+        with contextlib.suppress(Exception):
             handler.flush()
-        except Exception:  # the handler may already be torn down
-            pass
     for stream in (sys.stdout, sys.stderr):
-        try:
+        # the stream may already be closed
+        with contextlib.suppress(Exception):
             stream.flush()
-        except Exception:  # the stream may already be closed
-            pass
 
 
 def _install_signal_handlers(handler) -> None:
@@ -70,11 +69,9 @@ def _install_signal_handlers(handler) -> None:
         sig = getattr(signal, name, None)
         if sig is None:
             continue
-        try:
+        # mount() was called from a non-main thread — signals aren't ours
+        with contextlib.suppress(ValueError):
             signal.signal(sig, handler)
-        except ValueError:
-            # mount() was called from a non-main thread — signals aren't ours
-            pass
 
 
 def _watch_stdin(is_done, on_quit) -> None:
@@ -96,10 +93,9 @@ def _watch_stdin(is_done, on_quit) -> None:
 
 def _stop_fs(fs) -> None:
     """Stops the FS while we are already on the way out — errors are noise."""
-    try:
+    # the dispatcher may already be down
+    with contextlib.suppress(Exception):
         fs.stop()
-    except Exception:  # the dispatcher may already be down
-        pass
 
 
 # ---------- Linux / macOS ----------
@@ -119,7 +115,7 @@ def _mount_fuse(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             try:
                 node = tree.stat(path)
             except NotFound:
-                raise OSError(errno.ENOENT, "no such node")
+                raise OSError(errno.ENOENT, "no such node") from None
 
             is_dir = node.is_dir
             return {
@@ -137,9 +133,9 @@ def _mount_fuse(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             try:
                 src = tree.open_source(path)
             except IsADirectory:
-                raise OSError(errno.EISDIR, "is a directory")
+                raise OSError(errno.EISDIR, "is a directory") from None
             except NotFound:
-                raise OSError(errno.ENOENT, "no such file")
+                raise OSError(errno.ENOENT, "no such file") from None
             with self._lock:
                 fh = next(self._fh)
                 self._files[fh] = src
@@ -266,7 +262,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             try:
                 node = tree.stat(_norm_windows_path(file_name))
             except NotFound:
-                raise NTStatusObjectNameNotFound()
+                raise NTStatusObjectNameNotFound() from None
             attrs = FILE_ATTRIBUTE.FILE_ATTRIBUTE_DIRECTORY if node.is_dir else 0
             return attrs, _SD.handle, _SD.size
 
@@ -291,7 +287,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                     try:
                         src = tree.open_source(file_context["path"])
                     except NotFound:
-                        raise NTStatusObjectNameNotFound()
+                        raise NTStatusObjectNameNotFound() from None
                     file_context["source"] = src
                     self._log("source opened for %s -> %s", file_context["path"], src.path)
                 return src
@@ -302,7 +298,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 return self._context(vpath)
             except NotFound:
                 self._log("open %s -> not found", vpath)
-                raise NTStatusObjectNameNotFound()
+                raise NTStatusObjectNameNotFound() from None
 
         def create(
             self,
@@ -322,7 +318,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
                 return self._context(vpath)
             except NotFound:
                 logger.info("refused to create %s: the FS is read-only", vpath)
-                raise NTStatusMediaWriteProtected()
+                raise NTStatusMediaWriteProtected() from None
 
         def close(self, file_context):
             if isinstance(file_context, dict):
@@ -356,7 +352,7 @@ def _mount_winfsp(tree: VirtualTree, mountpoint: str, foreground: bool) -> None:
             try:
                 node = tree.stat(file_context["path"])
             except NotFound:
-                raise NTStatusObjectNameNotFound()
+                raise NTStatusObjectNameNotFound() from None
             return self._info(node)
 
         def read_directory(self, file_context, marker):

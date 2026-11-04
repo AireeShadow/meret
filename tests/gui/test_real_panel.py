@@ -137,23 +137,13 @@ def test_revealing_a_folder_leaves_the_panel_at_the_top(panel, tmp_path):
     assert not panel.rootIndex().isValid()
 
 
-def test_reveal_does_not_list_a_path_it_already_knows(panel, tmp_path):
-    """Every listing is resolved on the GUI thread: a known path must not be re-read."""
-    assert panel.reveal(tmp_path)
-
-    calls = []
-    panel._model.setRootPath = lambda *args: calls.append(args)
-
-    assert panel.reveal(tmp_path)
-    assert calls == []
-
-
 def test_the_drives_stay_the_root_of_the_panel(panel):
     """The drive list is the model's root: the panel must sit at it, not inside it."""
     assert pump_until(lambda: panel._model.rowCount() > 0)
 
     assert panel._model.rootPath() == ""
     assert not panel.rootIndex().isValid()
+
 
 def test_show_filesystem_reads_the_top_again(panel):
     """A no-op setRootPath("") returns early: the root has to be forced to re-read.
@@ -169,6 +159,7 @@ def test_show_filesystem_reads_the_top_again(panel):
     panel.show_filesystem()
 
     assert calls == [QDir.homePath(), ""]
+
 
 def test_reveal_does_not_list_a_path_it_already_knows(panel, tmp_path):
     """A known path must not be listed again: only the way back to the top moves.
@@ -186,6 +177,7 @@ def test_reveal_does_not_list_a_path_it_already_knows(panel, tmp_path):
     assert panel.reveal(tmp_path)
 
     assert calls == [(QDir.homePath(),), ("",)]  # the top, never the target
+
 
 # ---------- drives: a dead one must not hide the others ----------
 

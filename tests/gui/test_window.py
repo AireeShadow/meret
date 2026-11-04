@@ -1,4 +1,5 @@
 """Smoke tests: the window builds, lists a tagged file and closes cleanly."""
+
 import pytest
 from PySide6.QtCore import Qt
 
@@ -132,8 +133,11 @@ def test_preview_updates_for_the_selected_file(tmp_path, qapp, qtbot):
     window.open_folder("/travel")
     qtbot.waitUntil(lambda: window.grid.count() == 1, timeout=2000)
     window.grid.setCurrentRow(0)
-    qtbot.waitUntil(lambda: window.preview.pixmap() is not None
-        and not window.preview.pixmap().isNull(), timeout=2000)
+    qtbot.waitUntil(
+        lambda: window.preview.pixmap() is not None and not window.preview.pixmap().isNull(),
+        timeout=2000,
+    )
+
 
 def test_thumbnails_are_batched_and_the_queue_refills_on_completion(tmp_path, qapp, qtbot):
     """The bug: a zero-timer refilled the queue at once, so BATCH limited nothing."""
@@ -146,8 +150,9 @@ def test_thumbnails_are_batched_and_the_queue_refills_on_completion(tmp_path, qa
 
     submitted, landed = [], []
 
-    def fake_run(work, on_done=None, on_failed=None, args=(), kwargs=None,
-                 generation=None, sticky=False):
+    def fake_run(
+        work, on_done=None, on_failed=None, args=(), kwargs=None, generation=None, sticky=False
+    ):
         submitted.append(args[0])
         landed.append(lambda: on_done(None))  # None: nothing is painted
 
@@ -178,6 +183,7 @@ def test_thumbnails_are_batched_and_the_queue_refills_on_completion(tmp_path, qa
 
     assert len(submitted) == BATCH * 2
     assert window._queue == []
+
 
 @pytest.fixture
 def menu_window(tmp_path, qapp, qtbot):
@@ -225,6 +231,7 @@ def test_a_menu_entry_is_the_very_same_action_as_the_toolbar(menu_window):
     in_toolbar = {a for a in menu_window.toolbar.actions() if not a.isSeparator()}
 
     assert set(_menu_entries(menu_window)) == in_toolbar
+
 
 def _answer(monkeypatch, role):
     """Make the next QMessageBox answer as if the button with `role` was clicked.

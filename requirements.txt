@@ -1,5 +1,0 @@
-typer[all]>=0.26.0
-rich>=13.9.0
-pydantic>=2.13.0
-Pillow>=12.3.0
-pytest>=9.1.0

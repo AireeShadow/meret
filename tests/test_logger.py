@@ -247,8 +247,11 @@ def test_uncaught_exceptions_reach_the_log(monkeypatch):
     log_uncaught_exceptions()
     log_uncaught_exceptions()  # idempotent: no double logging
 
-    try:
+    def crash_on_the_main_thread() -> None:
         raise ValueError("main-thread crash")
+
+    try:
+        crash_on_the_main_thread()
     except ValueError:
         sys.excepthook(*sys.exc_info())
 

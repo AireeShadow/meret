@@ -153,21 +153,21 @@ class VirtualTree:
             snap = self._snap
             if snap is not None and self._is_fresh(snap, self._repo_version()):
                 return snap
-            
+
             # Rebuild snapshot with consistent data read
             started = time.perf_counter()
             previous = snap.version if snap is not None else None
-            
+
             # Read all data first
             tags = self.repo.get_all_tags()
             children: dict[int | None, list[Tag]] = {}
             for t in tags:
                 children.setdefault(t.parent_id, []).append(t)
-            
+
             # Read version AFTER data to detect concurrent modifications
             # If a write happened during our read, we'll rebuild next time
             version = self._repo_version()
-            
+
             snap = _Snapshot(
                 version=version,
                 taken_at=time.monotonic(),
@@ -175,10 +175,12 @@ class VirtualTree:
                 children=children,
             )
             self._snap = snap
-            
+
             logger.debug(
                 "snapshot rebuilt: data_version %s -> %s, %d tags in %.1f ms",
-                previous, version, len(tags),
+                previous,
+                version,
+                len(tags),
                 (time.perf_counter() - started) * 1000,
             )
             return snap
@@ -255,7 +257,10 @@ class VirtualTree:
                 dirs = sum(1 for n in listing.nodes if n.is_dir)
                 logger.debug(
                     "listing %s: %d folders, %d files in %.1f ms",
-                    vpath, dirs, len(listing.nodes) - dirs, (time.perf_counter() - started) * 1000,
+                    vpath,
+                    dirs,
+                    len(listing.nodes) - dirs,
+                    (time.perf_counter() - started) * 1000,
                 )
             return listing
 
@@ -276,14 +281,14 @@ class VirtualTree:
                 is_dir=True,
                 tag_id=t.id,
             )
-            for name, t in zip(dir_names, child_tags)
+            for name, t in zip(dir_names, child_tags, strict=True)
         ]
 
         # files = files tagged with this tag (by id: namesakes are distinct)
         if tag is not None:
             files = self.repo.search_by_tag_ids([[tag.id]])
             file_names = self._dedupe([f.filename for f in files])
-            for name, f in zip(file_names, files):
+            for name, f in zip(file_names, files, strict=True):
                 size, mtime = self._file_stat(f)
                 nodes.append(
                     Node(

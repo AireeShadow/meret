@@ -21,19 +21,23 @@ def window(tmp_path, qapp, qtbot):
     repo = SQLiteRepository(str(tmp_path / "meret.db"))
     main = MainWindow(repo, tmp_path / "meret.db")
     qtbot.addWidget(main)
-    # The start-up listing is still in flight, and its callback ends in
-    # _update_status(): it would overwrite a status line written before it lands.
+
+    # Two waits, in this order, because the window does two things on start.
     #
-    # pump_until, not qtbot.waitUntil. Revealing the database folder expands its
-    # ancestors, and %TEMP% - an ancestor of every tmp_path - is resolved on the
-    # GUI thread with a stat per entry, so a single such event can outlast the
-    # whole timeout. qtbot.waitUntil re-checks the clock before it re-checks the
-    # callback, so a delivery that lands during that event is reported as a
-    # timeout. pump_until evaluates the predicate once more after its last pump,
-    # which is exactly the turn the delivery needs.
+    # First the panel's own reveal: it expands every ancestor up to the drive root,
+    # and %TEMP% - an ancestor of every tmp_path - is resolved with a stat per entry.
+    # On Windows that is tens of seconds of a blocked GUI thread, and everything
+    # queued behind it waits, including the listing below. pump_until, not
+    # qtbot.waitUntil: the latter re-checks the clock before it re-checks the
+    # callback, so a delivery that lands during the block is reported as a timeout.
+    assert pump_until(lambda: main.fs.current_path() == main._db_path.parent, timeout_ms=60000), (
+        "the start-up reveal never finished - the panel is stuck expanding %TEMP%"
+    )
+
+    # Then the start-up listing: its callback ends in _update_status(), and it would
+    # overwrite a status line the test wrote before it lands.
     assert pump_until(lambda: not main._tasks._inflight, timeout_ms=15000), (
-        "the start-up listing never landed - the GUI thread is probably stuck in a "
-        "filesystem listing"
+        "the start-up listing never landed"
     )
     return main
 

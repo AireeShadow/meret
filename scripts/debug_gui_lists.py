@@ -1,4 +1,5 @@
 """Scratch check: does the runner deliver, and does the grid fill?"""
+
 from __future__ import annotations
 
 import logging

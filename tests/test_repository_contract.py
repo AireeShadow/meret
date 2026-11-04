@@ -1,4 +1,3 @@
-
 from meret.core import tagpaths
 from meret.core.models import FileEntry, FileType
 
@@ -283,6 +282,7 @@ def test_search_by_tag_ids_distinguishes_namesakes(repo):
     genre = tagpaths.resolve("genre/mystery", repo.get_all_tags())
 
     assert [f.filename for f in repo.search_by_tag_ids([[genre.id]])] == ["a.png"]
+
 
 def test_known_fingerprints_tracks_size_and_mtime(repo):
     assert repo.known_fingerprints() == {}

@@ -30,13 +30,15 @@ def used_keys() -> set:
             if not isinstance(node, ast.Call):
                 continue
             name = (
-                node.func.id if isinstance(node.func, ast.Name)
-                else getattr(node.func, "attr", "")
+                node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
             )
             args = [a.value for a in node.args if isinstance(a, ast.Constant)]
             context = next(
-                (k.value.value for k in node.keywords
-                 if k.arg == "context" and isinstance(k.value, ast.Constant)),
+                (
+                    k.value.value
+                    for k in node.keywords
+                    if k.arg == "context" and isinstance(k.value, ast.Constant)
+                ),
                 None,
             )
             if name in ("_", "translate") and args and isinstance(args[0], str):

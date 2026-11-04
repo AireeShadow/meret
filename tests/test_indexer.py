@@ -1,6 +1,5 @@
 """Indexer tests: two phases — collect (listing) and extract (metadata)."""
 
-
 from PIL import Image
 
 from meret.core.extractors import VideoExtractor
@@ -36,15 +35,18 @@ def test_collect_single_unsupported(tmp_path, mock_repo):
 def test_collect_missing_library(mock_repo, tmp_path):
     assert Indexer(mock_repo, tmp_path / "nope").collect() == []
 
+
 def test_skip_existing_reindexes_changed_file(tmp_path, make_png, mock_repo):
     path = make_png("a")
     Indexer(mock_repo, tmp_path).run()
 
-    Image.new("RGB", (64, 64), "blue").save(path)   # same path, bigger file
+    Image.new("RGB", (64, 64), "blue").save(path)  # same path, bigger file
     stats = Indexer(mock_repo, tmp_path, skip_existing=True).run()
 
     assert stats["skipped"] == 0
     assert stats["updated"] == 1
+
+
 # ---------- extract phase ----------
 
 

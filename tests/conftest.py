@@ -1,6 +1,7 @@
 """
 Pytest configuration and shared fixtures.
 """
+
 import logging
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -68,11 +69,13 @@ def repo(request, sqlite_repo, mock_repo):
 @pytest.fixture
 def make_png(tmp_path: Path):
     counter = {"n": 0}
+
     def _make(name: str = "photo", size=(16, 16)) -> Path:
         counter["n"] += 1
         path = tmp_path / f"{name}_{counter['n']}.png"
         Image.new("RGB", size, "red").save(path)
         return path
+
     return _make
 
 
@@ -94,31 +97,31 @@ def isolated_config(monkeypatch, tmp_path: Path):
     Use this when testing config modifications.
     """
     import meret.core.config as config_module
-    
+
     config_dir = tmp_path / "meret_config"
     config_dir.mkdir()
-    
+
     monkeypatch.setattr(
-        config_module,
-        "platformdirs",
-        MagicMock(user_config_dir=lambda x: str(config_dir))
+        config_module, "platformdirs", MagicMock(user_config_dir=lambda x: str(config_dir))
     )
-    
+
     # Reset singleton
     config_module._config_instance = None
-    
+
     yield config_dir
-    
+
     # Cleanup
     config_module._config_instance = None
+
 
 @pytest.fixture(autouse=True)
 def suppress_textual_warnings():
     """Suppress Textual internal warnings."""
     import warnings
+
     warnings.filterwarnings(
         "ignore",
         message="coroutine 'DirectoryTree.watch_path' was never awaited",
-        category=RuntimeWarning
+        category=RuntimeWarning,
     )
     yield

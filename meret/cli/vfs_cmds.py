@@ -47,7 +47,9 @@ def _get_tree(db_path: Path | None) -> VirtualTree:
 @app.command("ls", help=_("List the contents of a virtual directory (tags = folders)."))
 def ls(
     vpath: str = typer.Argument("/", help=_("Virtual path, e.g. /travel")),
-    db_path: Path | None = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
+    db_path: Path | None = typer.Option(
+        None, "--db", "-d", help=_("Database directory or path to a .db file")
+    ),
     long: bool = typer.Option(False, "--long", "-l", help=_("Show sizes")),
 ):
     """List the contents of a virtual directory (tags = folders)."""
@@ -55,21 +57,21 @@ def ls(
         tree = _get_tree(db_path)
     except DatabaseNotFound:
         console.print(f"[red]{_('Database not found')}[/red]")
-        raise typer.Exit(1)
-    
+        raise typer.Exit(1) from None
+
     try:
         nodes = tree.listdir(vpath)
     except NotFound:
         console.print(f"[red]{_('No such path: {path}').format(path=vpath)}[/red]")
-        raise typer.Exit(1)
-    
+        raise typer.Exit(1) from None
+
     if not nodes:
         console.print(f"[dim]({_('empty')})[/dim]")
         return
-    
+
     dirs = [n for n in nodes if n.is_dir]
     files = [n for n in nodes if not n.is_dir]
-    
+
     for node in dirs:
         console.print(f"[bold blue]{node.name}/[/bold blue]")
     for node in files:
@@ -77,14 +79,16 @@ def ls(
             console.print(f"[dim]{_human(node.size):>9}[/dim] {node.name}")
         else:
             console.print(node.name)
-    
+
     console.print(f"\n[dim]{_('{n} folders, {m} files').format(n=len(dirs), m=len(files))}[/dim]")
 
 
 @app.command("open", help=_("Open a file with the system's default application."))
 def open_file(
     vpath: str = typer.Argument(..., help=_("Path to the file")),
-    db_path: Path | None = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
+    db_path: Path | None = typer.Option(
+        None, "--db", "-d", help=_("Database directory or path to a .db file")
+    ),
     path_only: bool = typer.Option(False, "--path", "-p", help=_("Only print the path")),
 ):
     """Open a file with the system's default application."""
@@ -93,19 +97,23 @@ def open_file(
         real = tree.real_path(vpath)
     except NotFound:
         console.print(f"[red]{_('File not found: {path}').format(path=vpath)}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except IsADirectory:
-        console.print(f"[yellow]{_('This is a directory (tag): {path}').format(path=vpath)}[/yellow]")
-        raise typer.Exit(1)
-    
+        console.print(
+            f"[yellow]{_('This is a directory (tag): {path}').format(path=vpath)}[/yellow]"
+        )
+        raise typer.Exit(1) from None
+
     if not real.exists():
-        console.print(f"[yellow]{_('In the database but missing on disk: {path}').format(path=real)}[/yellow]")
+        console.print(
+            f"[yellow]{_('In the database but missing on disk: {path}').format(path=real)}[/yellow]"
+        )
         raise typer.Exit(1)
-    
+
     if path_only:
         console.print(str(real), soft_wrap=True)
         return
-    
+
     _open_external(real)
     console.print(f"[green]→ {real}[/green]")
 
@@ -113,7 +121,9 @@ def open_file(
 @app.command("stat", help=_("Info about a virtual FS node."))
 def stat_cmd(
     vpath: str = typer.Argument(..., help=_("Virtual path")),
-    db_path: Path | None = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
+    db_path: Path | None = typer.Option(
+        None, "--db", "-d", help=_("Database directory or path to a .db file")
+    ),
 ):
     """Info about a virtual FS node."""
     tree = _get_tree(db_path)
@@ -121,11 +131,14 @@ def stat_cmd(
         node = tree.stat(vpath)
     except NotFound:
         console.print(f"[red]{_('No such path: {path}').format(path=vpath)}[/red]")
-        raise typer.Exit(1)
-    
+        raise typer.Exit(1) from None
+
     table = Table(show_header=False, box=None)
     table.add_row(_("path"), node.vpath)
-    table.add_row(_("type"), f"[blue]{_('directory (tag)')}[/blue]" if node.is_dir else _("file", context="node type"))
+    table.add_row(
+        _("type"),
+        f"[blue]{_('directory (tag)')}[/blue]" if node.is_dir else _("file", context="node type"),
+    )
     if node.size:
         table.add_row(_("size"), _human(node.size))
     if node.source_path:
@@ -136,12 +149,16 @@ def stat_cmd(
 @app.command("mount", help=_("Mount tags as a drive/directory (read-only)."))
 def mount_cmd(
     mountpoint: Path = typer.Argument(..., help=_("Where to mount, e.g. M:")),
-    db_path: Path | None = typer.Option(None, "--db", "-d", help=_("Database directory or path to a .db file")),
+    db_path: Path | None = typer.Option(
+        None, "--db", "-d", help=_("Database directory or path to a .db file")
+    ),
 ):
     """Mount tags as a drive/directory (read-only)."""
     from meret.vfs.backends.mount import mount as _mount
-    
-    console.print(f"[cyan]{_('Mounting at {path}... Ctrl+C or Enter to exit').format(path=mountpoint)}[/cyan]")
+
+    console.print(
+        f"[cyan]{_('Mounting at {path}... Ctrl+C or Enter to exit').format(path=mountpoint)}[/cyan]"
+    )
     try:
         _mount(_get_tree(db_path), mountpoint)
     except KeyboardInterrupt:
@@ -150,7 +167,7 @@ def mount_cmd(
         console.print(f"[red]{_('No driver: {error}').format(error=e)}[/red]")
         console.print(f"[dim]{_('Linux/macOS: pip install fusepy')}[/dim]")
         console.print(f"[dim]{_('Windows: WinFsp + pip install winfspy')}[/dim]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 def _pids_for_mountpoint(mountpoint: str) -> list[int]:
@@ -166,7 +183,7 @@ def _pids_for_mountpoint(mountpoint: str) -> list[int]:
         cmd = ["powershell", "-NoProfile", "-Command", script]
     else:
         cmd = ["pgrep", "-f", f"meret mount.*{needle}"]
-    
+
     out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     return [int(tok) for tok in out.stdout.split() if tok.strip().isdigit()]
 
@@ -178,14 +195,16 @@ def umount_cmd(
     """Unmount: find the mount process and terminate it."""
     pids = [pid for pid in _pids_for_mountpoint(mountpoint) if pid != os.getpid()]
     if not pids:
-        console.print(f"[yellow]{_('Nothing is mounted at {path}').format(path=mountpoint)}[/yellow]")
+        console.print(
+            f"[yellow]{_('Nothing is mounted at {path}').format(path=mountpoint)}[/yellow]"
+        )
         raise typer.Exit(1)
-    
+
     for pid in pids:
         try:
             os.kill(pid, signal.SIGTERM)
             console.print(f"[green]{_('terminated PID {pid}').format(pid=pid)}[/green]")
         except OSError as exc:
             console.print(f"[red]{_('PID {pid}: {error}').format(pid=pid, error=exc)}[/red]")
-    
+
     console.print(f"[dim]{_('If Explorer still shows the mount point, press F5')}[/dim]")

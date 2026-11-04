@@ -42,7 +42,7 @@ class _TaskSignals(QObject):
     result that a newer request has already superseded.
     """
 
-    done = Signal(object, object)    # task, result
+    done = Signal(object, object)  # task, result
     failed = Signal(object, object)  # task, exception
 
 
@@ -125,12 +125,8 @@ class TaskRunner(QObject):
         task.runner = self
         # Explicitly queued: results must land on the runner's thread (the GUI
         # thread), never on the pool thread that produced them
-        task.signals.done.connect(
-            self._deliver_done, Qt.ConnectionType.QueuedConnection
-        )
-        task.signals.failed.connect(
-            self._deliver_failed, Qt.ConnectionType.QueuedConnection
-        )
+        task.signals.done.connect(self._deliver_done, Qt.ConnectionType.QueuedConnection)
+        task.signals.failed.connect(self._deliver_failed, Qt.ConnectionType.QueuedConnection)
         self._inflight.add(task)
         _INFLIGHT.add(task)
         self._pool.start(task)
@@ -154,9 +150,7 @@ class TaskRunner(QObject):
             if task.on_failed is not None:
                 task.on_failed(error)
             else:  # never let a failure disappear just because nobody listened
-                logger.warning(
-                    "task %s failed: %s", getattr(task.fn, "__name__", task.fn), error
-                )
+                logger.warning("task %s failed: %s", getattr(task.fn, "__name__", task.fn), error)
         finally:
             self._release(task)
 

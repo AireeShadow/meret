@@ -109,6 +109,7 @@ class AbstractRepository(ABC):
         One query for the whole scan, so incremental mode doesn't issue a
         SELECT per file (otherwise it's the same story we had with writes).
         """
+
     @abstractmethod
     def known_fingerprints(self) -> dict[str, tuple[int, float]]:
         """{filepath: (size, mtime)} for every indexed file.

@@ -51,9 +51,7 @@ def fake(monkeypatch):
 def _answer(monkeypatch, text="M:"):
     from PySide6.QtWidgets import QInputDialog
 
-    monkeypatch.setattr(
-        QInputDialog, "getText", staticmethod(lambda *a, **k: (text, bool(text)))
-    )
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: (text, bool(text))))
 
 
 def test_the_cli_builder_puts_the_flag_where_the_parser_expects_it(window):

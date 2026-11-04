@@ -153,9 +153,7 @@ def test_saving_keeps_a_theme_change_in_effect(tmp_path, config, qapp, qtbot, mo
     assert all(not action.icon().isNull() for action in window._actions.values())
 
 
-def test_the_poll_pauses_while_the_dialog_is_open(
-    tmp_path, config, qapp, qtbot, monkeypatch
-):
+def test_the_poll_pauses_while_the_dialog_is_open(tmp_path, config, qapp, qtbot, monkeypatch):
     """A modal window must not fight with a refresh underneath it."""
     from PySide6.QtWidgets import QDialog
 
@@ -175,6 +173,7 @@ def test_the_poll_pauses_while_the_dialog_is_open(
 
     assert seen == [False]  # stopped while the dialog was up
     assert window._poll.isActive()  # and ticking again once it closed
+
 
 def test_the_dialog_shows_every_section_at_once(config, qapp, qtbot):
     """No tabs: switching them inside a dialog is where the app kept freezing."""
@@ -225,9 +224,8 @@ def test_every_editor_is_reachable_from_the_scroll_area(config, qapp, qtbot):
         editor = dialog._editors[setting.key]
         assert editor.isVisible()
 
-def test_a_theme_is_applied_only_when_it_changed(
-    tmp_path, config, qapp, qtbot, monkeypatch
-):
+
+def test_a_theme_is_applied_only_when_it_changed(tmp_path, config, qapp, qtbot, monkeypatch):
     """Re-polishing the app is a visible stall: a save with the same theme must skip it."""
     from PySide6.QtWidgets import QDialog
 
@@ -253,6 +251,7 @@ def test_a_theme_is_applied_only_when_it_changed(
     window._edit_config()
     assert applied == ["dark"]
 
+
 def test_every_tab_can_be_shown(config, qapp, qtbot):
     """The dialog must survive a show, with the app's own theme applied.
 
@@ -277,6 +276,7 @@ def test_every_tab_can_be_shown(config, qapp, qtbot):
     assert all(box.isVisible() for box in boxes)
     assert dialog.isVisible()
     assert dialog.width() == width  # a fixed size: no resize churn
+
 
 def test_switching_pages_back_and_forth_keeps_the_dialog_settled(config, qapp, qtbot):
     """The freeze came after a few scrolls: a layout that never settles.
@@ -310,6 +310,7 @@ def test_switching_pages_back_and_forth_keeps_the_dialog_settled(config, qapp, q
         pump(qapp, ms=5)
         assert dialog.size() == size
         assert dialog.isVisible()
+
 
 def test_the_dialog_does_not_flood_the_event_loop(config, qapp, qtbot, tally):
     """A storm is what makes processEvents() never settle - and the suite hang.

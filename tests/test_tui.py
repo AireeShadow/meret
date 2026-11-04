@@ -1,4 +1,5 @@
 """Tests for TUI components."""
+
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,119 +21,120 @@ from tests.mocks import MockRepository
 
 class TestVirtualFileTree:
     """Tests for VirtualFileTree - the virtual filesystem browser."""
-    
+
     def test_root_data_is_set(self, tmp_path: Path, mock_repo: MockRepository):
         """Root node must have data='/' for proper navigation."""
-        
+
         # Setup: create a tag
         mock_repo.create_tag("travel")
-        
+
         # Create tree with mocked get_repo
-        with patch('meret.cli.tui.get_repo', return_value=mock_repo):
+        with patch("meret.cli.tui.get_repo", return_value=mock_repo):
             tree_widget = VirtualFileTree(tmp_path / "test.db")
             # _load_tree вызван в __init__, и root.data должен быть установлен
-        
+
         assert tree_widget.root.data == "/", f"Expected '/', got {tree_widget.root.data!r}"
-    
+
     def test_populate_node_sets_vpath(self, tmp_path: Path, mock_repo: MockRepository):
         """_populate_node must set node.data = entry.vpath for each child."""
         from meret.vfs import VirtualTree
-        
+
         # Setup: create tag with file
-        f = mock_repo.save_file(FileEntry(
-            filename="beach.png", 
-            filepath="/beach.png", 
-            type=FileType.IMAGE
-        ))
+        f = mock_repo.save_file(
+            FileEntry(filename="beach.png", filepath="/beach.png", type=FileType.IMAGE)
+        )
         mock_repo.add_tag(f, "vacation")
-        
+
         tree_widget = VirtualFileTree(tmp_path / "test.db")
         tree_widget.virtual_tree = VirtualTree(mock_repo)
         tree_widget.root.data = "/"
         tree_widget._populate_node(tree_widget.root, "/")
-        
+
         # Find vacation node
         vac_node = None
         for child in tree_widget.root.children:
             if "vacation" in str(child.label):
                 vac_node = child
                 break
-        
+
         assert vac_node is not None, "vacation node not found"
         assert vac_node.data == "/vacation", f"Expected '/vacation', got {vac_node.data!r}"
-    
+
     def test_populate_node_nested_tags(self, tmp_path: Path, mock_repo: MockRepository):
         """Nested tags create proper vpaths like /parent/child."""
         from meret.vfs import VirtualTree
-        
+
         # Setup: nested tags
         mock_repo.create_tag("travel")
         mock_repo.create_tag("beach")
         mock_repo.set_tag_parent("beach", "travel")
-        
+
         tree_widget = VirtualFileTree(tmp_path / "test.db")
         tree_widget.virtual_tree = VirtualTree(mock_repo)
         tree_widget.root.data = "/"
         tree_widget._populate_node(tree_widget.root, "/")
-        
+
         # Expand travel node
         travel_node = None
         for child in tree_widget.root.children:
             if "travel" in str(child.label):
                 travel_node = child
                 break
-        
+
         assert travel_node is not None
         assert travel_node.data == "/travel"
-        
+
         # Populate travel children
         tree_widget._populate_node(travel_node, "/travel")
-        
+
         # Check beach node
         beach_node = None
         for child in travel_node.children:
             if "beach" in str(child.label):
                 beach_node = child
                 break
-        
+
         assert beach_node is not None
-        assert beach_node.data == "/travel/beach", f"Expected '/travel/beach', got {beach_node.data!r}"
-    
+        assert beach_node.data == "/travel/beach", (
+            f"Expected '/travel/beach', got {beach_node.data!r}"
+        )
+
     def test_on_tree_node_expanded_uses_data(self, tmp_path: Path, mock_repo: MockRepository):
         """on_tree_node_expanded must use node.data as vpath."""
         from meret.vfs import VirtualTree
-        
+
         # Setup
         mock_repo.create_tag("test")
-        
+
         tree_widget = VirtualFileTree(tmp_path / "test.db")
         tree_widget.virtual_tree = VirtualTree(mock_repo)
         tree_widget.root.data = "/"
         tree_widget._populate_node(tree_widget.root, "/")
-        
+
         # Mock _populate_node to check what vpath is passed
         called_with = []
         original_populate = tree_widget._populate_node
-        
+
         def mock_populate(node, vpath):
             called_with.append(vpath)
             original_populate(node, vpath)
-        
+
         tree_widget._populate_node = mock_populate
-        
+
         # Simulate expanding first child
         test_node = tree_widget.root.children[0]
         test_node.data = "/test"  # Ensure data is set
-        
+
         # Create mock event
         class MockEvent:
             def __init__(self, node):
                 self.node = node
-        
+
         tree_widget.on_tree_node_expanded(MockEvent(test_node))
-        
+
         # Assert correct vpath was used
         assert "/test" in called_with, f"Expected '/test' in {called_with}"
+
 
 @pytest_asyncio.fixture
 async def host_pilot():
@@ -147,6 +149,7 @@ async def host_pilot():
 
     async with App().run_test() as pilot:
         yield pilot
+
 
 class TestSortedDirectoryTree:
     """Tests for SortedDirectoryTree with sorting capabilities.
@@ -215,18 +218,21 @@ class TestSortedDirectoryTree:
 
 class TestDriveSelector:
     """Tests for Windows drive selector."""
-    
+
     def test_drive_selector_creates(self):
         """DriveSelector initializes."""
         selector = DriveSelector()
         assert selector is not None
-    
-    @pytest.mark.skipif(not hasattr(__import__('sys'), 'platform') or 
-                       not __import__('sys').platform.startswith('win'), 
-                       reason="Windows only")
+
+    @pytest.mark.skipif(
+        not hasattr(__import__("sys"), "platform")
+        or not __import__("sys").platform.startswith("win"),
+        reason="Windows only",
+    )
     def test_get_drives_winapi(self):
         """get_drives_winapi returns drives on Windows."""
         from meret.cli.tui import get_drives_winapi
+
         drives = get_drives_winapi()
         assert len(drives) > 0
         assert all(isinstance(d, Path) for d in drives)
@@ -234,25 +240,25 @@ class TestDriveSelector:
 
 class TestFilePreview:
     """Tests for FilePreview widget."""
-    
+
     def test_preview_initial_state(self):
         """Preview shows initial message."""
         preview = FilePreview()
         # Check initial content
         assert "Select a file" in str(preview.render())
-    
+
     def test_preview_virtual_file(self):
         """Preview handles virtual file path."""
         preview = FilePreview()
         preview.update_preview(Path("/virtual/path"), is_virtual=True)
         content = str(preview.render())
         assert "Virtual:" in content
-    
+
     def test_preview_real_file(self, tmp_path: Path):
         """Preview shows real file info."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("hello")
-        
+
         preview = FilePreview()
         preview.update_preview(test_file, is_virtual=False)
         content = str(preview.render())
@@ -261,13 +267,13 @@ class TestFilePreview:
 
 class TestTagDialog:
     """Tests for TagDialog."""
-    
+
     def test_tag_dialog_creates(self, tmp_path: Path):
         """TagDialog initializes correctly."""
-        
+
         dialog = TagDialog(tmp_path / "test.jpg")
         assert dialog.file_path.name == "test.jpg"
-    
+
     def test_tag_dialog_returns_value(self, tmp_path: Path):
         """TagDialog returns entered tag."""
         dialog = TagDialog(tmp_path / "test.jpg")
@@ -278,7 +284,7 @@ class TestTagDialog:
 
 class TestCommandPalette:
     """Tests for CommandPalette."""
-    
+
     def test_palette_has_commands(self):
         """Command palette contains expected commands."""
         palette = CommandPalette()
@@ -293,26 +299,27 @@ class TestCommandPalette:
 
 class TestMeretApp:
     """Integration tests for MeretApp."""
-    
+
     @pytest.mark.asyncio
     async def test_app_initializes(self, tmp_path: Path):
         """App starts without errors."""
         from meret.core.sqlite_repo import SQLiteRepository
+
         db = tmp_path / "test.db"
         SQLiteRepository(str(db))
-        
+
         app = MeretApp(db)
         async with app.run_test() as pilot:
             assert app.db_path == db
-            assert hasattr(app, 'real_tree')
-    
+            assert hasattr(app, "real_tree")
+
     @pytest.mark.asyncio
     async def test_action_stats_no_db(self, tmp_path: Path):
         """Stats action handles missing DB gracefully."""
         app = MeretApp(tmp_path)
         # Should not raise
         app.action_stats()  # Will show notification
-    
+
     def test_bindings_defined(self):
         """All key bindings are defined."""
         app = MeretApp(Path("."))
@@ -327,7 +334,7 @@ class TestMeretApp:
         assert "U" in keys  # umount
         assert "D" in keys  # select drive (Windows)
         assert "S" in keys  # sort
-    
+
     @pytest.mark.asyncio
     async def test_sort_files_cycles_modes(self, tmp_path: Path):
         """action_sort_files cycles through sort modes."""
@@ -337,7 +344,7 @@ class TestMeretApp:
             app.action_sort_files()
             # Проверь что sort_by изменился
             assert app.sort_by in ["name", "size", "date"]
-    
+
     @pytest.mark.asyncio
     async def test_go_home(self, tmp_path: Path):
         """action_go_home sets fs_root to home."""
@@ -351,7 +358,7 @@ class TestMeretApp:
 def test_tui_launch_and_quit(tmp_path: Path):
     """Full integration test - app launches and quits."""
     from textual.app import App
-    
+
     app = MeretApp(tmp_path)
     # Just verify it can be instantiated
     assert isinstance(app, App)
@@ -359,21 +366,23 @@ def test_tui_launch_and_quit(tmp_path: Path):
 
 # ---------- New integration tests for mount/unmount ----------
 
+
 class TestMountActions:
     """Tests for mount/unmount actions."""
-    
+
     @pytest.mark.asyncio
     async def test_action_mount_no_path(self, tmp_path: Path):
         """Mount action handles missing path gracefully."""
         app = MeretApp(tmp_path)
         # Should not raise, will show dialog
         # We can't easily test the full flow without running the app
-    
+
     @pytest.mark.asyncio
     async def test_action_umount_no_path(self, tmp_path: Path):
         """Unmount action handles missing path gracefully."""
         app = MeretApp(tmp_path)
         # Should not raise
+
 
 # ---------- real-FS panel: '..', sorting, layout ----------
 
@@ -405,8 +414,11 @@ def fs_app(tmp_path: Path):
 
     db = base / "meret.db"
     repo = SQLiteRepository(str(db))
-    f = repo.save_file(FileEntry(filename="big.txt", filepath=str(base / "a" / "b" / "big.txt"),
-                                 type=FileType.IMAGE))
+    f = repo.save_file(
+        FileEntry(
+            filename="big.txt", filepath=str(base / "a" / "b" / "big.txt"), type=FileType.IMAGE
+        )
+    )
     repo.add_tag(f, "travel")
 
     app = MeretApp(db)
@@ -545,9 +557,15 @@ def test_every_palette_command_dispatches(monkeypatch):
         app.notify = lambda msg, **kw: called.append(("notify", msg))
         before = len(called)
         names = {
-            "scan": "action_scan", "search": "action_search", "tag": "action_tag",
-            "init": "action_init_db", "config": "action_config", "stats": "action_stats",
-            "tree": "action_tree", "prune": "action_prune", "mount": "action_mount",
+            "scan": "action_scan",
+            "search": "action_search",
+            "tag": "action_tag",
+            "init": "action_init_db",
+            "config": "action_config",
+            "stats": "action_stats",
+            "tree": "action_tree",
+            "prune": "action_prune",
+            "mount": "action_mount",
             "umount": "action_umount",
         }
         monkeypatch.setattr(app, names[cmd], lambda c=cmd: called.append(c))
@@ -559,7 +577,7 @@ def test_palette_matches_rank_exact_and_prefix_first():
     palette = CommandPalette()
     assert palette._matches("tree")[0] == "tree"
     assert palette._matches("un")[0] == "untag"
-    assert palette._matches("")[: 2] == ["scan", "search"]
+    assert palette._matches("")[:2] == ["scan", "search"]
 
 
 class TestCommandPaletteFlow:

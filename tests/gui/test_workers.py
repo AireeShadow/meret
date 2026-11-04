@@ -1,4 +1,5 @@
 """The runner delivers on the GUI thread, drops stale work and survives GC."""
+
 import gc
 
 import pytest
@@ -50,7 +51,7 @@ def test_stale_result_is_dropped(runner, qtbot):
     generation = runner.bump()
     runner.run(lambda: "old", on_done=seen.append, generation=generation)
     assert runner.wait(2000)  # the pool is done, but nothing was delivered yet
-    runner.bump()             # ...and now the result is stale
+    runner.bump()  # ...and now the result is stale
     qtbot.wait(100)
     assert seen == []
 

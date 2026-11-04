@@ -26,8 +26,8 @@ def test_foreign_keys_cascade(sqlite_repo):
 
 
 def _first_word(stmt: str) -> str:
-    for line in stmt.splitlines():
-        line = line.strip()
+    for raw in stmt.splitlines():
+        line = raw.strip()
         if line and not line.startswith("--"):
             return line.split()[0].upper()
     return ""

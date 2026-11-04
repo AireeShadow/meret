@@ -46,14 +46,16 @@ def _msgids_in_code():
             if not isinstance(node, ast.Call):
                 continue
             name = (
-                node.func.id if isinstance(node.func, ast.Name)
-                else getattr(node.func, "attr", "")
+                node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
             )
             args = [a.value for a in node.args if isinstance(a, ast.Constant)]
             where = f"{py.relative_to(MERET.parent)}:{node.lineno}"
             context = next(
-                (k.value.value for k in node.keywords
-                 if k.arg == "context" and isinstance(k.value, ast.Constant)),
+                (
+                    k.value.value
+                    for k in node.keywords
+                    if k.arg == "context" and isinstance(k.value, ast.Constant)
+                ),
                 None,
             )
             if name in ("_", "translate") and args and isinstance(args[0], str):
@@ -65,6 +67,7 @@ def _msgids_in_code():
 
 def _fields(text):
     return sorted({name for _, name, _, _ in string.Formatter().parse(text) if name is not None})
+
 
 def test_code_has_translatable_strings():
     assert len(_msgids_in_code()) > 30
@@ -88,6 +91,7 @@ def test_every_msgid_is_translated_with_the_same_placeholders(language):
     assert not missing, "not in the catalog:\n" + "\n".join(missing)
     assert not broken, "placeholders differ:\n" + "\n".join(broken)
 
+
 @pytest.mark.parametrize("language", LANGUAGES)
 def test_quoted_placeholders_stay_quoted(language):
     """`'{cmd}'` must keep both quotes: a stray apostrophe reads as a typo."""
@@ -95,6 +99,7 @@ def test_quoted_placeholders_stay_quoted(language):
     catalog = _parse_po(po.read_text(encoding="utf-8"))
     bad = [f"{m!r} -> {t!r}" for m, t in catalog.items() if "'{cmd}'" in m and "'{cmd}'" not in t]
     assert not bad, "\n".join(bad)
+
 
 def test_no_markup_in_msgids():
     """Markup belongs in the code: '[green]' in a msgid is a translator trap."""
@@ -111,14 +116,15 @@ def test_catalog_has_no_duplicate_msgids(language, caplog):
     dupes = [r.getMessage() for r in caplog.records if "duplicate msgid" in r.getMessage()]
     assert not dupes, "\n".join(dupes)
 
+
 def test_an_untranslated_duplicate_does_not_shadow_the_translated_one(caplog):
     """`later wins` must not mean an empty copy wins over a real translation."""
     text = 'msgid "a"\nmsgstr "1"\n\nmsgid "a"\nmsgstr ""\n'
     assert _parse_po(text, source="t.po")["a"] == "1"
     assert "duplicate msgid" in caplog.text
 
-#: format_file_size reaches these through self.translate(), not _()
 
+#: format_file_size reaches these through self.translate(), not _()
 
 
 @pytest.mark.parametrize("language", LANGUAGES)
@@ -152,12 +158,13 @@ def test_same_msgid_in_another_context_is_not_a_duplicate(caplog):
 # ---------- .po parsing and loading ----------
 
 
-PO = r'''
+PO = r"""
 # comment
 msgid ""
 msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
-"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && "
+"(n%100<10 || n%100>=20) ? 1 : 2);\n"
 
 msgid "Hello"
 msgstr "Привет"
@@ -186,7 +193,7 @@ msgstr "Нечётко"
 
 msgid "Untranslated"
 msgstr ""
-'''
+"""
 
 
 def _po_dir(tmp_path, text=PO, language="ru"):
@@ -208,8 +215,10 @@ def test_po_is_read_without_any_mo(tmp_path):
     assert loc.translate("Untranslated") == "Untranslated"
 
 
-@pytest.mark.parametrize(("n", "form"), [(1, "файл"), (2, "файла"), (5, "файлов"),
-                                         (11, "файлов"), (21, "файл"), (22, "файла")])
+@pytest.mark.parametrize(
+    ("n", "form"),
+    [(1, "файл"), (2, "файла"), (5, "файлов"), (11, "файлов"), (21, "файл"), (22, "файла")],
+)
 def test_po_plural_rule_comes_from_the_header(tmp_path, n, form):
     loc = LocaleManager("ru", locale_dir=_po_dir(tmp_path))
     assert loc.translate_plural("file", "files", n) == form
@@ -235,11 +244,14 @@ def _clear_env(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
-@pytest.mark.parametrize(("var", "value", "expected"), [
-    ("LANG", "ru_RU.UTF-8", "ru"),
-    ("LANGUAGE", "de:en", "de"),
-    ("LC_ALL", "pt_BR", "pt"),
-])
+@pytest.mark.parametrize(
+    ("var", "value", "expected"),
+    [
+        ("LANG", "ru_RU.UTF-8", "ru"),
+        ("LANGUAGE", "de:en", "de"),
+        ("LC_ALL", "pt_BR", "pt"),
+    ],
+)
 def test_language_from_env(monkeypatch, var, value, expected):
     _clear_env(monkeypatch)
     monkeypatch.setenv(var, value)
@@ -249,8 +261,10 @@ def test_language_from_env(monkeypatch, var, value, expected):
 def test_c_locale_is_not_a_language(monkeypatch):
     _clear_env(monkeypatch)
     monkeypatch.setenv("LANG", "C.UTF-8")
-    with patch.object(loc_module, "_language_from_windows", return_value=None), \
-            patch("locale.getlocale", return_value=(None, None)):
+    with (
+        patch.object(loc_module, "_language_from_windows", return_value=None),
+        patch("locale.getlocale", return_value=(None, None)),
+    ):
         assert system_language() == "en"
 
 
@@ -263,8 +277,10 @@ def test_windows_display_language(monkeypatch):
 def test_windows_style_getlocale_name(monkeypatch):
     """getlocale() on Windows says 'Russian_Russia' — that used to become 'russian'."""
     _clear_env(monkeypatch)
-    with patch.object(loc_module, "_language_from_windows", return_value=None), \
-            patch("locale.getlocale", return_value=("Russian_Russia", "1251")):
+    with (
+        patch.object(loc_module, "_language_from_windows", return_value=None),
+        patch("locale.getlocale", return_value=("Russian_Russia", "1251")),
+    ):
         assert system_language() == "ru"
 
 
@@ -321,24 +337,45 @@ def test_config_accepts_auto():
     assert LocaleConfig().language == "auto"
     assert LocaleConfig(language="ru").language == "ru"
 
+
 # ---------- TUI-specific translations ----------
+
 
 def test_tui_bindings_in_catalog():
     """Test that all TUI binding labels are in Russian catalog."""
     po = DEFAULT_LOCALE_DIR / "ru" / "LC_MESSAGES" / "messages.po"
     if not po.exists():
         pytest.skip("Russian .po not found")
-    
+
     catalog = _parse_po(po.read_text(encoding="utf-8"))
-    
+
     # All binding labels that should be translated
     bindings = [
-        "Quit", "Config", "Init DB", "Open", "Scan", "Tag",
-        "Refresh", "Delete tag", "Home", "Up", "Sort",
-        "Mount", "Unmount", "Select Drive", "Search", "Help",
-        "Cancel", "OK", "Yes", "No", "Close", "Select", "Command",
+        "Quit",
+        "Config",
+        "Init DB",
+        "Open",
+        "Scan",
+        "Tag",
+        "Refresh",
+        "Delete tag",
+        "Home",
+        "Up",
+        "Sort",
+        "Mount",
+        "Unmount",
+        "Select Drive",
+        "Search",
+        "Help",
+        "Cancel",
+        "OK",
+        "Yes",
+        "No",
+        "Close",
+        "Select",
+        "Command",
     ]
-    
+
     missing = [b for b in bindings if b not in catalog]
     assert not missing, f"Missing TUI bindings in catalog: {missing}"
 
@@ -348,19 +385,20 @@ def test_tui_dialog_buttons_in_catalog():
     po = DEFAULT_LOCALE_DIR / "ru" / "LC_MESSAGES" / "messages.po"
     if not po.exists():
         pytest.skip("Russian .po not found")
-    
+
     po_content = po.read_text(encoding="utf-8")
-    
+
     buttons = {
         "Cancel": "Отмена",
         "OK": "ОК",
         "Yes": "Да",
         "No": "Нет",
     }
-    
+
     for btn, expected in buttons.items():
         assert f'msgid "{btn}"' in po_content, f"Button '{btn}' not in .po"
         assert expected in po_content, f"Translation '{expected}' for '{btn}' not found"
+
 
 # ---------- --lang is honoured before the commands are built ----------
 
@@ -422,11 +460,13 @@ def test_dangling_lang_flag_is_not_a_crash(monkeypatch):
 
 # ---------- an unknown command is translated ----------
 
+
 def test_app_uses_the_translated_group():
     """A stray `app = typer.Typer(...)` below would silently drop cls=TranslatedGroup."""
     from meret.cli.app import TranslatedGroup, app
 
     assert app.info.cls is TranslatedGroup
+
 
 def test_unknown_command_message_text():
     """The catalog wording, without the CLI in the way."""
@@ -438,6 +478,7 @@ def test_unknown_command_message_text():
     )
     # {cmd} is already substituted here — no braces left in the result
     assert msg == "Команда 'scna' не найдена. Возможно, вы имели в виду: scan?"
+
 
 def _plain(text: str) -> str:
     """The error goes out in a Rich panel: drop the borders and squeeze whitespace."""

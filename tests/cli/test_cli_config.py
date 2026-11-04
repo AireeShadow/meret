@@ -1,4 +1,5 @@
 """Tests for config CLI commands."""
+
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -24,7 +25,7 @@ def test_config_get_set(isolated_config):
     result = runner.invoke(app, ["config", "set", "scan.workers", "4"])
     assert result.exit_code == 0
     assert "Set scan.workers = 4" in result.output
-    
+
     # Get value
     result = runner.invoke(app, ["config", "get", "scan.workers"])
     assert result.exit_code == 0
@@ -50,11 +51,11 @@ def test_config_reset_with_confirmation(isolated_config):
     """config reset asks for confirmation."""
     # First set a value
     runner.invoke(app, ["config", "set", "scan.workers", "99"])
-    
+
     # Reset without force should prompt
     result = runner.invoke(app, ["config", "reset"], input="n\n")
     assert result.exit_code == 1  # Aborted
-    
+
     # Reset with force
     result = runner.invoke(app, ["config", "reset", "--force"])
     assert result.exit_code == 0

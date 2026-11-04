@@ -1,0 +1,138 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch cancels the run it superseded: the older
+# answer cannot be the one anybody is waiting for.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      # The badge is a second spelling of the version: a drift is a red build,
+      # not a diff nobody noticed.
+      - run: python scripts/sync_version.py --check
+
+  test:
+    name: test ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      # One red platform must not hide the other two.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13"]
+        exclude:
+          # Nine runs is more than three platforms need; 3.11 and 3.12 on the
+          # other two would re-test the same platform code.
+          - os: macos-latest
+            python: "3.11"
+          - os: windows-latest
+            python: "3.11"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      # ffprobe reads video and audio metadata, and PySide6 links against system
+      # libraries even under the offscreen platform plugin.
+      - name: system packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3
+      - name: system packages (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
+      - name: system packages (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - run: pip install -e ".[dev,gui]"
+
+      - name: pytest
+        run: pytest -q
+        env:
+          # The GUI suite runs headless: no display on a runner.
+          QT_QPA_PLATFORM: offscreen
+
+      # A hung GUI test says nothing in the pytest output; the log does.
+      - name: upload the meret log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meret-log-${{ matrix.os }}-py${{ matrix.python }}
+          if-no-files-found: ignore
+          path: |
+            ~/.local/state/meret/log/meret.log
+            ~/Library/Logs/meret/meret.log
+            ~/AppData/Local/meret/Logs/meret.log
+
+  build:
+    name: build the wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install build
+      - run: python -m build
+      # force-include and artifacts are the only reason these ship at all; a
+      # packaging change that drops them builds fine and breaks at run time.
+      - name: the wheel carries the schema and the icons
+        run: |
+          python - <<'PY'
+          import glob
+          import zipfile
+
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          for needed in ("meret/core/schema.sql", "meret/gui/icons/commands/refresh.svg"):
+              assert any(name.endswith(needed) for name in names), needed
+          print(f"{wheel}: {len(names)} entries")
+          PY
+
+  types:
+    name: mypy (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # No [tool.mypy] section yet, so the defaults are the only thing this can be
+    # measured against. It reports; it does not block, until someone tunes it.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev,gui]"
+      - run: mypy meret

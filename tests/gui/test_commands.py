@@ -49,9 +49,7 @@ def test_command_table_covers_the_whole_tui():
     bindings = {PALETTE_ALIASES.get(name_of(b), name_of(b)) for b in MeretApp.BINDINGS}
     palette = {PALETTE_ALIASES.get(command_name(r), command_name(r)) for r in palette_entries()}
 
-    assert {command for command, _ in command_table()} == (
-        bindings | palette | {"untag"}
-    ) - dropped
+    assert {command for command, _ in command_table()} == (bindings | palette | {"untag"}) - dropped
 
 
 def test_shared_descriptions_are_the_tui_ones():
@@ -91,9 +89,7 @@ def test_every_command_has_a_key_and_a_label():
         assert short_label(command)
 
 
-def test_no_command_falls_through_to_the_not_available_note(
-    tmp_path, qapp, qtbot, monkeypatch
-):
+def test_no_command_falls_through_to_the_not_available_note(tmp_path, qapp, qtbot, monkeypatch):
     """Each entry reaches a real handler. Dialogs are stubbed: a nested loop in a
     test nobody closes would just hang."""
     from PySide6.QtGui import QDesktopServices
@@ -117,6 +113,7 @@ def test_no_command_falls_through_to_the_not_available_note(
         window.run_command(command)
         assert "isn't available" not in window._status_label.text(), command
 
+
 def test_missing_preview_keeps_an_icon_and_explains_itself(tmp_path, qapp, qtbot):
     """A file whose source is gone: still an icon, and the tooltip says why."""
     from meret.core.models import FileEntry, FileType
@@ -125,9 +122,7 @@ def test_missing_preview_keeps_an_icon_and_explains_itself(tmp_path, qapp, qtbot
 
     repo = SQLiteRepository(str(tmp_path / "meret.db"))
     gone = tmp_path / "gone.png"
-    file_id = repo.save_file(
-        FileEntry(filename=gone.name, filepath=str(gone), type=FileType.IMAGE)
-    )
+    file_id = repo.save_file(FileEntry(filename=gone.name, filepath=str(gone), type=FileType.IMAGE))
     repo.add_tag(file_id, "travel")
 
     window = MainWindow(repo, tmp_path / "meret.db")
@@ -139,6 +134,7 @@ def test_missing_preview_keeps_an_icon_and_explains_itself(tmp_path, qapp, qtbot
     assert not item.icon().isNull()  # the placeholder, not an empty row
     qtbot.waitUntil(lambda: len(item.toolTip().splitlines()) == 3, timeout=2000)
     assert "ffmpeg" not in item.toolTip()  # an image, not a video
+
 
 def test_sort_cycles_columns(tmp_path, qapp, qtbot):
     """Name, then size, then date - the TUI's order, on the view's own columns."""
@@ -160,7 +156,7 @@ def test_sort_cycles_columns(tmp_path, qapp, qtbot):
     assert calls == [
         (1, Qt.SortOrder.DescendingOrder),  # size, largest first
         (3, Qt.SortOrder.DescendingOrder),  # date, newest first
-        (0, Qt.SortOrder.AscendingOrder),   # name, A to Z
+        (0, Qt.SortOrder.AscendingOrder),  # name, A to Z
     ]
 
 
@@ -191,6 +187,7 @@ def test_sort_uses_the_views_own_slot(tmp_path, qapp, qtbot):
     assert set(landed) == {(1, Qt.SortOrder.DescendingOrder)}
     assert window.fs.header().sortIndicatorSection() == 1
 
+
 def test_palette_shows_every_command_without_scrolling(qapp):
     """A palette you must scroll looks like a palette with missing commands."""
     from meret.gui.commands import CommandPalette, command_table
@@ -202,6 +199,7 @@ def test_palette_shows_every_command_without_scrolling(qapp):
     assert palette._list.count() == len(command_table())
     row = palette._list.sizeHintForRow(0) or 22
     assert palette._list.viewport().height() >= row * palette._list.count()
+
 
 def test_palette_rows_separate_key_name_and_description(qapp):
     """Same trap as the help: 'command_palette' is exactly as wide as the column."""
@@ -219,6 +217,7 @@ def test_palette_rows_separate_key_name_and_description(qapp):
 
         assert item.text().startswith(f"{key} "), item.text()
         assert f" {descriptions[command]}" in item.text(), item.text()
+
 
 def test_menu_table_covers_every_command_once():
     """A menu that forgets a command, or lists it twice, is the whole point of this."""

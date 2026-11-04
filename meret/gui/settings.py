@@ -153,9 +153,7 @@ class SettingsDialog(QDialog):
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        open_file = buttons.addButton(
-            _("Open the file"), QDialogButtonBox.ButtonRole.ActionRole
-        )
+        open_file = buttons.addButton(_("Open the file"), QDialogButtonBox.ButtonRole.ActionRole)
         open_file.clicked.connect(lambda _checked=False: manager.edit())
 
         layout = QVBoxLayout(self)

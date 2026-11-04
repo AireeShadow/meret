@@ -1,4 +1,5 @@
 """Scratch check for the .po parser. Delete once it behaves."""
+
 from meret.core.locale import DEFAULT_LOCALE_DIR, _parse_po
 
 SAMPLE = 'msgid "a"\nmsgstr "1"\n\nmsgid "b"\nmsgstr "2"\n'

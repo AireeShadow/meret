@@ -7,7 +7,55 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
-## [0.7.31] — 2026-10-28
+## \[0.7.32\] — 2026-10-29
+
+### Added
+
+- **`scripts/sync_version.py` and `tests/test_version.py`.** The README badge was a
+  second spelling of `meret/__init__.py` and nothing kept the two together. The script
+  rewrites the badge, `--check` reports a drift without writing, and the test runs the
+  check — so a version bump that forgets the badge is a red suite instead of a diff
+  nobody reads. `test_version.py` also fails when the changelog has no section for the
+  current version.
+- **`.pre-commit-config.yaml`**: trailing whitespace, end-of-file, line endings,
+  YAML and TOML validity, oversized files, `ruff-check --fix`, `ruff-format`, the
+  badge sync and the version guards.
+- **CI** (`.github/workflows/ci.yml`): lint (`ruff check`, `ruff format --check`,
+  `sync_version.py --check`), the suite on Windows, Linux and macOS across 3.11–3.13
+  with `fail-fast: false`, a wheel build that asserts `schema.sql` and the icons made
+  it into the archive, and an advisory `mypy` job. A failed run uploads the meret log:
+  a hung GUI test says nothing in the pytest output and everything in that file.
+- `.github/dependabot.yml`: weekly updates for the hook revisions, the actions and pip.
+
+### Changed
+
+- **`select` is set in `[tool.ruff.lint]` for the first time.** The ignore list named
+  `B008`, `RUF012`, `PLW1510`, `BLE001`, `S110`, `TRY004` and `SIM115` — rules from
+  sets ruff does not enable by default, so every one of those entries was dead config.
+  Turning the sets on brought 447 findings; the deliberate ones are now ignored with
+  the reason beside them: function-local imports (259 of them, and the reason `core`
+  stays importable without PySide6), `E402` for the same trap, non-ASCII strings, the
+  message-only `ValueError`, module-level latches, and the argv-list subprocess rules.
+- `tests/**` additionally ignores `S101` and `PLR2004`: an `assert` and a bare number
+  are how a test is written, and there is no `-O` run to strip the asserts.
+- `[tool.ruff.lint.pylint]` raises `max-args`, `max-positional-args`, `max-branches`
+  and `max-statements`: the panel helpers take their widget's fields as arguments, and
+  the SQL splitter is long by nature.
+- The README badge is no longer edited by hand — `python scripts/sync_version.py`
+  writes it, and `--check` is a CI step.
+- About fifty findings remain from the newly selected rules (`B904`, `SIM105`,
+  `TRY300`, `TRY400`, `B905`, `E501`, `PLW2901`, `E731`, `PLW0108`, `E741`, `SIM108`,
+  `TRY301`) and are worked through one rule per commit rather than in one diff.
+
+### Fixed
+
+- **`test_reveal_does_not_list_a_path_it_already_knows` was defined twice** in
+  `tests/gui/test_real_panel.py`. The second definition shadowed the first, so the
+  first never ran — and its expectation was wrong anyway: `reveal()` always ends in
+  `_restore_top()`, so `setRootPath` is called twice and never with the target. The
+  shadowed copy is gone.
+
+## \[0.7.31\] — 2026-10-28
 
 ### Fixed
 
@@ -22,7 +70,7 @@ rather than as comparison links.
   needs — and fails with a sentence instead of a bare `TimeoutError`. It is the same
   helper `tests/gui/test_real_panel.py` already uses for the start-up reveal.
 
-## [0.7.30] — 2026-10-28
+## \[0.7.30\] — 2026-10-28
 
 ### Fixed
 
@@ -42,7 +90,7 @@ rather than as comparison links.
 - Refreshing the panel probes the drives again, so a drive plugged in since start
   shows up; Qt reads the drive list only once per model.
 
-## [0.7.29] — 2026-10-27
+## \[0.7.29\] — 2026-10-27
 
 ### Fixed
 

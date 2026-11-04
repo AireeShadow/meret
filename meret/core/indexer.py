@@ -89,7 +89,7 @@ class Indexer:
         except OSError:
             return None
         return int(st.st_size), float(st.st_mtime)
-    
+
     def _process_file(self, file_path: Path) -> FileEntry | None:
         """Extraction only — no DB access (important for threads)."""
         file_type = self.registry.get_file_type(file_path)
@@ -129,7 +129,9 @@ class Indexer:
                     progress_callback(PHASE_EXTRACT, done, len(files))
         except KeyboardInterrupt:
             self.interrupted = True
-            logger.warning("Extraction interrupted by user after %d/%d files", len(entries), len(files))
+            logger.warning(
+                "Extraction interrupted by user after %d/%d files", len(entries), len(files)
+            )
             for future in futures:
                 future.cancel()
             pool.shutdown(wait=False, cancel_futures=True)
@@ -162,7 +164,11 @@ class Indexer:
         self.interrupted = False
         logger.info(
             "Scan %s: workers=%d chunk_size=%d skip_existing=%s dry_run=%s",
-            single_file or self.library, self.workers, self.chunk_size, self.skip_existing, dry_run,
+            single_file or self.library,
+            self.workers,
+            self.chunk_size,
+            self.skip_existing,
+            dry_run,
         )
         started = time.perf_counter()
 
@@ -179,8 +185,12 @@ class Indexer:
 
         t0 = time.perf_counter()
         entries = self.extract(files, progress_callback=progress_callback)
-        logger.info("Extracted metadata for %d/%d files in %.1f s",
-                    len(entries), len(files), time.perf_counter() - t0)
+        logger.info(
+            "Extracted metadata for %d/%d files in %.1f s",
+            len(entries),
+            len(files),
+            time.perf_counter() - t0,
+        )
 
         if dry_run:
             return {
@@ -196,8 +206,12 @@ class Indexer:
         stats = self.index(entries, progress_callback=progress_callback)
         stats["skipped"] = skipped
         stats["interrupted"] = self.interrupted
-        logger.info("Indexed in %.1f s (total %.1f s): %s",
-                    time.perf_counter() - t0, time.perf_counter() - started, stats)
+        logger.info(
+            "Indexed in %.1f s (total %.1f s): %s",
+            time.perf_counter() - t0,
+            time.perf_counter() - started,
+            stats,
+        )
         return stats
 
     def _unchanged(self, path: Path, known: dict[str, tuple[int, float]]) -> bool:

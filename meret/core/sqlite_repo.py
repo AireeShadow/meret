@@ -111,7 +111,7 @@ class SQLiteRepository(AbstractRepository):
         self._watch_lock = threading.Lock()
         self._init_tables()
 
-    #----------- helpers -------------
+    # ----------- helpers -------------
     @staticmethod
     def _fingerprint(entry: FileEntry) -> tuple[int, float]:
         """(size, mtime) from the extracted metadata — the incremental scan key."""
@@ -125,7 +125,7 @@ class SQLiteRepository(AbstractRepository):
         except (TypeError, ValueError):
             mtime = 0.0
         return size, mtime
-    
+
     # ---------- connection ----------
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -315,7 +315,7 @@ class SQLiteRepository(AbstractRepository):
             return stats
 
         total = len(files)
-        with self._session() as conn:
+        with self._connect() as conn:
             known = {row[0] for row in conn.execute("SELECT filepath FROM files")}
 
             for start in range(0, total, chunk_size):
@@ -328,10 +328,11 @@ class SQLiteRepository(AbstractRepository):
                             if entry.metadata
                             else None
                         )
-                    except (TypeError, ValueError) as e:
+                    except (TypeError, ValueError):
                         stats["errors"] += 1
                         meta = None
-                        logger.error(f"metadata is not serializable: {entry.filepath}: {e}")
+                        # exception() already prints the object, so it is not in the text
+                        logger.exception("metadata is not serializable: %s", entry.filepath)
                     size, mtime = self._fingerprint(entry)
                     rows.append(
                         (
@@ -416,9 +417,7 @@ class SQLiteRepository(AbstractRepository):
         row = self._tag_row(conn, ref)
         return row["id"] if row else None
 
-    def _ensure_tag(
-        self, conn, ref: str, colour: str | None = None, reuse_any: bool = True
-    ) -> int:
+    def _ensure_tag(self, conn, ref: str, colour: str | None = None, reuse_any: bool = True) -> int:
         """Returns the tag id, creating it and any missing parents along the path.
 
         reuse_any=True: a single name is first looked up anywhere, so we don't
