@@ -628,6 +628,9 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget(self)
         self.tabs.addTab(splitter, _("Browser"))
         self.viewer = ViewerView(self)
+        # Stepping is the window's: the viewer has no idea what a folder is
+        self.viewer.next_requested.connect(lambda: self._step_file(1))
+        self.viewer.previous_requested.connect(lambda: self._step_file(-1))
         self.tabs.addTab(self.viewer, _("Viewer"))
         # Leaving the viewer tab stops playback, so a hidden video keeps silent
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -1323,8 +1326,10 @@ class MainWindow(QMainWindow):
             _apply_theme(QApplication.instance(), gui.theme)
             self._theme = gui.theme
             # The glyphs are painted in the palette colour: re-tint them with it
+            icons.clear_cache()
             for command, action in self._actions.items():
                 action.setIcon(icons.command_icon(command, ICON))
+            self.viewer.retint()
 
         if gui.thumbnail_size != self._thumbs.size:
             self.grid.setIconSize(QSize(gui.thumbnail_size, gui.thumbnail_size))
@@ -1544,6 +1549,34 @@ class MainWindow(QMainWindow):
 
         self.tabs.setCurrentWidget(self.viewer)
         self.viewer.open_file(str(source))
+
+    def _step_file(self, offset: int) -> None:
+        """Open the file `offset` rows away from the current one in the grid.
+
+        Folder rows are skipped: they have no source to show. Stepping past either
+        end stops and says so - a wrap from the last file back to the first reads as
+        a jump, not as an end.
+        """
+        if self.grid.count() == 0:
+            return
+
+        step = 1 if offset > 0 else -1
+        index = self.grid.currentRow()
+        if index < 0:
+            index = -1 if step > 0 else self.grid.count()
+
+        while True:
+            index += step
+            if index < 0 or index >= self.grid.count():
+                self._status_label.setText(_("End of the folder"))
+                return
+            item = self.grid.item(index)
+            if item.data(self.ROLE_SOURCE):
+                break
+
+        self.grid.setCurrentRow(index)
+        self.grid.scrollToItem(item)
+        self._open_in_viewer(item)
 
     def _on_tab_changed(self, index: int) -> None:
         """A hidden video must not keep playing: stop it when the tab goes away."""

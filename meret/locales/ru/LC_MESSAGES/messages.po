@@ -859,3 +859,18 @@ msgstr "Play"
 
 msgid "Pause"
 msgstr "Pause"
+
+msgid "End of the folder"
+msgstr "Конец папки"
+
+msgid "Previous file"
+msgstr "Предыдущий файл"
+
+msgid "Stop"
+msgstr "Стоп"
+
+msgid "Next file"
+msgstr "Следующий файл"
+
+msgid "00:00 / 00:00"
+msgstr "00:00 / 00:00"

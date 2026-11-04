@@ -147,3 +147,74 @@ def test_the_video_suffixes_are_a_fixed_set():
     assert ".mkv" in VIDEO_SUFFIXES
     assert ".png" not in VIDEO_SUFFIXES
     assert ".jpg" not in VIDEO_SUFFIXES
+
+
+def test_the_controls_carry_four_buttons(window):
+    """Previous, play/pause, stop, next - and nothing that seeks by itself.
+
+    The scrub bar and the clock are widgets, and addWidget() wraps each in its own
+    QWidgetAction, so only the actions with a label are buttons.
+    """
+    buttons = [a for a in window.viewer._controls.actions() if a.text()]
+
+    assert len(buttons) == 4
+    assert all(not a.icon().isNull() for a in buttons)
+
+
+def test_scrubbing_is_not_overwritten_by_playback(window, monkeypatch):
+    """The regression: positionChanged repainted the handle under the pointer."""
+    viewer = window.viewer
+    player = viewer._ensure_player()
+    viewer._position.setRange(0, 1000)
+    seeks = []
+    monkeypatch.setattr(player, "setPosition", seeks.append)
+
+    viewer._position.sliderPressed.emit()
+    viewer._position.setValue(700)  # what Qt itself does while the handle is dragged
+    player.positionChanged.emit(120)  # playback keeps reporting meanwhile
+
+    assert viewer._position.value() == 700, "playback overwrote the dragged position"
+
+    viewer._position.sliderMoved.emit(700)
+    viewer._position.sliderReleased.emit()
+
+    assert seeks == [700]
+
+
+def test_next_asks_the_window_for_the_next_file(window, tmp_path):
+    """The viewer has no folder of its own: it asks, the window selects."""
+    from PIL import Image
+
+    for name in ("a.png", "b.png"):
+        path = tmp_path / name
+        Image.new("RGB", (8, 8)).save(path)
+        _item(window, name, path)
+    window.grid.setCurrentRow(0)
+
+    window.viewer.next_requested.emit()
+
+    assert window.grid.currentRow() == 1
+
+
+def test_previous_at_the_first_file_says_so(window, tmp_path):
+    """No wrap: the first file reports the end instead of jumping to the last."""
+    from PIL import Image
+
+    path = tmp_path / "only.png"
+    Image.new("RGB", (8, 8)).save(path)
+    _item(window, "only.png", path)
+    window.grid.setCurrentRow(0)
+
+    window.viewer.previous_requested.emit()
+
+    assert window.grid.currentRow() == 0
+    assert window._status_label.text()
+
+
+def test_every_control_glyph_is_vendored():
+    """prune() deletes what GLYPHS does not name: a missing file is a silent tile."""
+    from meret.gui import icons
+
+    for name in ("previous", "play", "pause", "stop", "next"):
+        path = icons.ICON_DIR / f"{name}{icons.ICON_SUFFIX}"
+        assert path.is_file(), f"{path.name} is missing - run scripts/fetch_icons.py"

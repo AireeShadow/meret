@@ -7,6 +7,34 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.8.1\] — 2026-11-05
+
+### Added
+
+- **Playback controls under the viewer**: previous file, play/pause, stop, next file,
+  a scrub bar and an `m:ss / m:ss` clock. The glyphs are vendored Lucide files
+  (`play`, `pause`, `square`, `skip-back`, `skip-forward`) added to the `GLYPHS` table
+  in `scripts/fetch_icons.py`, so `prune()` keeps them.
+- `test_every_control_glyph_is_vendored`, so a missing file is a red test instead of a
+  silent letter tile.
+
+### Fixed
+
+- **The scrub bar could not be dragged.** `positionChanged` repainted the handle under
+  the pointer on every player tick, so the drag looked dead and the seek never landed.
+  `sliderPressed`/`sliderReleased` bracket the drag now, playback is ignored while it
+  lasts, and one `setPosition` runs on release.
+- Stop rewinds: `QMediaPlayer.stop()` alone leaves the position where it was, so the
+  next Play resumed mid-file.
+- **The media backend is built on the first video, not with the window.** Creating a
+  `QMediaPlayer` starts a backend, and the start-up fixture in `tests/gui/test_db_switch.py`
+  is timing-sensitive enough for that to matter.
+
+### Changed
+
+- Control glyphs are re-tinted after a theme change (`ViewerView.retint()`, with
+  `icons.clear_cache()`), so they follow the palette like the toolbar glyphs do.
+
 ## \[0.8.0\] — 2026-11-05
 
 ### Added

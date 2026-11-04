@@ -45,6 +45,13 @@ GLYPHS: dict[str, tuple[str, ...]] = {
     "command_palette": ("terminal",),
     "help": ("circle-question-mark", "circle-help", "help-circle", "info"),
     "quit": ("log-out",),
+    # the viewer's playback controls: not toolbar commands, but they live in the same
+    # directory, so prune() has to know them or it deletes them on the next run
+    "previous": ("skip-back",),
+    "play": ("play",),
+    "pause": ("pause",),
+    "stop": ("square", "square-stop"),
+    "next": ("skip-forward",),
 }
 
 
