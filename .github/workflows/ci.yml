@@ -68,9 +68,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             ffmpeg libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3
+      # winfspy is an sdist that compiles CFFI bindings: it needs the WinFsp SDK
+      # (inc/ and lib/) and names it through WINFSP_LIBRARY_PATH. A local checkout
+      # usually has WinFsp installed, so only CI notices. The variable goes through
+      # GITHUB_ENV because a step cannot export to the ones after it.
       - name: system packages (Windows)
         if: runner.os == 'Windows'
-        run: choco install ffmpeg --no-progress -y
+        run: |
+          choco install ffmpeg winfsp --no-progress -y
+          "WINFSP_LIBRARY_PATH=C:\Program Files (x86)\WinFsp" >> $env:GITHUB_ENV
       - name: system packages (macOS)
         if: runner.os == 'macOS'
         run: brew install ffmpeg

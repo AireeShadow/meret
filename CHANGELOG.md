@@ -25,6 +25,11 @@ rather than as comparison links.
     `ScanConfig.validate_workers` caps the value at `cpu_count() * 2`. The
     expectation is computed with the same cap now, so a four-core runner no longer
     fails a config that loaded correctly.
+  - **The Windows leg could not install at all.** `winfspy` is an sdist that compiles
+    CFFI bindings, and it looks for the WinFsp SDK through `WINFSP_LIBRARY_PATH` or the
+    `HKLM\SOFTWARE\WinFsp` registry key; a runner has neither, so `pip install` died in
+    `get_winfsp_dir`. CI installs WinFsp and sets the variable — a local machine with
+    WinFsp already installed never showed the problem.
 
 ### Changed
 
