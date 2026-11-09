@@ -7,7 +7,7 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
-## \[0.8.5\] — 2026-11-05
+## \[0.8.5\] — 2026-11-09
 
 ### Added
 
