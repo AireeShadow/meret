@@ -2,7 +2,7 @@
 
 ![license](https://img.shields.io/badge/license-GPL--3.0-blue)
 ![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
-![version](https://img.shields.io/badge/version-0.8.4-blue)
+![version](https://img.shields.io/badge/version-0.8.5-blue)
 ![tests](https://img.shields.io/badge/tests-passing-brightgreen)
 ![lint](https://img.shields.io/badge/lint-ruff-orange)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
@@ -242,6 +242,8 @@ the status bar.
 | `:` | command palette |
 | F1 | help |
 | Ctrl+Q | quit |
+| ← / → | in the viewer: 10 s back / forward in a video, previous / next file otherwise |
+| Space, Enter | in the viewer: play or pause |
 
 ### When the window misbehaves
 

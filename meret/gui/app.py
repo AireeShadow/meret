@@ -1597,6 +1597,9 @@ class MainWindow(QMainWindow):
 
         self.tabs.setCurrentWidget(self.viewer)
         self.viewer.open_file(str(source))
+        # The viewer's shortcuts are WidgetWithChildrenShortcut: without the focus
+        # the arrow keys and Space do nothing at all
+        self.viewer.setFocus()
 
     def _step_file(self, offset: int) -> None:
         """Open the file `offset` rows away from the current one in the grid.

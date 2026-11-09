@@ -274,3 +274,102 @@ def test_meret_media_log_turns_the_category_back_on(monkeypatch):
     quiet_media_logs()
 
     assert "qt.multimedia.*=true" in os.environ["QT_LOGGING_RULES"]
+
+
+def test_the_arrow_and_play_keys_are_shortcuts(window):
+    """Shortcuts, not keyPressEvent: a focused slider or button eats those keys."""
+    from PySide6.QtCore import Qt
+
+    viewer = window.viewer
+    pairs = {
+        viewer._back_action: "Left",
+        viewer._forward_action: "Right",
+        viewer._play_pause_action: "Space",
+    }
+
+    for action, key in pairs.items():
+        assert key in [seq.toString() for seq in action.shortcuts()]
+        assert action.shortcutContext() == Qt.ShortcutContext.WidgetWithChildrenShortcut
+
+
+def test_forward_on_a_video_seeks_ten_seconds(window, monkeypatch):
+    """Right arrow inside a clip is a seek, not the next file."""
+    viewer = window.viewer
+    viewer._is_video = True
+    player = viewer._ensure_player()
+    seeks = []
+    monkeypatch.setattr(player, "position", lambda: 3000)
+    monkeypatch.setattr(player, "duration", lambda: 60000)
+    monkeypatch.setattr(player, "setPosition", seeks.append)
+
+    viewer.step_forward()
+
+    assert seeks == [3000 + 10_000]
+
+
+def test_back_on_a_video_stops_at_the_start(window, monkeypatch):
+    viewer = window.viewer
+    viewer._is_video = True
+    player = viewer._ensure_player()
+    seeks = []
+    monkeypatch.setattr(player, "position", lambda: 4000)
+    monkeypatch.setattr(player, "duration", lambda: 60000)
+    monkeypatch.setattr(player, "setPosition", seeks.append)
+
+    viewer.step_back()
+
+    assert seeks == [0]
+
+
+def test_forward_on_an_image_asks_for_the_next_file(window, tmp_path):
+    from PIL import Image
+
+    for name in ("a.png", "b.png"):
+        path = tmp_path / name
+        Image.new("RGB", (8, 8)).save(path)
+        _item(window, name, path)
+    window.grid.setCurrentRow(0)
+
+    window.viewer.step_forward()
+
+    assert window.grid.currentRow() == 1
+
+
+def test_back_on_an_image_asks_for_the_previous_file(window, tmp_path):
+    from PIL import Image
+
+    for name in ("a.png", "b.png"):
+        path = tmp_path / name
+        Image.new("RGB", (8, 8)).save(path)
+        _item(window, name, path)
+    window.grid.setCurrentRow(1)
+
+    window.viewer.step_back()
+
+    assert window.grid.currentRow() == 0
+
+
+def test_play_and_pause_follow_the_player_state(window, monkeypatch):
+    from PySide6.QtMultimedia import QMediaPlayer
+
+    viewer = window.viewer
+    player = viewer._ensure_player()
+    calls = []
+    monkeypatch.setattr(player, "pause", lambda: calls.append("pause"))
+    monkeypatch.setattr(player, "play", lambda: calls.append("play"))
+    monkeypatch.setattr(
+        player,
+        "playbackState",
+        lambda: QMediaPlayer.PlaybackState.PlayingState,
+    )
+
+    viewer._toggle_play()
+    assert calls == ["pause"]
+
+    monkeypatch.setattr(
+        player,
+        "playbackState",
+        lambda: QMediaPlayer.PlaybackState.PausedState,
+    )
+    viewer._toggle_play()
+    assert calls == ["pause", "play"]

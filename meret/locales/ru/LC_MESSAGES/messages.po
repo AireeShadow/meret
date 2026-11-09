@@ -874,3 +874,12 @@ msgstr "Следующий файл"
 
 msgid "00:00 / 00:00"
 msgstr "00:00 / 00:00"
+
+msgid "Back 10 seconds / previous file"
+msgstr "Назад 10 секунд / предыдущий файл"
+
+msgid "Forward 10 seconds / next file"
+msgstr "Вперёд 10 секунд / следующий файл"
+
+msgid "Play or pause"
+msgstr "Играть или пауза"

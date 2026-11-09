@@ -12,12 +12,14 @@ PySide6 keeps no alias, so the import fails at start-up otherwise.
 
 The control glyphs are vendored Lucide files named after the action, fetched by
 scripts/fetch_icons.py and tinted with the palette like every other command.
+
+The arrow keys mean "step": ten seconds inside a video, one file otherwise.
 """
 
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QAction, QPixmap, QResizeEvent
+from PySide6.QtGui import QAction, QKeySequence, QPixmap, QResizeEvent
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import QLabel, QSlider, QToolBar, QVBoxLayout, QWidget
@@ -30,6 +32,9 @@ VIDEO_SUFFIXES = frozenset({".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".w
 
 #: Control glyph size, in pixels.
 ICON = 18
+
+#: How far the arrow keys move the playhead, in milliseconds.
+JUMP_MS = 10_000
 
 
 class ViewerView(QWidget):
@@ -56,12 +61,17 @@ class ViewerView(QWidget):
 
         self._controls = QToolBar(self)
         self._build_controls()
+        self._build_shortcuts()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._image, 1)
         layout.addWidget(self._video, 1)
         layout.addWidget(self._controls)
+
+        # The shortcuts are WidgetWithChildrenShortcut, so the viewer itself has to
+        # be able to take the focus or they never fire
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._video.hide()
         self._controls.hide()
@@ -98,6 +108,33 @@ class ViewerView(QWidget):
         self._play_action.setIcon(self._play_icon())
         self._stop_action.setIcon(icons.command_icon("stop", ICON))
         self._next_action.setIcon(icons.command_icon("next", ICON))
+
+    # ---------- stepping ----------
+
+    def step_forward(self) -> None:
+        """Right arrow: ten seconds on in a video, the next file otherwise."""
+        if not self._is_video:
+            self.next_requested.emit()
+            return
+        self._seek_by(JUMP_MS)
+
+    def step_back(self) -> None:
+        """Left arrow: ten seconds back in a video, the previous file otherwise."""
+        if not self._is_video:
+            self.previous_requested.emit()
+            return
+        self._seek_by(-JUMP_MS)
+
+    def _seek_by(self, delta: int) -> None:
+        """Move the playhead, staying inside the clip."""
+        player = self._player
+        if player is None:
+            return
+        target = player.position() + delta
+        duration = player.duration()
+        if duration > 0:  # unknown duration: let the player clamp it
+            target = min(target, duration)
+        player.setPosition(max(0, target))
 
     # ---------- the player ----------
 
@@ -136,7 +173,7 @@ class ViewerView(QWidget):
         self._position = QSlider(Qt.Orientation.Horizontal, self)
         self._position.setRange(0, 0)
         self._position.setSingleStep(1000)
-        self._position.setPageStep(10000)
+        self._position.setPageStep(JUMP_MS)
         # sliderPressed/Released bracket the drag. Without them the player's own
         # positionChanged repaints the handle under the pointer on every tick, so
         # the drag looks dead and the seek never lands.
@@ -157,6 +194,43 @@ class ViewerView(QWidget):
             self._controls.addAction(action)
         self._controls.addWidget(self._position)
         self._controls.addWidget(self._clock)
+
+    def _build_shortcuts(self) -> None:
+        """Keys that work while the viewer or any of its widgets has the focus.
+
+        Not keyPressEvent: a focused QSlider eats the arrows to move its handle, and
+        a focused button eats Space and Enter to click itself. A shortcut is matched
+        before the key reaches the focus widget, so one meaning wins everywhere.
+        """
+        self._back_action = self._shortcut(
+            [QKeySequence(Qt.Key.Key_Left)],
+            _("Back 10 seconds / previous file"),
+            self.step_back,
+        )
+        self._forward_action = self._shortcut(
+            [QKeySequence(Qt.Key.Key_Right)],
+            _("Forward 10 seconds / next file"),
+            self.step_forward,
+        )
+        self._play_pause_action = self._shortcut(
+            [
+                QKeySequence(Qt.Key.Key_Space),
+                QKeySequence(Qt.Key.Key_Return),
+                QKeySequence(Qt.Key.Key_Enter),
+            ],
+            _("Play or pause"),
+            self._toggle_play,
+        )
+
+    def _shortcut(self, keys: list[QKeySequence], tip: str, slot) -> QAction:
+        """One key binding on the viewer's own scope, with its tip."""
+        action = QAction(self)
+        action.setShortcuts(keys)
+        action.setShortcutContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        action.setToolTip(tip)
+        action.triggered.connect(lambda _checked=False: slot())
+        self.addAction(action)
+        return action
 
     def _action(self, name: str, tip: str, slot) -> QAction:
         """One control: a vendored glyph, the tip, and the slot behind it."""

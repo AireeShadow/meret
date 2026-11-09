@@ -7,6 +7,26 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.8.5\] — 2026-11-05
+
+### Added
+
+- **The arrow keys step, and Space plays.** Right is ten seconds forward inside a
+  video and the next file outside one; Left is ten seconds back and the previous file.
+  Space and Enter toggle playback.
+- The keys are `QAction` shortcuts with `WidgetWithChildrenShortcut`, not a
+  `keyPressEvent` override. A focused `QSlider` eats the arrows to nudge its handle by
+  one step, and a focused button eats Space and Enter to click itself — a shortcut is
+  matched before the key reaches the focus widget, so one meaning wins everywhere in
+  the viewer and none of them leak into the browser tab.
+- The page itself takes `StrongFocus`, and opening a file gives it the focus: without
+  that the shortcuts have nothing to scope to.
+
+### Changed
+
+- `JUMP_MS` (10 s) is both the arrow step and the scrub bar's page step, so Page
+  Up/Down and the arrows move by the same amount.
+
 ## \[0.8.4\] — 2026-11-05
 
 ### Fixed
