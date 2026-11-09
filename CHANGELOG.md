@@ -30,6 +30,11 @@ rather than as comparison links.
     `HKLM\SOFTWARE\WinFsp` registry key; a runner has neither, so `pip install` died in
     `get_winfsp_dir`. CI installs WinFsp and sets the variable — a local machine with
     WinFsp already installed never showed the problem.
+  - `test_init_db_recreates_the_database_here` raced the wipe. The predicate read
+    `get_all_tags()` while the tables were already dropped and the repository not yet
+    reopened, so the old repository answered `no such table: tags` and the wait failed
+    on the way to a state it would have reached a moment later. The gap is now tolerated
+    instead of treated as the answer.
 
 ### Changed
 

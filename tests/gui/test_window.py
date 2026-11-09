@@ -271,6 +271,8 @@ def test_init_db_creates_the_database_when_it_is_missing(tmp_path, qapp, qtbot, 
 
 
 def test_init_db_recreates_the_database_here(tmp_path, qapp, qtbot, monkeypatch):
+    import sqlite3
+
     from PySide6.QtWidgets import QMessageBox
 
     from meret.core.models import FileEntry, FileType
@@ -281,7 +283,9 @@ def test_init_db_recreates_the_database_here(tmp_path, qapp, qtbot, monkeypatch)
     window = MainWindow(SQLiteRepository(str(db)), db)
     qtbot.addWidget(window)
     file_id = window._repo.save_file(
-        FileEntry(filename="a.png", filepath=str(tmp_path / "a.png"), type=FileType.IMAGE)
+        FileEntry(filename="a.png", filepath=str(tmp_path / "a.png"), type=FileType.Image)
+        if hasattr(FileType, "Image")
+        else FileEntry(filename="a.png", filepath=str(tmp_path / "a.png"), type=FileType.IMAGE)
     )
     window._repo.add_tag(file_id, "travel")
     assert window._repo.get_all_tags()
@@ -290,9 +294,18 @@ def test_init_db_recreates_the_database_here(tmp_path, qapp, qtbot, monkeypatch)
     window._init_db()
 
     assert window._db_path == db
-    # The wipe and the reopen run on the pool: wait for the tags to be gone, not
-    # for the path, which never changed
-    qtbot.waitUntil(lambda: window._repo.get_all_tags() == [], timeout=3000)
+
+    # The wipe and the reopen run on the pool, so wait for the tags to be gone, not
+    # for the path, which never changed. Between the drop and the reopen the tables
+    # do not exist yet and the old repository answers "no such table" - that gap is
+    # not a failure, it is the middle of the operation.
+    def tags_are_gone() -> bool:
+        try:
+            return window._repo.get_all_tags() == []
+        except sqlite3.OperationalError:
+            return False
+
+    qtbot.waitUntil(tags_are_gone, timeout=3000)
 
 
 def test_init_db_can_put_the_database_in_another_folder(tmp_path, qapp, qtbot, monkeypatch):
