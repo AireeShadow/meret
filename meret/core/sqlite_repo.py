@@ -108,6 +108,7 @@ class SQLiteRepository(AbstractRepository):
             updated_at = CURRENT_TIMESTAMP
     """
     _EXPECTED_TABLES = ("files", "tags", "file_tags")
+    _PAGE_SIZE = 500
 
     def __init__(self, db_path: str):
         self.db_path = str(db_path)
@@ -372,6 +373,37 @@ class SQLiteRepository(AbstractRepository):
             cur = conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
             conn.commit()
             return cur.rowcount > 0
+
+    def iter_files(self, limit=None, untagged_only=False):
+        """Files in id order, paged by id so the library is never loaded whole.
+
+        Not wrapped in @_traced: a generator returns before it does any work, so
+        the trace would report a duration that measures nothing.
+        """
+        where = ["f.id > ?"]
+        if untagged_only:
+            where.append("f.id NOT IN (SELECT file_id FROM file_tags)")
+        sql = (
+            f"{self._SELECT_FILES} WHERE {' AND '.join(where)} GROUP BY f.id ORDER BY f.id LIMIT ?"
+        )
+
+        remaining = limit
+        last_id = 0
+        while remaining is None or remaining > 0:
+            page = self._PAGE_SIZE if remaining is None else min(self._PAGE_SIZE, remaining)
+            with self._session() as conn:
+                rows = conn.execute(sql, (last_id, page)).fetchall()
+            if not rows:
+                return
+
+            for row in rows:
+                entry = self._row_to_file(row)
+                last_id = entry.id or last_id
+                yield entry
+                if remaining is not None:
+                    remaining -= 1
+                    if remaining <= 0:
+                        return
 
     # ---------- tags: lookup ----------
 

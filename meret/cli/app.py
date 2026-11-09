@@ -31,6 +31,7 @@ from meret.core.logger import (
 )
 from meret.core.models import Tag
 from meret.core.repository import AbstractRepository
+from meret.core.autotag import AutoTagger
 
 
 def _language_in(args: Sequence[str]) -> str | None:
@@ -220,13 +221,34 @@ def scan(
         help=_("Skip files that are already indexed and unchanged on disk"),
     ),
     workers: int = typer.Option(8, "--workers", "-w", help=_("Threads for reading metadata")),
+    autotag: bool | None = typer.Option(
+        None,
+        "--autotag/--no-autotag",
+        help=_("Apply the auto-tagging rules after indexing (default: the config)"),
+    ),
 ):
     """Scan and index media."""
     if not library.exists():
         console.print(f"[red]{_('No such path: {path}').format(path=library)}[/red]")
         raise typer.Exit(1)
 
-    indexer = Indexer(get_repo(db_path), library, workers=workers, skip_existing=skip_existing)
+    if autotag is None:
+        autotag = bool(get_config().get("autotag.enabled"))
+
+    tagger = None
+    if autotag:
+        tagger = AutoTagger.from_config()
+        if not tagger.rules:
+            console.print(f"[yellow]{_('No auto-tagging rules configured — skipping')}[/yellow]")
+            tagger = None
+
+    indexer = Indexer(
+        get_repo(db_path),
+        library,
+        workers=workers,
+        skip_existing=skip_existing,
+        autotag=tagger,
+    )
     with Progress(
         TextColumn("[cyan]{task.description}"),
         BarColumn(),
@@ -259,6 +281,72 @@ def scan(
             updated=stats["updated"],
             skipped=stats["skipped"],
             errors=stats["errors"],
+        )
+        console.print(f"[green]✓ {msg}[/green]")
+        if "tagged" in stats:
+            msg = _("Tagged: {files} files, {tags} tags").format(
+                files=stats["tagged"], tags=stats.get("auto_tags", 0)
+            )
+            console.print(f"[green]✓ {msg}[/green]")
+
+
+@app.command(
+    "autotag",
+    help=_("Tag indexed files from their metadata using the rules in the config."),
+)
+def autotag(
+    db_path: Path | None = DB_OPTION,
+    rules: Path | None = typer.Option(
+        None, "--rules", "-r", help=_("Rules file (TOML or JSON) instead of the config")
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help=_("Show what would be tagged")),
+    only_untagged: bool | None = typer.Option(
+        None,
+        "--only-untagged/--all",
+        help=_("Skip files that already have tags (default: the config decides)"),
+    ),
+    limit: int | None = typer.Option(None, "--limit", "-l", help=_("Stop after N files")),
+):
+    """Tag indexed files from their metadata using the rules in the config."""
+    if rules is not None and not rules.exists():
+        console.print(f"[red]{_('No such rules file: {path}').format(path=rules)}[/red]")
+        raise typer.Exit(1)
+
+    tagger = AutoTagger.from_config(rules, only_untagged=only_untagged)
+    if not tagger.rules:
+        msg = _("No auto-tagging rules: pass --rules or set autotag.rules_file")
+        console.print(f"[red]{msg}[/red]")
+        raise typer.Exit(1)
+
+    repo = get_repo(db_path)
+    with Progress(
+        TextColumn("[cyan]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task(_("Tagging"), total=None)
+
+        def on_progress(done: int, total: int | None) -> None:
+            progress.update(task, completed=done, total=total)
+
+        stats = tagger.run(
+            repo,
+            limit=limit,
+            dry_run=dry_run,
+            only_untagged=only_untagged,
+            progress=on_progress,
+        )
+
+    if dry_run:
+        msg = _("Would tag: {changed} files, {tags} tags").format(
+            changed=stats["changed"], tags=stats["tags"]
+        )
+        console.print(f"[cyan]{msg}[/cyan]")
+    else:
+        msg = _("Tagged: {changed} files, {tags} tags").format(
+            changed=stats["changed"], tags=stats["tags"]
         )
         console.print(f"[green]✓ {msg}[/green]")
 

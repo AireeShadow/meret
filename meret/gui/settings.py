@@ -58,19 +58,28 @@ def sections() -> tuple[tuple[str, str], ...]:
     return (
         ("paths", _("Paths")),
         ("scan", _("Scan")),
+        ("autotag", _("Auto-tagging")),
         ("gui", _("GUI")),
         ("locale", _("Locale")),
     )
 
 
 def settings_table() -> list[Setting]:
-    """Every field of the config. A function, so labels translate on call."""
+    """Every field of the config. A function, so labels translate on call.
+
+    The auto-tagging rules themselves are not here: they are a list of lists, and
+    this table has one row per scalar field. The row below points at the file that
+    holds them, which is the only part a form can edit.
+    """
     return [
         Setting("paths", "default_db", _("Default database"), "path"),
         Setting("paths", "default_library", _("Default library"), "path"),
         Setting("scan", "workers", _("Workers"), "int"),
         Setting("scan", "chunk_size", _("Chunk size"), "int"),
         Setting("scan", "skip_existing", _("Skip already indexed files"), "bool"),
+        Setting("autotag", "enabled", _("Apply rules after scanning"), "bool"),
+        Setting("autotag", "only_untagged", _("Only untagged files"), "bool"),
+        Setting("autotag", "rules_file", _("Rules file"), "path"),
         Setting("gui", "theme", _("Theme"), "choice", ("system", "light", "dark")),
         Setting("gui", "thumbnail_size", _("Thumbnail size"), "int"),
         Setting("gui", "window_width", _("Window width"), "int"),
@@ -238,6 +247,12 @@ class SettingsDialog(QDialog):
         start = line.text() or str(Path.home())
         if setting.name == "default_library":
             chosen = QFileDialog.getExistingDirectory(self, setting.label, start)
+        elif setting.name == "rules_file":
+            # an existing file, not a save target: a save dialog would offer to
+            # overwrite the very rules it is being asked to point at
+            chosen, _filters = QFileDialog.getOpenFileName(
+                self, setting.label, start, _("TOML or JSON (*.toml *.json)")
+            )
         else:
             chosen, _filters = QFileDialog.getSaveFileName(self, setting.label, start)
         if chosen:

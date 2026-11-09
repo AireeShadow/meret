@@ -883,3 +883,57 @@ msgstr "Вперёд 10 секунд / следующий файл"
 
 msgid "Play or pause"
 msgstr "Играть или пауза"
+
+msgid "Tag indexed files from their metadata using the rules in the config."
+msgstr "Протеггировать проиндексированные файлы по метадате, используя правила из конфига."
+
+msgid "Rules file (TOML or JSON) instead of the config"
+msgstr "Файл правил (TOML или JSON) вместо конфига"
+
+msgid "Show what would be tagged"
+msgstr "Показать, что было бы протеггировано"
+
+msgid "Skip files that already have tags (default: the config decides)"
+msgstr "Пропускать файлы, у которых уже есть теги (по умолчанию: решает конфиг)"
+
+msgid "Stop after N files"
+msgstr "Остановиться после N файлов"
+
+msgid "No such rules file: {path}"
+msgstr "Нет такого файла правил: {path}"
+
+msgid "No auto-tagging rules configured — skipping"
+msgstr "Правила автотеггинга не настроены — пропускаю"
+
+msgid "Tagging"
+msgstr "Теггирую"
+
+msgid "Tagged: {changed} files, {tags} tags"
+msgstr "Протеггировано: {changed} файлов, {tags} тегов"
+
+msgid "Tagged: {files} files, {tags} tags"
+msgstr "Протеггировано: {files} файлов, {tags} тегов"
+
+msgid "Apply the auto-tagging rules after indexing (default: the config)"
+msgstr "Применять правила автотеггинга после индексации (по умолчанию: решает конфиг)"
+
+msgid "No auto-tagging rules: pass --rules or set autotag.rules_file"
+msgstr "Нет правил автотеггинга: передай --rules или задай autotag.rules_file"
+
+msgid "Auto-tagging"
+msgstr "Автотеггинг"
+
+msgid "Apply rules after scanning"
+msgstr "Применять правила после сканирования"
+
+msgid "Only untagged files"
+msgstr "Только файлы без тегов"
+
+msgid "Rules file"
+msgstr "Файл правил"
+
+msgid "TOML or JSON (*.toml *.json)"
+msgstr "TOML или JSON (*.toml *.json)"
+
+msgid "Would tag: {changed} files, {tags} tags"
+msgstr "Было бы протеггировано: {changed} файлов, {tags} тегов"

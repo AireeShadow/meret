@@ -13,6 +13,7 @@ from pathlib import Path
 from meret.core.extractors import ExtractorRegistry
 from meret.core.models import FileEntry, FileType
 from meret.core.repository import AbstractRepository
+from meret.core.autotag import AutoTagger
 
 PHASE_COLLECT = "collect"
 PHASE_EXTRACT = "extract"
@@ -31,12 +32,14 @@ class Indexer:
         workers: int = 8,
         chunk_size: int = 1000,
         skip_existing: bool = False,
+        autotag: AutoTagger | None = None,
     ) -> None:
         self.repo = repository
         self.library = Path(library_path)
         self.workers = max(1, workers)
         self.chunk_size = max(1, chunk_size)
         self.skip_existing = skip_existing
+        self.autotag = autotag
         self.registry = ExtractorRegistry()
         self.interrupted = False
 
@@ -163,12 +166,13 @@ class Indexer:
     ) -> dict[str, int]:
         self.interrupted = False
         logger.info(
-            "Scan %s: workers=%d chunk_size=%d skip_existing=%s dry_run=%s",
+            "Scan %s: workers=%d chunk_size=%d skip_existing=%s dry_run=%s autotag=%s",
             single_file or self.library,
             self.workers,
             self.chunk_size,
             self.skip_existing,
             dry_run,
+            self.autotag is not None,
         )
         started = time.perf_counter()
 
@@ -193,6 +197,8 @@ class Indexer:
         )
 
         if dry_run:
+            # no ids exist yet, so there is nothing to attach tags to: a dry run
+            # reports what would be indexed, never what would be tagged
             return {
                 "indexed": 0,
                 "updated": 0,
@@ -206,6 +212,18 @@ class Indexer:
         stats = self.index(entries, progress_callback=progress_callback)
         stats["skipped"] = skipped
         stats["interrupted"] = self.interrupted
+
+        if self.autotag is not None:
+            # only the files this scan touched: a full-library pass is what
+            # `meret autotag` is for
+            tagged = self.autotag.run(
+                self.repo,
+                paths={str(path) for path in files},
+                progress=None,
+            )
+            stats["tagged"] = tagged["changed"]
+            stats["auto_tags"] = tagged["tags"]
+
         logger.info(
             "Indexed in %.1f s (total %.1f s): %s",
             time.perf_counter() - t0,

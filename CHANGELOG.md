@@ -7,6 +7,71 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.0\] — 2026-11-10
+
+### Added
+
+- **Metadata auto-tagging.** A rule is a tag path plus conditions over a file's
+  extracted metadata, so `exif.Make = Canon` can produce `camera/Canon` without
+  anyone clicking through the library. `meret/core/autotag.py` holds the rules,
+  the matcher and the tagger; `core` still imports neither `vfs` nor `cli`, so the
+  layering rule survives the feature.
+- **Rules are data, and they live in a file.** `[[rules]]` in a TOML/JSON file,
+  pointed at by `autotag.rules_file` or `--rules`. Not in `config.toml` on
+  purpose: rules are a list of lists, and the settings dialog shows exactly one
+  widget per config field — a rules table is not something a form row can hold.
+  `test_every_config_field_has_a_widget` is what settled that argument.
+- **Conditions see a flat view of the metadata** — dotted keys (`exif.Make`,
+  `tags.artist`, `creation_time`) plus derived facts (`type`, `orientation`,
+  `aspect`, `megapixels`, `duration_s`, `duration_min`, `year`), so nobody has to
+  write a rule against `2021:07:14 18:02:11` to tag a year.
+- **Thirteen operators:** `eq ne in not_in contains startswith endswith regex
+  gt gte lt lte exists missing`. They are a dispatch table, not a chain of
+  `if`s — one row per operator, and `matches_condition` only decides whether the
+  fact is there at all.
+- **Tag templates.** `camera/{exif.Make}` is skipped when the placeholder has no
+  value, so a rule can never create a bare `camera/` tag for `tag-prune` to
+  clean up later. EXIF strings are stripped on the way in: `"Canon "` would
+  otherwise become a tag with a trailing space.
+- `meret autotag [--rules FILE] [--dry-run] [--only-untagged/--all] [--limit N]`
+  tags an already-indexed library.
+- `meret scan --autotag` runs the same rules over the files the scan just
+  touched, and `autotag.enabled` is the default for the flag — `--autotag/
+  --no-autotag` is an `Optional[bool]` because "not given" and "explicitly off"
+  are different answers when the config has an opinion.
+- **A group in the settings dialog:** enabled, only-untagged and the rules file.
+  Its browse button opens a file rather than offering to save one — a save dialog
+  would propose overwriting the rules it is being asked to point at.
+- `tests/test_autotag.py`: facts and derived facts, every operator, a bad regex,
+  template rendering, dedupe against existing tags, rule colours, the dry run,
+  the path filter, `only_untagged`, and rule loading from both TOML and JSON.
+- Locale entries for the new strings in both catalogs.
+
+### Changed
+
+- **`AbstractRepository.iter_files` is not abstract.** A paged generator, so a
+  whole-library pass never materialises the library in memory — and deliberately
+  overridable-by-omission: a storage that cannot enumerate its files (a test
+  double, a backend that only answers lookups) must not become uninstantiable
+  because of a feature it never uses. It raises `NotImplementedError` at the
+  moment someone walks it. Making it abstract broke every mock repository in the
+  suite on the first attempt, which is exactly the cost of a contract nobody
+  asked that double to honour.
+- `Indexer` takes an optional `AutoTagger`; without one it behaves exactly as
+  before, so the GUI and the TUI need no changes at all.
+- **A dry run reports the same keys it always did.** `scan --dry-run` still
+  returns `indexed updated errors found skipped interrupted` and nothing else:
+  the CLI reads those in both branches, and an extra key is how the two branches
+  start to drift. What auto-tagging *would* do is `meret autotag --dry-run`'s
+  answer, with its own counters.
+
+### Fixed
+
+- EXIF and audio tag values are stripped before they become facts, so a padded
+  `Make` cannot produce a tag with trailing whitespace.
+- A missing rules file is a logged warning and "no rules", not a traceback: the
+  config can point at a file on a drive that is not mounted right now.
+
 ## \[0.8.5\] — 2026-11-09
 
 ### Added

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 from meret.core.models import FileEntry, Tag, TagNode
 
@@ -117,6 +117,21 @@ class AbstractRepository(ABC):
         Lets the incremental scan re-index files that changed on disk while
         skipping the untouched ones. One query, like known_paths.
         """
+
+    def iter_files(
+        self, limit: int | None = None, untagged_only: bool = False
+    ) -> Iterator[FileEntry]:
+        """Every indexed file as a model, one at a time, in a stable order.
+
+        A generator, not a list: auto-tagging walks the whole library and a
+        hundred thousand FileEntry objects is not something to hold in memory.
+
+        Deliberately NOT abstract. A storage that cannot enumerate its files — a
+        test double, a backend that only answers lookups — must not become
+        uninstantiable because of a feature it never uses. It says so loudly at
+        the moment someone actually walks it.
+        """
+        raise NotImplementedError(f"{type(self).__name__} cannot enumerate files")
 
     # --- change tracking ---
     def data_version(self) -> int | None:

@@ -65,6 +65,24 @@ class LocaleConfig(BaseModel):
     date_format: str = Field(default="%Y-%m-%d")
 
 
+class AutoTagConfig(BaseModel):
+    """Auto-tagging settings (the rules themselves live in a separate file).
+
+    Not in the config on purpose: rules are a list of lists, and the settings
+    dialog shows one widget per config field — a rules table is not something a
+    form row can hold. The file is the source of truth, the config only says
+    where it is and whether to use it.
+    """
+
+    enabled: bool = Field(default=False, description="Apply the rules after `meret scan`")
+    only_untagged: bool = Field(
+        default=False, description="Leave files that already have tags alone"
+    )
+    rules_file: str | None = Field(
+        default=None, description="TOML/JSON file with the auto-tagging rules"
+    )
+
+
 class MeretConfig(BaseModel):
     """Root configuration model."""
 
@@ -72,6 +90,7 @@ class MeretConfig(BaseModel):
     scan: ScanConfig = Field(default_factory=ScanConfig)
     gui: GUIConfig = Field(default_factory=GUIConfig)
     locale: LocaleConfig = Field(default_factory=LocaleConfig)
+    autotag: AutoTagConfig = Field(default_factory=AutoTagConfig)
 
     # Allow extra fields for forward compatibility
     model_config = {"extra": "allow"}
