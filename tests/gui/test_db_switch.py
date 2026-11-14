@@ -8,13 +8,26 @@ import sqlite3
 
 import pytest
 
-from tests.gui.conftest import pump, pump_until
+from tests.gui.conftest import pump_until
 
 pytest.importorskip("PySide6")
 
 
 @pytest.fixture
 def window(tmp_path, qapp, qtbot):
+    """A window on a fresh database, with the panel rooted and nothing blocking.
+
+    The panel is no longer revealed at start-up. reveal() expands every ancestor of
+    the path, and %TEMP% - an ancestor of every tmp_path - is resolved with a stat
+    per entry: on Windows that is tens of seconds of a blocked GUI thread, and it was
+    one of the two freezes this version fixes. The panel now roots itself at the home
+    folder and the drives live in the window's selector, so the only thing worth
+    waiting for is the panel having a root at all.
+
+    pump_until, not qtbot.waitUntil: the latter re-checks the clock before it
+    re-checks the callback, so a delivery that lands during a long event is reported
+    as a timeout.
+    """
     from meret.core.sqlite_repo import SQLiteRepository
     from meret.gui.app import MainWindow
 
@@ -22,24 +35,9 @@ def window(tmp_path, qapp, qtbot):
     main = MainWindow(repo, tmp_path / "meret.db")
     qtbot.addWidget(main)
 
-    # Two waits, in this order, because the window does two things on start.
-    #
-    # First the panel's own reveal: it expands every ancestor up to the drive root,
-    # and %TEMP% - an ancestor of every tmp_path - is resolved with a stat per entry.
-    # On Windows that is tens of seconds of a blocked GUI thread, and everything
-    # queued behind it waits, including the listing below. pump_until, not
-    # qtbot.waitUntil: the latter re-checks the clock before it re-checks the
-    # callback, so a delivery that lands during the block is reported as a timeout.
-    assert pump_until(lambda: main.fs.current_path() == main._db_path.parent, timeout_ms=60000), (
-        "the start-up reveal never finished - the panel is stuck expanding %TEMP%"
+    assert pump_until(lambda: main.fs.rootIndex().isValid(), timeout_ms=60000), (
+        "the panel never rooted itself - show_drive() did not run"
     )
-
-    # Then the start-up listing, whose callback ends in _update_status() and would
-    # overwrite a status line the test wrote before it lands. Waiting on the pool
-    # itself beats polling a predicate: no guessed budget, and the delivery below is
-    # a single pump instead of a race with the next version probe.
-    assert main._tasks.wait(60000), "the start-up listing never finished"
-    pump(20)
     return main
 
 

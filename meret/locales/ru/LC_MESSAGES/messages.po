@@ -943,3 +943,6 @@ msgstr "Корневой тег"
 
 msgid "Parent tag for every produced tag (default: the config)"
 msgstr "Родительский тег для всех создаваемых тегов (по умолчанию: решает конфиг)"
+
+msgid "Not reachable"
+msgstr "Недоступен"

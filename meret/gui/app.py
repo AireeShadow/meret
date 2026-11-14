@@ -27,6 +27,7 @@ from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QP
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFileSystemModel,
@@ -297,23 +298,32 @@ class TagTree(QTreeWidget):
 
 
 class RealFsPanel(QTreeView):
-    """The whole real filesystem, from its top: drives on Windows, "/" on Unix.
+    """The real filesystem, one root at a time.
 
     Qt's own model, so nothing here needs a database connection or a pool thread.
-    The view is rooted at the model's own root - an invalid QModelIndex - which is
-    the drive list on Windows and "/" on Unix, so one tree covers every drive
-    instead of one folder. Navigation reveals a path inside that tree instead of
-    re-rooting it, which is what makes the panel show the filesystem, not a folder.
+    The view is rooted at ONE folder, never at the model's own root: that root is
+    the drive list, and building it asks Windows for every drive's label and free
+    space - a dead mapped drive answers after ~5.5 s, on the GUI thread, in a single
+    event. The window offers the drives itself, from names only, and a drive whose
+    probe did not answer is disabled there, so a dead drive is never touched.
     """
 
     path_activated = Signal(str)
     # A drive answered its probe; emitted from the probe's thread, handled on ours
     _drive_ready = Signal(str, bool)
+    #: The same answer, for the window's drive selector. A drive that did not answer
+    #: must not be selectable: selecting it is 5.5 s of frozen window.
+    drive_probed = Signal(str, bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._started = time.monotonic()
         self._probing: set[str] = set()  # drives whose probe has not answered yet
+        # Guard against a nested event loop starting a second listing on top of one
+        # that is still running: that is how the queue stops draining.
+        self._refreshing = False
+        # The one folder the panel is rooted at. Never "" - see the class docstring.
+        self._root_path = QDir.homePath()
         self._model = QFileSystemModel(self)
         self._model.setFilter(QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot)
         # The watcher is the freeze: QFileSystemModel watches every directory it has
@@ -345,22 +355,26 @@ class RealFsPanel(QTreeView):
         # folder is the size of its ancestors. Naming them in the log beats guessing.
         self._model.directoryLoaded.connect(self._log_loaded)
         self._drive_ready.connect(self._add_drive)
-        self.show_filesystem()
+        self.show_drive(self._root_path)
         self._probe_drives()
         QTimer.singleShot(500, self._report_top)
 
     def reveal(self, path: Path) -> bool:
-        """Show `path`: expand what is needed, select it and scroll it into view.
+        """Show `path`: select it and scroll it into view, then return to the root.
 
         Deliberately not index(path) alone: that one fetches with fetch=false and
         hands back an invalid index for a folder that is cached but filtered out - a
         hidden one such as AppData. So index() is tried first and setRootPath() is
-        the fallback for a path the model has not listed yet - which is also what
-        keeps a second reveal of the same folder free of a whole new listing.
+        the fallback for a path the model has not listed yet.
 
-        The model's own root goes back to the drive list on the way out, and so does
-        the view: a model or a view left rooted at the revealed folder shows that one
-        drive and hides the rest.
+        A path that is not on disk is not revealed. The check is on the path itself,
+        not on fileInfo(index): setRootPath() on a missing path hands back the node of
+        the nearest existing ancestor, so fileInfo(index).exists() answers about the
+        parent and says True. The stat is paid only when re-rooting is needed, which
+        is also the only case where the model has not looked at the path already.
+
+        The root goes back to `_root_path`, never to the model's own root: that one
+        is the drive list, and building it costs seconds per dead mapped drive.
         """
         target = str(Path(path))
         started = time.perf_counter()
@@ -368,10 +382,14 @@ class RealFsPanel(QTreeView):
         index = self._model.index(target)
         rerooted = not index.isValid()
         if rerooted:
+            if not Path(target).exists():
+                return False
             index = self._model.setRootPath(target)  # never listed: this lists it
-        if not index.isValid():
+
+        # isinstance, not just isValid: a stub that returns None must not reach Qt
+        if not isinstance(index, QModelIndex) or not index.isValid():
             if rerooted:
-                self.show_filesystem()
+                self._restore_top()
             return False
 
         self._expand_ancestors(index)
@@ -380,25 +398,35 @@ class RealFsPanel(QTreeView):
         self._restore_top()
 
         logger.info(
-            "revealed %s in %.0f ms%s; root=%r, view root valid=%s, top rows=%d",
+            "revealed %s in %.0f ms%s; root=%r, view root valid=%s, rows=%d",
             target,
             (time.perf_counter() - started) * 1000,
             " (listed)" if rerooted else "",
             self._model.rootPath(),
             self.rootIndex().isValid(),
-            self._model.rowCount(QModelIndex()),
+            self._model.rowCount(self.rootIndex()),
         )
         return True
 
     def refresh(self) -> None:
-        """Re-read the panel from scratch.
+        """Re-read the current root from scratch.
 
-        Nothing else does it now that the watcher is off, and a bare setRootPath("")
-        returns early when the model is already at the top - hence the step off the
-        root and back inside _restore_top(), which is a real change and therefore a
-        real re-read. Drives plugged in since start are picked up here too.
+        Only the explicit `refresh` command asks for this: it costs a directory
+        listing with a stat per entry, on the GUI thread, so nothing that touches the
+        database may trigger it.
+
+        The re-entrancy guard is load-bearing. A nested event loop can deliver an
+        event while a listing is already in progress, and a second listing started on
+        top of the first is how the queue stops draining.
         """
-        self._restore_top()
+        if self._refreshing:
+            logger.debug("refresh already in progress, not starting another")
+            return
+        self._refreshing = True
+        try:
+            self._restore_top(force=True)
+        finally:
+            self._refreshing = False
         self._probe_drives()
 
     # ---------- the drive list ----------
@@ -449,8 +477,10 @@ class RealFsPanel(QTreeView):
             self._drive_ready.emit(path, reachable)
 
     def _add_drive(self, path: str, reachable: bool) -> None:
-        """GUI thread: a probe answered. A reachable drive gets its row right away."""
+        """GUI thread: a probe answered. Tell the window either way."""
         self._probing.discard(path)  # a refresh may probe it again
+        with contextlib.suppress(RuntimeError):
+            self.drive_probed.emit(path, reachable)
         if not reachable:
             return
         if self._model.index(path).isValid():
@@ -484,17 +514,27 @@ class RealFsPanel(QTreeView):
         except RuntimeError:
             return
 
-    def _restore_top(self) -> None:
-        """Put the model and the view back at the filesystem top.
+    def _restore_top(self, force: bool = False) -> None:
+        """Put the model and the view back at the panel's root.
 
-        Stepping through the home folder makes the following setRootPath("") a real
-        change: setRootPath() with the path it already has returns early. What it
-        does not do is re-read the drive list - Qt reads that once per model; new
-        drives come from _probe_drives().
+        The root is one folder (`_root_path`), never the model's own root: that one
+        is the drive list, and building it asks Windows for every drive's label and
+        free space - ~5.5 s per dead mapped drive, on the GUI thread, in one event.
+        The drives live in the window's selector instead.
+
+        `force` steps through the parent first: setRootPath() with the path it
+        already has returns early, and that early return is the only thing stopping
+        a real re-read.
         """
-        self._model.setRootPath(QDir.homePath())
-        self._model.setRootPath("")
-        self.setRootIndex(QModelIndex())
+        if force:
+            parent = str(Path(self._root_path).parent)
+            if parent == self._root_path:  # a drive root: nothing above it
+                parent = QDir.homePath()
+            self._model.setRootPath(parent)
+        index = self._model.setRootPath(self._root_path)
+        # isinstance, not just isValid: a stub that returns None must not reach Qt
+        if isinstance(index, QModelIndex):
+            self.setRootIndex(index)
 
     def _expand_ancestors(self, index: QModelIndex) -> None:
         """Expand every row above `index`, top down, so it is on screen.
@@ -528,21 +568,59 @@ class RealFsPanel(QTreeView):
             self.path_activated.emit(str(path))
 
     def show_filesystem(self) -> None:
-        """Show the top of the filesystem and drop the selection.
+        """Show the panel's root again and drop the selection.
 
-        The empty root path is the model's own root - the drive list on Windows, "/"
-        elsewhere - and it is also what flips the flag canFetchMore() needs before it
-        populates anything at all. _restore_top() is what actually gets it read: a
-        bare setRootPath("") here would return early and leave the root unread.
+        Named for what it used to do. The filesystem top is no longer a place this
+        panel goes: the drive list costs ~5.5 s per dead mapped drive on the GUI
+        thread, so the drives are the window's selector and the panel always shows
+        exactly one folder.
         """
-        self._restore_top()
+        self._restore_top(force=True)
         self.setCurrentIndex(QModelIndex())
         logger.info(
-            "show_filesystem: root=%r, view root valid=%s, top rows=%d",
+            "show_filesystem: root=%r, view root valid=%s, rows=%d",
             self._model.rootPath(),
             self.rootIndex().isValid(),
-            self._model.rowCount(QModelIndex()),
+            self._model.rowCount(self.rootIndex()),
         )
+
+    def show_home(self) -> None:
+        """Root the model AND the view at the home folder.
+
+        `setRootPath()` first, not `index()`: with an empty root path the model's
+        root node is the drive list, and building that list asks Windows for every
+        drive's label and free space. A dead mapped drive answers after ~5.5 s, and
+        the whole delivery lands on the GUI thread - the 5.4 s event the watchdog
+        names `QFileSystemModel/QEvent`. `setRootPath(home)` makes the home folder
+        the root node itself, so the drive list is never built at all.
+
+        `index()` was the bug: it looks harmless, and it resolves the path through
+        the root node, which is exactly the drive list this method exists to avoid.
+        """
+        home = QDir.homePath()
+        index = self._model.setRootPath(home)
+        self.setRootIndex(index)
+        self.setCurrentIndex(QModelIndex())
+        logger.info(
+            "show_home: root=%r, view root valid=%s", self._model.rootPath(), index.isValid()
+        )
+
+    def show_drive(self, path: str) -> None:
+        """Root the model and the view at one folder or drive.
+
+        `setRootPath()` and nothing else: it makes the path the model's root node,
+        so the drive list is never built. `index(path)` looks equivalent and is not -
+        it resolves the path through the root node, which is the drive list.
+        """
+        if not path:
+            return
+        self._root_path = path
+        index = self._model.setRootPath(path)
+        # isinstance, not just isValid: a stub that returns None must not reach Qt
+        if isinstance(index, QModelIndex):
+            self.setRootIndex(index)
+        self.setCurrentIndex(QModelIndex())
+        logger.info("show_drive: %s (valid=%s)", path, index.isValid() if index else False)
 
 
 class MainWindow(QMainWindow):
@@ -617,15 +695,32 @@ class MainWindow(QMainWindow):
 
         self.fs = RealFsPanel(self)
         self.fs.path_activated.connect(self._on_real_activated)
-        # reveal, not set_root: the panel is rooted at the filesystem top for good,
-        # so the database folder is a row to walk to, not a new root
-        self.fs.reveal(self._db_path.parent)
+        # The database folder is not revealed at start-up: reveal() expands every
+        # ancestor, and each expand is a listing with a stat per entry on the GUI
+        # thread. The panel starts at the home folder, and the drive selector below
+        # takes the user anywhere else.
+        logger.info("database folder: %s", self._db_path.parent)
 
         left = QSplitter(Qt.Orientation.Vertical, self)
         tags_box = QGroupBox(_("Virtual FS (Tags)"), self)
         QVBoxLayout(tags_box).addWidget(self.tags)
+
         fs_box = QGroupBox(_("Real Filesystem"), self)
-        QVBoxLayout(fs_box).addWidget(self.fs)
+        fs_layout = QVBoxLayout(fs_box)
+        # The drives come from us, not from the model: QDir.drives() is a list of
+        # names (GetLogicalDrives, instant), and _probe_drives already tests each one
+        # on its own thread. A drive that does not answer is disabled here, so the
+        # model is never pointed at it - which is the whole point, since its drive
+        # list costs ~5.5 s per dead drive.
+        self.drives = QComboBox(self)
+        self.drives.addItem(str(Path.home()))
+        for drive in QDir.drives():
+            self.drives.addItem(drive.absolutePath())
+        self.drives.currentTextChanged.connect(self.fs.show_drive)
+        self.fs.drive_probed.connect(self._on_drive_probed)
+        fs_layout.addWidget(self.drives)
+        fs_layout.addWidget(self.fs)
+
         left.addWidget(tags_box)
         left.addWidget(fs_box)
         left.setSizes([320, 320])
@@ -697,7 +792,14 @@ class MainWindow(QMainWindow):
         They are window actions, not toolbar actions, so a command whose button is
         in the overflow menu is still reachable by its shortcut - and the palette
         is for discovery.
+
+        MERET_NO_TOOLTIPS=1 drops the tooltips for an A/B run. A QToolTip is a
+        top-level QLabel, and it is the one widget that shows up in the watchdog
+        report right before the window stops answering: if the freeze goes away
+        without it, the tooltip path is the bug and the key belongs in the status
+        bar instead.
         """
+        tooltips = not os.environ.get("MERET_NO_TOOLTIPS")
         for command, description in command_table():
             shortcut = SHORTCUTS.get(command, "")
             action = QAction(description, self)
@@ -705,8 +807,9 @@ class MainWindow(QMainWindow):
             action.setIconText(short_label(command))  # the button text, if shown
             if shortcut:
                 action.setShortcut(shortcut)
-                action.setToolTip(f"{description} ({shortcut})")
-            else:
+                if tooltips:
+                    action.setToolTip(f"{description} ({shortcut})")
+            elif tooltips:
                 action.setToolTip(description)
             action.triggered.connect(lambda _checked=False, name=command: self.run_command(name))
             self.addAction(action)
@@ -764,7 +867,8 @@ class MainWindow(QMainWindow):
         """Run a command. The table is the TUI's bindings and palette, plus untag."""
         logger.info("palette: %s", cmd)
         handlers = {
-            "refresh": self._refresh,
+            # the one command that re-reads the disk: see _refresh's `panel`
+            "refresh": partial(self._refresh, panel=True),
             "scan": self._scan,
             "search": self._search_query,
             "tag": self._tag_selected,
@@ -790,18 +894,24 @@ class MainWindow(QMainWindow):
 
     # ---------- contents ----------
 
-    def _refresh(self) -> None:
-        """Re-read tags, the filesystem panel and the current view after any write."""
+    def _refresh(self, panel: bool = False) -> None:
+        """Re-read tags and the current view after a write.
+
+        `panel` re-reads the real filesystem panel too, and only the explicit refresh
+        command passes it. The panel shows the disk, not the database: making a tag
+        write re-list two directories on the GUI thread is what turned an outside
+        change into a five-second freeze.
+        """
         # None only while a database switch is in the air, and a switch always ends
         # in open_folder()
         assert self._tree is not None
         self._tree.invalidate()
         self.tags.reload()
-        # The panel no longer notices changes by itself, so it has to be told.
-        # getattr: a test may have swapped the panel for a stub without refresh().
-        refresh_panel = getattr(self.fs, "refresh", None)
-        if refresh_panel is not None:
-            refresh_panel()
+        if panel:
+            # getattr: a test may have swapped the panel for a stub without refresh().
+            refresh_panel = getattr(self.fs, "refresh", None)
+            if refresh_panel is not None:
+                refresh_panel()
         if self._search is not None:
             self._run_search(self._search)
             return
@@ -1664,6 +1774,23 @@ class MainWindow(QMainWindow):
                 return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
+    def _on_drive_probed(self, path: str, reachable: bool) -> None:
+        """A drive that did not answer is not offered at all.
+
+        Not merely discouraged: a disabled entry cannot be selected, and the model
+        only ever stats the folder it is rooted at, so an unreachable drive costs
+        nothing for the whole session.
+        """
+        index = self.drives.findText(path)
+        if index < 0:
+            return
+        item = self.drives.model().item(index)
+        if item is None:
+            return
+        item.setEnabled(reachable)
+        if not reachable:
+            item.setToolTip(_("Not reachable"))
+
     # ---------- outside changes ----------
 
     def _check_version(self) -> None:
@@ -1718,6 +1845,11 @@ class TracedApplication(QApplication):
         self._chains: dict[tuple, str] = {}
         self._last_report = time.perf_counter()
         self._text = ""
+        # The event the GUI thread is inside right now, and when it last finished
+        # one. A handler that never returns never reaches notify()'s finally, so
+        # these two are the only witnesses a permanent freeze can leave behind.
+        self._current = "-"
+        self._last_event_done = time.perf_counter()
 
         self._beat = QTimer(self)
         self._beat.setInterval(self.REPORT_MS)
@@ -1729,9 +1861,13 @@ class TracedApplication(QApplication):
     def notify(self, receiver, event) -> bool:
         """Time every event and count it per receiver, so a storm names itself."""
         started = time.perf_counter()
+        # Read by the watchdog thread: the only witness when an event never returns
+        self._current = f"{type(receiver).__name__}/{type(event).__name__}"
         try:
             return super().notify(receiver, event)
         finally:
+            self._current = "-"
+            self._last_event_done = time.perf_counter()
             spent = (time.perf_counter() - started) * 1000
             self._events += 1
             pair = (type(receiver).__name__, type(event).__name__)
@@ -1792,6 +1928,16 @@ class TracedApplication(QApplication):
             time.sleep(self.REPORT_MS / 1000 * 2)
             if self._text:
                 print(f"[watchdog]\n{self._text}", file=sys.stderr, flush=True)
+            # A handler that never returns never reaches notify()'s finally, so the
+            # event counter freezes and no "slow" line is ever printed - the freeze
+            # is silent exactly when it is worst. This line names it instead.
+            stuck_for = time.perf_counter() - self._last_event_done
+            if self._current != "-" and stuck_for > 2.0:
+                print(
+                    f"[watchdog] stuck for {stuck_for:.1f} s in: {self._current}",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
     @staticmethod
     def _name_of(widget) -> str:

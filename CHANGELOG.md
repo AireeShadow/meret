@@ -7,6 +7,75 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.2\] — 2026-11-14
+
+### Fixed
+
+- **The GUI froze for ~5.5 s and sometimes never came back, on a machine with two
+  unreachable mapped drives.** `QFileSystemModel` builds its own root node as the
+  drive list, and building it asks Windows for every drive's label and free space.
+  A dead mapped drive answers after ~5.5 s (`X:` and `Y:` in the trace), and the
+  whole delivery arrives on the GUI thread in a single event. A blocked GUI thread
+  does not repaint, so the tooltip painted a moment before stayed frozen on screen —
+  the freeze looked like hovering the toolbar, which is where the report started.
+- **The panel is rooted at exactly one folder now, never at the model's own root.**
+  `setRootPath()` makes a path the root node, so the drive list is never built.
+  `index(path)` looks equivalent and is not: it resolves the path through the root
+  node, which is the drive list — that was the difference between a freeze and no
+  freeze, and it is why the first attempt at this fix changed nothing.
+- **The start-up reveal is gone.** `reveal(self._db_path.parent)` expands every
+  ancestor of the database folder, and each expand is a listing with a stat per
+  entry on the GUI thread; with the database in a synced folder those stats go
+  through the sync filter. The folder is logged instead, and the panel starts at the
+  home folder.
+- **`umount` no longer runs the CLI on the GUI thread.** `_pids_for_mountpoint` finds
+  its target with `Get-CimInstance Win32_Process` on Windows — seconds of WMI
+  enumeration, and no natural end when the WMI service is unhappy. The call runs on
+  the task pool with `stdin=DEVNULL` and a timeout, and the process scan gives up
+  after ten seconds instead of waiting forever.
+- The status line no longer claims "Unmounted" before the CLI has answered:
+  `meret umount` exits 1 with "Nothing is mounted at ...", and that is what the
+  window shows now.
+- `reveal()` no longer reports success for a path that is not on disk. The check is
+  on the path, not on `fileInfo(index)`: `setRootPath()` on a missing path hands
+  back the node of the nearest existing ancestor, so the old check answered about
+  the parent and said True.
+- `RealFsPanel` no longer crashes when `setRootPath()` answers with `None` — a test
+  double that returns nothing used to reach `setRootIndex()` and raise `TypeError`.
+
+### Added
+
+- **A drive selector above the real-FS panel.** The drives come from
+  `QDir.drives()` — names only, instant — and each one is tested by the probe that
+  already ran for the panel. A drive that does not answer is disabled in the list,
+  so it cannot be selected and the model is never pointed at it. This is the only
+  way to offer the drives without paying for the model's own drive list.
+- `RealFsPanel.drive_probed`, so the window can act on a probe result instead of
+  only the panel.
+- `[watchdog] stuck for N s in: <receiver>/<event>` with `MERET_WATCHDOG=1`. A
+  handler that never returns never reaches `notify()`'s `finally`, so no `slow:`
+  line is printed exactly when a freeze is worst — this line names the event that
+  is still running, read by the watchdog thread while the GUI thread cannot answer.
+- `MERET_NO_TOOLTIPS=1`, which ruled the tooltip path out: the freeze was identical
+  without any tooltip.
+
+### Changed
+
+- `refresh()` re-reads the current root by stepping through its parent, since
+  `setRootPath()` with the path it already has returns early. It refuses to start a
+  second listing while one is running: a nested event loop that delivers an event
+  mid-listing used to stack a second listing on top of the first, and the queue
+  never drained again.
+- `_spawn` passes `stdin=DEVNULL`. `meret mount` waits for Enter on Windows, and a
+  window has no console to inherit one from — leaving stdin attached is how a mount
+  ends the moment it starts.
+- `_run`, `_run_cli` and `_spawn_cli` are gone: the first was the only blocking
+  subprocess call left on the GUI thread, and the other two were never called.
+- `tests/gui/test_real_panel.py` describes the new behaviour, and two of its tests
+  are regression guards rather than descriptions: `test_the_panel_never_asks_for_the_drive_list`
+  fails if anything ever passes `""` to `setRootPath()` again, which is the exact
+  call that cost 5.5 s per dead drive.
+
 ## \[0.9.1\] — 2026-11-10
 
 ### Added
