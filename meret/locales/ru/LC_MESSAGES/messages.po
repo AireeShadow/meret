@@ -937,3 +937,9 @@ msgstr "TOML или JSON (*.toml *.json)"
 
 msgid "Would tag: {changed} files, {tags} tags"
 msgstr "Было бы протеггировано: {changed} файлов, {tags} тегов"
+
+msgid "Tag root"
+msgstr "Корневой тег"
+
+msgid "Parent tag for every produced tag (default: the config)"
+msgstr "Родительский тег для всех создаваемых тегов (по умолчанию: решает конфиг)"

@@ -7,6 +7,35 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.1\] — 2026-11-10
+
+### Added
+
+- **`autotag.root`: every produced tag is filed under a configurable parent.**
+  `metadata` by default, so auto-tags never mix with hand-made ones at the top of
+  the tree. `--root` overrides it for one run; an empty root files them bare.
+- A rule that already spells the root out — `metadata/camera/{exif.Make}` — is not
+  prefixed twice, so both spellings of the same rule agree.
+- The root is normalised on load: `/metadata/`, `metadata` and ` metadata ` are one
+  spelling, and backslashes count as separators. The value is typed by a human into
+  a config file, and a leading slash is not a hierarchy.
+- Dedupe in `plan()` compares the final path, root included — otherwise `--root`
+  would only change what gets written while the "file already has this tag" check
+  looked at a different name, and a second run would add a duplicate.
+- A "Tag root" row in the settings dialog, and coverage in `tests/test_autotag.py`
+  for prefixing, double-prefixing, an empty root and normalisation.
+
+### Fixed
+
+- **`AutoTagConfig` was defined twice in `meret/core/config.py`.** The second
+  definition rebound the module name, but `MeretConfig.autotag` had already
+  captured the *first* class object when the field was declared — so `root` never
+  reached the model. The dialog showed the row, `values()` returned it,
+  `apply_settings()` wrote it, and `MeretConfig` dropped it on validation. Nothing
+  raised: a duplicate class definition is silent in Python.
+  `test_every_config_field_has_a_widget` caught it by comparing the model's fields
+  against the dialog's table instead of trusting either side.
+
 ## \[0.9.0\] — 2026-11-10
 
 ### Added

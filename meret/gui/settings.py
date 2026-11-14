@@ -68,8 +68,9 @@ def settings_table() -> list[Setting]:
     """Every field of the config. A function, so labels translate on call.
 
     The auto-tagging rules themselves are not here: they are a list of lists, and
-    this table has one row per scalar field. The row below points at the file that
-    holds them, which is the only part a form can edit.
+    this table has one row per scalar field. The rows below point at the file that
+    holds them and at the parent tag the results are filed under — the only parts a
+    form can edit.
     """
     return [
         Setting("paths", "default_db", _("Default database"), "path"),
@@ -79,6 +80,7 @@ def settings_table() -> list[Setting]:
         Setting("scan", "skip_existing", _("Skip already indexed files"), "bool"),
         Setting("autotag", "enabled", _("Apply rules after scanning"), "bool"),
         Setting("autotag", "only_untagged", _("Only untagged files"), "bool"),
+        Setting("autotag", "root", _("Tag root"), "text"),
         Setting("autotag", "rules_file", _("Rules file"), "path"),
         Setting("gui", "theme", _("Theme"), "choice", ("system", "light", "dark")),
         Setting("gui", "thumbnail_size", _("Thumbnail size"), "int"),

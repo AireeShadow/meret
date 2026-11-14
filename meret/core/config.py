@@ -15,6 +15,8 @@ from typing import Any
 import platformdirs
 from pydantic import BaseModel, Field, field_validator
 
+from meret.core.autotag import normalize_root
+
 APP_NAME = "meret"
 CONFIG_FILENAME = "config.toml"
 
@@ -71,16 +73,26 @@ class AutoTagConfig(BaseModel):
     Not in the config on purpose: rules are a list of lists, and the settings
     dialog shows one widget per config field — a rules table is not something a
     form row can hold. The file is the source of truth, the config only says
-    where it is and whether to use it.
+    where it is, what to file the results under and whether to use it.
     """
 
     enabled: bool = Field(default=False, description="Apply the rules after `meret scan`")
     only_untagged: bool = Field(
         default=False, description="Leave files that already have tags alone"
     )
+    root: str = Field(
+        default="metadata",
+        description="Parent tag for every produced tag; empty means no parent",
+    )
     rules_file: str | None = Field(
         default=None, description="TOML/JSON file with the auto-tagging rules"
     )
+
+    @field_validator("root")
+    @classmethod
+    def _normalize_root(cls, value: str) -> str:
+        """`/metadata/` and `metadata` are the same parent — one spelling in the file."""
+        return normalize_root(value)
 
 
 class MeretConfig(BaseModel):

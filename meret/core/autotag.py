@@ -110,6 +110,18 @@ def _clean(value: Any) -> Any:
     return value.strip() if isinstance(value, str) else value
 
 
+def normalize_root(root: str | None) -> str:
+    """A tag path with no stray separators. Empty means "no parent tag".
+
+    Accepts "/media/", "media", " media " and backslashes: the value comes from a
+    config file a human typed into, and a leading slash is not a hierarchy.
+    """
+    if not root:
+        return ""
+    parts = (part.strip() for part in str(root).replace("\\", "/").split("/"))
+    return "/".join(part for part in parts if part)
+
+
 def _year_from(facts: dict[str, Any]) -> int | None:
     """The year a photo/video was taken, falling back to the file mtime."""
     for key in ("exif.DateTimeOriginal", "exif.DateTime", "creation_time", "tags.date"):
@@ -298,10 +310,7 @@ def load_rules(path: Path) -> list[AutoTagRule]:
     if path.suffix.lower() == ".json":
         data: Any = json.loads(text)
     else:
-        try:
-            import tomllib
-        except ImportError:  # Python < 3.11
-            import tomli as tomllib
+        import tomllib
 
         data = tomllib.loads(text)
 
@@ -321,21 +330,30 @@ def load_rules(path: Path) -> list[AutoTagRule]:
 class AutoTagger:
     """Turns rules plus a file's metadata into tag paths, and writes them."""
 
-    def __init__(self, rules: Iterable[AutoTagRule], only_untagged: bool = False) -> None:
+    def __init__(
+        self,
+        rules: Iterable[AutoTagRule],
+        only_untagged: bool = False,
+        root: str = "",
+    ) -> None:
         self.rules = [rule for rule in rules if rule.enabled]
         self.only_untagged = only_untagged
+        self.root = normalize_root(root)
 
     @classmethod
     def from_config(
         cls,
         rules_path: str | Path | None = None,
         only_untagged: bool | None = None,
+        root: str | None = None,
     ) -> "AutoTagger":
         """Build a tagger from the ``[autotag]`` config section.
 
-        An explicit ``rules_path`` wins over ``autotag.rules_file``. A rules file
-        that is not there is a warning, not a crash: the config can point at a
-        file that lives on a drive which is not mounted right now.
+        An explicit ``rules_path`` wins over ``autotag.rules_file``. ``root``
+        overrides ``autotag.root``, which is the parent every produced tag is filed
+        under; an empty root files them at the top level. A rules file that is not
+        there is a warning, not a crash: the config can point at a file that lives
+        on a drive which is not mounted right now.
         """
         from meret.core.config import get_config
 
@@ -352,12 +370,31 @@ class AutoTagger:
 
         if only_untagged is None:
             only_untagged = section.only_untagged
-        return cls(rules, only_untagged=only_untagged)
+        if root is None:
+            root = section.root
+        return cls(rules, only_untagged=only_untagged, root=root)
+
+    def _with_root(self, tag: str) -> str:
+        """File the tag under the configured parent, exactly once.
+
+        A rule that already spells the root out — `metadata/camera/{exif.Make}` —
+        is left alone, so both spellings of the same rule agree instead of
+        producing `metadata/metadata/camera/Canon`.
+        """
+        if not self.root:
+            return tag
+        folded_tag = tag.casefold()
+        folded_root = self.root.casefold()
+        if folded_tag == folded_root or folded_tag.startswith(folded_root + "/"):
+            return tag
+        return f"{self.root}/{tag}"
 
     def plan(self, entry: FileEntry) -> list[tuple[str, str | None]]:
         """The tags this file should gain, as (tag path, colour) pairs.
 
-        Tags the file already has are skipped, so a second run is a no-op.
+        Tags the file already has are skipped, so a second run is a no-op. The
+        comparison is on the final path, root included: `metadata/big` and `big`
+        are two different tags, and only one of them is what this run produces.
         """
         facts = build_facts(entry)
         existing = {label.casefold() for label in entry.labels}
@@ -370,6 +407,7 @@ class AutoTagger:
             tag = render_tag(rule.tag, facts)
             if not tag:
                 continue
+            tag = self._with_root(tag)
             key = tag.casefold()
             if key in seen or key in existing:
                 continue

@@ -299,6 +299,9 @@ def autotag(
     rules: Path | None = typer.Option(
         None, "--rules", "-r", help=_("Rules file (TOML or JSON) instead of the config")
     ),
+    root: str | None = typer.Option(
+        None, "--root", help=_("Parent tag for every produced tag (default: the config)")
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help=_("Show what would be tagged")),
     only_untagged: bool | None = typer.Option(
         None,
@@ -312,7 +315,7 @@ def autotag(
         console.print(f"[red]{_('No such rules file: {path}').format(path=rules)}[/red]")
         raise typer.Exit(1)
 
-    tagger = AutoTagger.from_config(rules, only_untagged=only_untagged)
+    tagger = AutoTagger.from_config(rules, only_untagged=only_untagged, root=root)
     if not tagger.rules:
         msg = _("No auto-tagging rules: pass --rules or set autotag.rules_file")
         console.print(f"[red]{msg}[/red]")

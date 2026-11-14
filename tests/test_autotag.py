@@ -213,3 +213,27 @@ def test_load_rules_from_toml_with_autotag_table(tmp_path):
     )
     rules = load_rules(path)
     assert [rule.tag for rule in rules] == ["big"]
+
+
+def test_root_prefixes_every_tag():
+    rule = make_rule("big", [{"field": "width", "op": "gte", "value": 4000}])
+    tagger = AutoTagger([rule], root="metadata")
+    assert tagger.tags_for(make_entry()) == ["metadata/big"]
+
+
+def test_root_is_not_applied_twice():
+    rule = make_rule("metadata/big", [{"field": "width", "op": "gte", "value": 4000}])
+    tagger = AutoTagger([rule], root="metadata")
+    assert tagger.tags_for(make_entry()) == ["metadata/big"]
+
+
+def test_empty_root_keeps_bare_tags():
+    rule = make_rule("big", [{"field": "width", "op": "gte", "value": 4000}])
+    tagger = AutoTagger([rule], root="")
+    assert tagger.tags_for(make_entry()) == ["big"]
+
+
+def test_root_is_normalized():
+    rule = make_rule("big", [{"field": "width", "op": "gte", "value": 4000}])
+    tagger = AutoTagger([rule], root="  /my media/  ")
+    assert tagger.tags_for(make_entry()) == ["my media/big"]
