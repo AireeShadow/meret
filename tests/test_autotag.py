@@ -237,3 +237,34 @@ def test_root_is_normalized():
     rule = make_rule("big", [{"field": "width", "op": "gte", "value": 4000}])
     tagger = AutoTagger([rule], root="  /my media/  ")
     assert tagger.tags_for(make_entry()) == ["my media/big"]
+
+
+def test_the_shipped_rules_parse_and_tag_a_photo():
+    """The default file is a policy, not a placeholder: it must parse and fire.
+
+    A broken default is worse than none - it turns every `meret autotag` into a
+    traceback on a fresh install, and nobody edits a file they cannot read.
+
+    The asserts are staged on purpose: "no tags" says nothing about whether the file
+    failed to parse, the rules failed to match, or the template rendered empty.
+    """
+    from meret.core.autotag import DEFAULT_RULES_PATH, AutoTagger, build_facts, load_rules
+
+    assert DEFAULT_RULES_PATH.is_file(), "the default rules file did not ship"
+
+    rules = load_rules(DEFAULT_RULES_PATH)
+    assert rules, "the default rules file parsed to zero rules - check [[rules]]"
+
+    entry = make_entry()
+    facts = build_facts(entry)
+    assert facts["type"] == "image"
+    assert facts["exif.Make"] == "Canon"
+
+    tags = AutoTagger(rules, root="metadata").tags_for(entry)
+
+    assert "metadata/kind/image" in tags
+    assert "metadata/format/JPEG" in tags
+    assert "metadata/orientation/landscape" in tags
+    assert "metadata/resolution/high" in tags
+    assert "metadata/year/2021" in tags
+    assert "metadata/camera/Canon" in tags

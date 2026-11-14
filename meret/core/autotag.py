@@ -26,6 +26,10 @@ from meret.core.repository import AbstractRepository
 
 logger = logging.getLogger(__name__)
 
+#: The rules shipped with meret, used when no file is configured. A feature that
+#: silently does nothing on a fresh install is a feature nobody finds.
+DEFAULT_RULES_PATH = Path(__file__).parent / "rules" / "default.toml"
+
 Operator = Literal[
     "eq",
     "ne",
@@ -349,11 +353,14 @@ class AutoTagger:
     ) -> "AutoTagger":
         """Build a tagger from the ``[autotag]`` config section.
 
-        An explicit ``rules_path`` wins over ``autotag.rules_file``. ``root``
-        overrides ``autotag.root``, which is the parent every produced tag is filed
-        under; an empty root files them at the top level. A rules file that is not
-        there is a warning, not a crash: the config can point at a file that lives
-        on a drive which is not mounted right now.
+        An explicit ``rules_path`` wins over ``autotag.rules_file``, and an external
+        file wins over the shipped defaults. The defaults are used only when nothing
+        is configured at all - a configured file that is missing stays missing, with a
+        warning: falling back to a default policy would tag a library nobody asked it
+        to tag.
+
+        ``root`` overrides ``autotag.root``, which is the parent every produced tag is
+        filed under; an empty root files them at the top level.
         """
         from meret.core.config import get_config
 
@@ -367,6 +374,9 @@ class AutoTagger:
                 rules = load_rules(path)
             else:
                 logger.warning("auto-tagging rules file not found: %s", path)
+        elif DEFAULT_RULES_PATH.is_file():
+            rules = load_rules(DEFAULT_RULES_PATH)
+            logger.info("using the built-in auto-tagging rules: %s", DEFAULT_RULES_PATH)
 
         if only_untagged is None:
             only_untagged = section.only_untagged

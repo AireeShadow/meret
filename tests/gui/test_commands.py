@@ -49,7 +49,9 @@ def test_command_table_covers_the_whole_tui():
     bindings = {PALETTE_ALIASES.get(name_of(b), name_of(b)) for b in MeretApp.BINDINGS}
     palette = {PALETTE_ALIASES.get(command_name(r), command_name(r)) for r in palette_entries()}
 
-    assert {command for command, _ in command_table()} == (bindings | palette | {"untag"}) - dropped
+    assert {command for command, _ in command_table()} == (
+        (bindings | palette | {"untag"}) - dropped
+    )
 
 
 def test_shared_descriptions_are_the_tui_ones():

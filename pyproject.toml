@@ -149,7 +149,7 @@ input_files = "meret/**/*.py"
 output_file = "meret/locales/messages.pot"
 
 [tool.setuptools.package-data]
-meret = ["locales/**/*.mo", "locales/**/*.po"]
+meret = ["locales/**/*.mo", "locales/**/*.po", "core/rules/*.toml"]
 
 [tool.mypy]
 python_version = "3.11"

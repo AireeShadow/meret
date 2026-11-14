@@ -1,0 +1,82 @@
+# The rules meret ships with.
+#
+# Used when neither `autotag.rules_file` nor `--rules` names a file, so the feature
+# does something on a fresh install instead of printing "no rules". A configured file
+# that does not exist is NOT replaced by these: an auto-tagger that silently falls
+# back to a default policy would tag a library nobody asked it to tag.
+#
+# Everything here is deliberately coarse. A rule that fires on most files is noise,
+# and a default is a starting point, not a finished policy. To keep your own:
+#
+#   cp meret/core/rules/default.toml ~/Media/rules.toml
+#   meret config set autotag.rules_file ~/Media/rules.toml
+#
+# The parent tag comes from `autotag.root` (default "metadata"), so `kind/{type}`
+# becomes `metadata/kind/image`.
+
+[[rules]]
+tag = "kind/{type}"
+
+[[rules.conditions]]
+field = "type"
+op = "exists"
+
+[[rules]]
+tag = "format/{format}"
+
+[[rules.conditions]]
+field = "format"
+op = "exists"
+
+[[rules]]
+tag = "orientation/{orientation}"
+
+[[rules.conditions]]
+field = "orientation"
+op = "exists"
+
+[[rules]]
+tag = "resolution/high"
+
+[[rules.conditions]]
+field = "megapixels"
+op = "gte"
+value = 12
+
+[[rules]]
+tag = "resolution/low"
+
+[[rules.conditions]]
+field = "megapixels"
+op = "lt"
+value = 2
+
+[[rules]]
+tag = "year/{year}"
+
+[[rules.conditions]]
+field = "year"
+op = "exists"
+
+[[rules]]
+tag = "camera/{exif.Make}"
+
+[[rules.conditions]]
+field = "exif.Make"
+op = "exists"
+
+[[rules]]
+tag = "video/long"
+
+[[rules.conditions]]
+field = "duration_s"
+op = "gte"
+value = 600
+
+[[rules]]
+tag = "screenshot"
+
+[[rules.conditions]]
+field = "filename"
+op = "contains"
+value = "screenshot"

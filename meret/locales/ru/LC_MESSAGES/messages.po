@@ -946,3 +946,21 @@ msgstr "Родительский тег для всех создаваемых �
 
 msgid "Diagnostics to switch on: {names}"
 msgstr "Диагностика: {names}"
+
+msgid "Tag files from their metadata"
+msgstr "Протеггировать файлы по метадате"
+
+msgid "No auto-tagging rules: set autotag.rules_file or pass --rules on the CLI"
+msgstr "Нет правил автотеггинга: задай autotag.rules_file или передай --rules в CLI"
+
+msgid "Tagging..."
+msgstr "Теггирую..."
+
+msgid "Auto-tag"
+msgstr "Автотег"
+
+msgid "Auto-tagging failed"
+msgstr "Автотеггинг не удался"
+
+msgid "Tagging complete!"
+msgstr "Теггирование завершено!"

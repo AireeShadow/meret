@@ -33,6 +33,7 @@ GLYPHS: dict[str, tuple[str, ...]] = {
     "search": ("search",),
     "tag": ("tag",),
     "untag": ("tag-off", "tag-x", "tags"),
+    "autotag": ("tags", "sparkles", "wand-sparkles"),
     "delete": ("trash-2", "trash"),
     "sort_files": ("arrow-up-down",),
     "init_db": ("database",),

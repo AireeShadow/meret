@@ -112,7 +112,13 @@ def test_open_db_waits_out_a_lock(window, tmp_path, qtbot, monkeypatch):
 
 
 def test_a_database_that_will_not_open_is_a_status_line(window, tmp_path, qtbot):
-    """A failure keeps the old database and says so instead of half-switching."""
+    """A failure keeps the old database and says so instead of half-switching.
+
+    pump_until, not qtbot.waitUntil: the switch runs on the task pool, and the pool is
+    busy with the start-up listing and thumbnails when this test begins, so a fixed
+    two-second budget is a guess about load. pump_until evaluates the predicate once
+    more after its last pump, which is the turn a late delivery needs.
+    """
     before = window._db_path
 
     def boom(_path):
@@ -120,6 +126,8 @@ def test_a_database_that_will_not_open_is_a_status_line(window, tmp_path, qtbot)
 
     window._open_db = boom
     window._use_db(tmp_path / "other.db")
-    qtbot.waitUntil(lambda: "locked" in window._status_label.text(), timeout=2000)
 
-    assert window._db_path == before
+    assert pump_until(lambda: "locked" in window._status_label.text(), timeout_ms=15000), (
+        f"the failure never reached the status line: {window._status_label.text()!r}"
+    )
+    assert window._db_path == before  # nothing was swapped

@@ -558,6 +558,7 @@ def test_every_palette_command_dispatches(monkeypatch):
         before = len(called)
         names = {
             "scan": "action_scan",
+            "autotag": "action_autotag",
             "search": "action_search",
             "tag": "action_tag",
             "init": "action_init_db",

@@ -334,6 +334,7 @@ class CommandPalette(ModalScreen[str]):
             ("search", _("Search files by tags/name")),
             ("tag", _("Tag selected file")),
             ("untag", _("Remove tag from file")),
+            ("autotag", _("Tag files from their metadata")),
             ("init", _("Initialize new database")),
             ("config", _("Edit configuration")),
             ("stats", _("Show database statistics")),
@@ -444,6 +445,7 @@ class MeretApp(App):
         Binding("enter", "open_file", _("Open")),
         Binding("s", "scan", _("Scan")),
         Binding("t", "tag", _("Tag")),
+        Binding("a", "autotag", _("Auto-tag")),
         Binding("r", "refresh", _("Refresh")),
         Binding("c", "config", _("Config")),
         Binding("d", "delete", _("Delete tag")),
@@ -582,6 +584,7 @@ class MeretApp(App):
             "scan": self.action_scan,
             "search": self.action_search,
             "tag": self.action_tag,
+            "autotag": self.action_autotag,
             "init": self.action_init_db,
             "config": self.action_config,
             "stats": self.action_stats,
@@ -606,6 +609,33 @@ class MeretApp(App):
             self._run(["meret", "scan", str(self.selected_real), "--db", str(self.db_path)])
             self.virt_tree._load_tree()
             self.notify(_("Scan complete!"))
+
+    def action_autotag(self):
+        """Apply the auto-tagging rules to the whole library.
+
+        Shells out to `meret autotag`, like scan and mount do: the rules live in a
+        file and the CLI already owns the policy, so the TUI only decides when. One
+        process, one exit code, and the virtual panel is reloaded afterwards because
+        every tag it wrote is new.
+
+        The last line of the CLI's output is what the user wants to read - "Tagged: 12
+        files, 30 tags" - so it becomes the notification instead of a generic "done".
+        """
+        self.notify(_("Tagging..."))
+        result = self._run(
+            ["meret", "autotag", "--db", str(self.db_path)],
+            capture_output=True,
+            text=True,
+        )
+        output = (result.stdout or "").strip() or (result.stderr or "").strip()
+        if result.returncode != 0:
+            logger.warning("autotag: exit %s: %s", result.returncode, output)
+            self.notify(output or _("Auto-tagging failed"), severity="error")
+            return
+
+        self.virt_tree._load_tree()
+        lines = output.splitlines()
+        self.notify(lines[-1] if lines else _("Tagging complete!"))
 
     def action_open_file(self):
         """Open selected file with default app."""
@@ -864,6 +894,7 @@ class MeretApp(App):
         /              {_("Search")}
         s              {_("Scan selected directory")}
         t              {_("Tag selected file")}
+        a              {_("Tag files from their metadata")}
         d              {_("Delete tag (virtual panel)")}
         r              {_("Refresh")}
         m / U          {_("Mount")} / {_("unmount")}

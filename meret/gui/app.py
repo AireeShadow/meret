@@ -50,6 +50,7 @@ from meret.core.indexer import Indexer
 from meret.core.locale import _
 from meret.core.models import FileEntry, FileType
 from meret.core.sqlite_repo import SQLiteRepository
+from meret.core.autotag import AutoTagger
 from meret.gui import icons
 from meret.gui.commands import (
     SHORTCUTS,
@@ -83,6 +84,8 @@ ICON = 28
 
 #: Toolbar buttons, in order. None is a separator. This is every command: a panel
 #: that hides half of them is not "one to one with the TUI".
+#: Toolbar buttons, in order. None is a separator. This is every command: a panel
+#: that hides half of them is not "one to one with the TUI".
 TOOLBAR: tuple = (
     "refresh",
     "scan",
@@ -90,6 +93,7 @@ TOOLBAR: tuple = (
     None,
     "tag",
     "untag",
+    "autotag",
     "delete",
     None,
     "sort_files",
@@ -180,6 +184,10 @@ class MainWindow(QMainWindow):
     ROLE_SOURCE = Qt.ItemDataRole.UserRole + 1
     ROLE_MTIME = Qt.ItemDataRole.UserRole + 2
     ROLE_FILE_ID = Qt.ItemDataRole.UserRole + 3
+
+    #: A message that must outlive the next refresh. Set through _say(), read by
+    #: _update_status(), cleared when the user asks for something new.
+    _notice: str | None = None
 
     def __init__(self, repo, db_path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -411,6 +419,7 @@ class MainWindow(QMainWindow):
     def run_command(self, cmd: str) -> None:
         """Run a command. The table is the TUI's bindings and palette, plus untag."""
         logger.info("palette: %s", cmd)
+        self._notice = None  # a new action replaces whatever was on the line
         handlers = {
             # the one command that re-reads the disk: see _refresh's `panel`
             "refresh": partial(self._refresh, panel=True),
@@ -418,6 +427,7 @@ class MainWindow(QMainWindow):
             "search": self._search_query,
             "tag": self._tag_selected,
             "untag": self._untag_selected,
+            "autotag": self._autotag,
             "delete": self._delete_tag,
             "sort_files": self._sort,
             "init_db": self._init_db,
@@ -613,21 +623,38 @@ class MainWindow(QMainWindow):
         item.setToolTip(self._file_tooltip(item, _reason_text(result.reason)))
 
     def _update_status(self) -> None:
-        """Refresh the status bar: current view and how much is selected."""
+        """Refresh the status bar: current view, selection count, or a notice.
+
+        A notice wins. This runs after almost every action - a listing, a selection, a
+        refresh - so anything written with setText() alone survives about one poll.
+        """
         if self._search is not None:
             where = _("Search: {query}").format(query=self._search)
         else:
             where = self._vpath
         self.statusBar().showMessage(f"{where} — {self.grid.count()}")
-        if self._selection:
+        if self._notice is not None:
+            self._status_label.setText(self._notice)
+        elif self._selection:
             self._status_label.setText(f"{_('Selected:')} {len(self._selection)}")
         else:
             self._status_label.setText(_("No selection"))
 
+    def _say(self, text: str) -> None:
+        """Show a message and keep it until the user asks for something else.
+
+        Written through `_notice` so the next `_update_status()` cannot wipe it. That
+        is what happened to "Error: database is locked": the poll's refresh replaced
+        it with "No selection" about a second and a half later, so the message was
+        technically shown and practically never read.
+        """
+        self._notice = text
+        self._status_label.setText(text)
+
     def _show_error(self, path: str, error: Exception) -> None:
         """A listing that failed must be visible, never a silently empty grid."""
         logger.warning("cannot list %s: %s", path, error)
-        self._status_label.setText(_("Cannot open {path}: {error}").format(path=path, error=error))
+        self._say(_("Cannot open {path}: {error}").format(path=path, error=error))
 
     # ---------- commands ----------
 
@@ -675,6 +702,47 @@ class MainWindow(QMainWindow):
             self._repo.remove_tag(file_id, name.strip())
         self._refresh()
 
+    def _autotag(self) -> None:
+        """Apply the auto-tagging rules to the whole library, off the GUI thread.
+
+        The rules live in a file, so this is the same work `meret autotag` does - the
+        window only decides when. No `only_untagged` override and no `dry_run`: the
+        config decides, exactly as it does for the CLI, so one file drives both.
+
+        The poll is stopped for the duration, like a scan: the run commits the whole
+        time, and a refresh every 1.5 s would rebuild the tree and the grid underneath
+        it. The task is sticky, so browsing during a long run cannot swallow its end.
+        """
+        tagger = AutoTagger.from_config()
+        if not tagger.rules:
+            self._status_label.setText(
+                _("No auto-tagging rules: set autotag.rules_file or pass --rules on the CLI")
+            )
+            return
+
+        self._status_label.setText(_("Tagging..."))
+        self._poll.stop()
+
+        def done(stats: dict) -> None:
+            self._status_label.setText(
+                _("Tagged: {files} files, {tags} tags").format(
+                    files=stats["changed"], tags=stats["tags"]
+                )
+            )
+            # the run itself was the change: re-baseline, so the first poll after it
+            # does not refresh a second time on data the refresh below already read
+            self._version = None
+            self._refresh()
+            self._poll.start()
+
+        def failed(error: Exception) -> None:
+            logger.warning("autotag failed: %s", error)
+            self._status_label.setText(_("Error: {error}").format(error=error))
+            self._version = None
+            self._poll.start()
+
+        self._tasks.run(tagger.run, on_done=done, on_failed=failed, args=(self._repo,), sticky=True)
+
     def _delete_tag(self) -> None:
         """Delete the tag selected in the tree. Its children move up one level."""
         item = self.tags.currentItem()
@@ -721,7 +789,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_scan_done(self, _stats: dict) -> None:
-        self._status_label.setText(_("Scan complete!"))
+        self._say(_("Scan complete!"))
         # The scan itself was the change: re-baseline, so the first poll after it
         # does not refresh a second time on data the refresh below already read
         self._version = None
@@ -730,7 +798,7 @@ class MainWindow(QMainWindow):
 
     def _on_scan_failed(self, error: Exception) -> None:
         logger.warning("scan failed: %s", error)
-        self._status_label.setText(_("Error: {error}").format(error=error))
+        self._say(_("Error: {error}").format(error=error))
         self._version = None
         self._poll.start()
 
@@ -871,7 +939,7 @@ class MainWindow(QMainWindow):
         The old database stays in place: nothing was swapped yet.
         """
         logger.warning("cannot switch database: %s", error)
-        self._status_label.setText(_("Error: {error}").format(error=error))
+        self._say(_("Error: {error}").format(error=error))
 
     def _open_db(self, path: Path):
         """Open a repository, waiting out a lock left by a task in flight.
@@ -1079,7 +1147,7 @@ class MainWindow(QMainWindow):
         self._tasks.run(self._repo.get_stats, on_done=self._on_stats)
 
     def _on_stats(self, stats: dict) -> None:
-        self._status_label.setText(
+        self._say(
             _("Files: {files}, tags: {tags}").format(
                 files=stats.get("total_files", 0), tags=stats.get("total_tags", 0)
             )
@@ -1095,7 +1163,7 @@ class MainWindow(QMainWindow):
         self._tasks.run(self._repo.prune_orphan_tags, on_done=self._on_pruned)
 
     def _on_pruned(self, removed: int) -> None:
-        self._status_label.setText(_("Tags deleted: {n}").format(n=removed))
+        self._say(_("Tags deleted: {n}").format(n=removed))
         self._refresh()
 
     def _mount(self) -> None:
@@ -1123,6 +1191,20 @@ class MainWindow(QMainWindow):
         point = point.strip()
         self._run(self._cli("umount", point, with_db=False))
         self._status_label.setText(_("Unmounted {path}").format(path=point))
+
+    def _on_umount_done(self, point: str, result: tuple[int, str]) -> None:
+        """Say what actually happened.
+
+        The old code announced "Unmounted" before the command returned, so an unmount
+        that found nothing looked like a success. The CLI exits 1 with "Nothing is
+        mounted at ..." and that sentence is the honest answer.
+        """
+        code, message = result
+        if code == 0:
+            self._say(_("Unmounted {path}").format(path=point))
+            return
+        logger.info("umount %s: exit %s: %s", point, code, message)
+        self._say(message or _("Nothing is mounted at {path}").format(path=point))
 
     def _spawn_cli(self, *args: str) -> None:
         """Run the CLI without waiting - a mount lives until it is unmounted."""

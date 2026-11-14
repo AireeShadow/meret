@@ -7,6 +7,47 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.4\] — 2026-11-15
+
+### Added
+
+- **`autotag` in both front-ends.** A toolbar button, a menu entry, the palette and
+  `Ctrl+Shift+A` in the window; `a` and a palette row in the TUI. The TUI shells out
+  to `meret autotag` instead of importing `AutoTagger`, the same way `scan` and
+  `mount` do: the rules and the config already live in the CLI, and a second path to
+  the same policy is a second place for it to drift. The window runs it on the task
+  pool with the poll stopped, and reports the run's own counters.
+- **Default auto-tagging rules ship with meret** (`meret/core/rules/default.toml`,
+  nine rules): kind, format, orientation, two resolution buckets, year, camera make,
+  long video, screenshot. Used only when neither `autotag.rules_file` nor `--rules`
+  names a file, so a fresh install does something instead of printing "no rules". A
+  configured file that is missing stays missing, with a warning — falling back to a
+  default policy would tag a library nobody asked it to tag.
+- `"autotag": ("tags", "sparkles", "wand-sparkles")` in `scripts/fetch_icons.py`, so
+  the glyph is vendored as `autotag.svg` and `prune()` keeps it. Without a file the
+  button still works: `command_icon()` falls back to a tile with the initial.
+- `tests/test_autotag.py::test_the_shipped_rules_parse_and_tag_a_photo`, with staged
+  assertions: "no tags" says nothing about whether the file failed to parse, the rules
+  failed to match, or the template rendered empty.
+
+### Fixed
+
+- **Messages on the status line survived about one and a half seconds.** `_on_db_failed`
+  wrote "Error: database is locked" with `setText()`, and the poll's next refresh
+  called `_update_status()`, which rewrote the line to "No selection" — the message
+  was technically shown and practically never read. `_say()` now stores a notice that
+  `_update_status()` prefers, and `run_command()` clears it, so a message lives until
+  the user asks for something else. The same bug hit `Scan complete!`,
+  `Tags deleted: N`, the statistics line and the `umount` result; all four go through
+  `_say()` now.
+
+### Changed
+
+- `meret/cli/tui.py` gains `action_autotag`, the binding, the palette row and a help
+  line. `tests/gui/test_commands.py` is strict again: the GUI and the TUI command
+  tables match one to one, and `untag` stays the only exception (the TUI lists it but
+  never wires it up).
+
 ## \[0.9.3\] — 2026-11-15
 
 ### Added
