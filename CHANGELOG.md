@@ -7,6 +7,59 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.3\] — 2026-11-15
+
+### Added
+
+- **`--debug <name>[,<name>]` replaces the diagnostic environment variables.**
+  `meret --debug watchdog,watch_fs gui` does what `MERET_WATCHDOG` and
+  `MERET_WATCH_FS` did, except a misspelled name is a command-line error listing the
+  real ones instead of a silent no-op — which is what a misspelled environment
+  variable always was. Names: `watchdog`, `watch_fs`, `settings_modeless`,
+  `media_log`, `no_tooltips`. The environment is still read as a fallback, so an
+  existing script keeps working; the flag wins when both are present.
+  `meret/core/debug.py` holds the registry, `parse()` and `enabled()`.
+- `meret/gui/drives.py`: the drive letters, read from `GetLogicalDrives()`.
+
+### Changed
+
+- **`meret/gui/app.py` is split.** `RealFsPanel` → `gui/fs_panel.py`, `TagTree` →
+  `gui/tag_tree.py`, the traced application and the media-log switch →
+  `gui/diagnostics.py`, the drive letters → `gui/drives.py`. `app.py` keeps the window
+  and the entry point. Nothing moved changes behaviour, but the split is what made the
+  bug below findable: the trace finally named a file instead of a 1978-line module.
+- The diagnostic switches are read through `debug.enabled()` instead of
+  `os.environ.get()` at each call site, so a switch has one spelling and one place to
+  look when it does not seem to work.
+
+### Fixed
+
+- **Enumerating or probing drives could take the process down, not just slow it.**
+  `QDir.drives()` builds a `QFileInfo` per drive, and on a disconnected mapped drive
+  the volume query faults inside the network provider: an access violation below the
+  level where Python can raise, so no `except` clause and no lock helps. Probing the
+  drives first (a thread each, `os.path.exists()`, later `GetDriveTypeW()`) crashed
+  the suite three times — the last two from the same call, and one of them on the GUI
+  thread, inside `QDir.drives()` itself. The letters now come from
+  `GetLogicalDrives()`, a bitmask read from the mount manager: no drive is opened, no
+  volume is queried, and a dead drive costs nothing until someone selects it.
+- `ctypes.windll.kernel32.GetDriveTypeW` is bound once at import with explicit
+  `argtypes`/`restype`, and the panel no longer reaches ctypes from more than one
+  thread. Two probes entering `windll`'s lazy loader at the same time was an access
+  violation of its own — the trace pointed straight at that line.
+- `RealFsPanel` no longer crashes when `setRootPath()` answers with `None`: a test
+  double that returns nothing used to reach `setRootIndex()` and raise `TypeError`.
+
+### Removed
+
+- The drive probe: `_probe_drives`, `_probe_drive`, `_reachable`, `_probing`,
+  `drive_probed`, and the four tests that described them. It was the only way to grey
+  out a dead drive in the selector, and it was also the only native call in the GUI
+  that could kill the process. The `Not reachable` locale string went with it.
+- `tests/gui/test_real_panel.py` tests that patched `app.threading` or `app.QDir` now
+  patch `fs_panel` — a monkeypatch has to target the module that *looks the name up*,
+  not the one that used to define it.
+
 ## \[0.9.2\] — 2026-11-14
 
 ### Fixed

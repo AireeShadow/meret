@@ -242,7 +242,7 @@ def test_every_control_glyph_is_vendored():
 
 def test_the_media_backend_chatter_is_off_by_default(monkeypatch):
     """A window has no console: the backend's start-up lines are noise there."""
-    from meret.gui.app import QUIET_MEDIA_RULES, quiet_media_logs
+    from meret.gui.diagnostics import QUIET_MEDIA_RULES, quiet_media_logs
 
     monkeypatch.delenv("MERET_MEDIA_LOG", raising=False)
     monkeypatch.delenv("QT_LOGGING_RULES", raising=False)

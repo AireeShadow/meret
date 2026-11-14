@@ -32,6 +32,9 @@ from meret.core.logger import (
 from meret.core.models import Tag
 from meret.core.repository import AbstractRepository
 from meret.core.autotag import AutoTagger
+from meret.core.debug import names as debug_names
+from meret.core.debug import parse as parse_debug
+from meret.core.debug import set_enabled as set_debug_flags
 
 
 def _language_in(args: Sequence[str]) -> str | None:
@@ -132,6 +135,11 @@ def main(
     ctx: typer.Context,
     verbose: bool = typer.Option(False, "--verbose", "-v"),
     log_level: str | None = typer.Option(None, "--log-level"),
+    debug: str | None = typer.Option(
+        None,
+        "--debug",
+        help=_("Diagnostics to switch on: {names}").format(names=", ".join(debug_names())),
+    ),
     language: str | None = typer.Option(
         None,
         "--lang",
@@ -146,6 +154,12 @@ def main(
         raise typer.BadParameter(str(e), param_hint="--log-level") from e
 
     log_uncaught_exceptions()
+
+    # Before anything reads a flag: the GUI reads them all in its constructors
+    try:
+        set_debug_flags(parse_debug(debug))
+    except ValueError as e:
+        raise typer.BadParameter(str(e), param_hint="--debug") from e
 
     # Set locale early
     lang = set_locale(language or get_config().get("locale.language")).language

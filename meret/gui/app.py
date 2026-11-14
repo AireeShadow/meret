@@ -9,28 +9,24 @@ Mounting and unmounting shell out to `meret mount` / `meret umount` instead of
 importing a backend, so opening a window never drags FUSE or WinFsp in.
 """
 
-import contextlib
+import os
 import faulthandler
 import gc
 import logging
-import os
 import sqlite3
 import subprocess
 import sys
-import threading
 import time
-from pathlib import Path
 from functools import partial
+from pathlib import Path
 
-from PySide6.QtCore import QDir, QCoreApplication, QModelIndex, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QCoreApplication, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QComboBox,
     QDialog,
     QFileDialog,
-    QFileSystemModel,
     QGroupBox,
     QInputDialog,
     QLabel,
@@ -43,15 +39,13 @@ from PySide6.QtWidgets import (
     QStyle,
     QTabWidget,
     QToolBar,
-    QTreeView,
-    QTreeWidget,
-    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from meret.core import tagpaths
 from meret.core.config import get_config
+from meret.core.debug import enabled
 from meret.core.indexer import Indexer
 from meret.core.locale import _
 from meret.core.models import FileEntry, FileType
@@ -64,10 +58,14 @@ from meret.gui.commands import (
     menu_table,
     short_label,
 )
+from meret.gui.diagnostics import TracedApplication, quiet_media_logs
+from meret.gui.fs_panel import RealFsPanel
 from meret.gui.settings import SettingsDialog, apply_settings
+from meret.gui.tag_tree import TagTree
 from meret.gui.thumbnails import Reason, Thumbnail, ThumbnailCache
 from meret.gui.workers import TaskRunner
 from meret.gui.viewer import ViewerView
+from meret.gui.drives import drive_roots
 from meret.vfs.tree import Node, VirtualTree
 
 logger = logging.getLogger(__name__)
@@ -139,24 +137,6 @@ _DISABLED_PALETTE = {
     "HighlightedText": "#9aa0a6",
 }
 
-#: Qt logging rules that keep the FFmpeg backend quiet. It announces its version, its
-#: codecs and every misdetection on stderr, which for a window with no console is noise
-#: in whatever terminal started it. Warnings and errors stay: a file that will not open
-#: is still worth reading. MERET_MEDIA_LOG=1 turns the whole category back on.
-QUIET_MEDIA_RULES = "qt.multimedia.ffmpeg*.debug=false;qt.multimedia.ffmpeg*.info=false"
-
-
-def quiet_media_logs() -> None:
-    """Silence the media backend before Qt loads it.
-
-    QT_LOGGING_RULES is read when the application is created, so this has to run
-    before QApplication - a rule set afterwards misses the plugin's own start-up
-    lines. A value already in the environment is kept and ours is appended to it.
-    """
-    rule = "qt.multimedia.*=true" if os.environ.get("MERET_MEDIA_LOG") else QUIET_MEDIA_RULES
-    existing = os.environ.get("QT_LOGGING_RULES", "")
-    os.environ["QT_LOGGING_RULES"] = f"{existing};{rule}" if existing else rule
-
 
 def _apply_theme(app: QCoreApplication | None, theme: str) -> None:
     """`system` keeps the platform look; `dark` sets a Fusion palette.
@@ -191,436 +171,6 @@ def _reason_text(reason: str) -> str:
         Reason.NO_DECODER: _("No preview for this file type"),
     }
     return table.get(reason, "")
-
-
-class TagTree(QTreeWidget):
-    """The tag hierarchy as folders, straight out of the virtual tree.
-
-    Children are read only when a row is expanded - and off the GUI thread:
-    listdir can rebuild the whole snapshot in the repository, so a synchronous
-    call on a library with thousands of tags freezes the window mid-click.
-
-    The tree keeps its own generation, so a listing still on its way when the tree
-    is rebuilt never touches a row that is already gone.
-    """
-
-    tag_selected = Signal(str)
-    FILLED = Qt.ItemDataRole.UserRole + 10
-    ROLE_TAG_ID = Qt.ItemDataRole.UserRole + 11
-    LOADING = Qt.ItemDataRole.UserRole + 12
-
-    def __init__(
-        self, tree: VirtualTree | None, tasks: TaskRunner, parent: QWidget | None = None
-    ) -> None:
-        super().__init__(parent)
-        # None only while a database switch is in the air
-        self._tree: VirtualTree | None = tree
-        self._tasks = tasks
-        self._generation = 0
-        self.setHeaderHidden(True)
-        self.itemExpanded.connect(self._on_expanded)
-        self.currentItemChanged.connect(self._on_current)
-
-    def set_tree(self, tree: VirtualTree | None) -> None:
-        """Point the panel at another database's tree, or at nothing for a moment.
-
-        None is not a detail: the old tree holds the old repository, and a database
-        file cannot be deleted while a connection to it is still open.
-        """
-        self._tree = tree
-        if tree is not None:
-            self.reload()
-
-    def reload(self) -> None:
-        """Rebuild from the root. Anything in flight for the old rows is dropped."""
-        self._generation += 1
-        self.clear()
-        self._fill(self.invisibleRootItem(), "/", self._generation)
-
-    def _fill(self, item: QTreeWidgetItem, vpath: str, generation: int) -> None:
-        """Queue a listing for `item`; the row fills itself when it lands.
-
-        Sticky: the folder generation is bumped on every navigation, and a tag
-        listing must not be dropped just because the grid re-read a folder.
-
-        Nested defs, not lambdas: TaskRunner.run takes Callable[..., Any], so mypy
-        has nothing to infer a lambda's arguments from.
-        """
-        assert self._tree is not None
-        item.setData(0, self.LOADING, True)
-
-        def done(nodes: list[Node]) -> None:
-            self._filled(item, nodes, generation)
-
-        def failed(error: Exception) -> None:
-            self._failed(item, error, generation)
-
-        self._tasks.run(
-            self._tree.listdir, on_done=done, on_failed=failed, args=(vpath,), sticky=True
-        )
-
-    def _filled(self, item: QTreeWidgetItem, nodes: list[Node], generation: int) -> None:
-        """Replace the placeholder with the real subfolders."""
-        if generation != self._generation:
-            return  # the tree was rebuilt; this row is gone
-        item.takeChildren()
-        for node in nodes:
-            if not node.is_dir:
-                continue
-            child = QTreeWidgetItem([node.name])
-            child.setData(0, Qt.ItemDataRole.UserRole, node.vpath)
-            child.setData(0, self.ROLE_TAG_ID, node.tag_id)
-            item.addChild(child)
-            child.addChild(QTreeWidgetItem([""]))
-        item.setData(0, self.LOADING, False)
-        item.setData(0, self.FILLED, True)
-
-    def _failed(self, item: QTreeWidgetItem, error: Exception, generation: int) -> None:
-        """A row that failed must say so, never look empty."""
-        if generation != self._generation:
-            return
-        logger.warning("tag tree: cannot list: %s", error)
-        item.takeChildren()
-        item.addChild(QTreeWidgetItem([str(error)]))
-        item.setData(0, self.LOADING, False)
-        item.setData(0, self.FILLED, True)
-
-    def _on_expanded(self, item: QTreeWidgetItem) -> None:
-        if item.data(0, self.FILLED) or item.data(0, self.LOADING):
-            return
-        item.takeChildren()
-        item.addChild(QTreeWidgetItem(["…"]))
-        self._fill(item, item.data(0, Qt.ItemDataRole.UserRole), self._generation)
-
-    def _on_current(self, current: QTreeWidgetItem | None, _previous) -> None:
-        if current is not None:
-            self.tag_selected.emit(current.data(0, Qt.ItemDataRole.UserRole) or "/")
-
-
-class RealFsPanel(QTreeView):
-    """The real filesystem, one root at a time.
-
-    Qt's own model, so nothing here needs a database connection or a pool thread.
-    The view is rooted at ONE folder, never at the model's own root: that root is
-    the drive list, and building it asks Windows for every drive's label and free
-    space - a dead mapped drive answers after ~5.5 s, on the GUI thread, in a single
-    event. The window offers the drives itself, from names only, and a drive whose
-    probe did not answer is disabled there, so a dead drive is never touched.
-    """
-
-    path_activated = Signal(str)
-    # A drive answered its probe; emitted from the probe's thread, handled on ours
-    _drive_ready = Signal(str, bool)
-    #: The same answer, for the window's drive selector. A drive that did not answer
-    #: must not be selectable: selecting it is 5.5 s of frozen window.
-    drive_probed = Signal(str, bool)
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._started = time.monotonic()
-        self._probing: set[str] = set()  # drives whose probe has not answered yet
-        # Guard against a nested event loop starting a second listing on top of one
-        # that is still running: that is how the queue stops draining.
-        self._refreshing = False
-        # The one folder the panel is rooted at. Never "" - see the class docstring.
-        self._root_path = QDir.homePath()
-        self._model = QFileSystemModel(self)
-        self._model.setFilter(QDir.Filter.AllDirs | QDir.Filter.Files | QDir.Filter.NoDotAndDotDot)
-        # The watcher is the freeze: QFileSystemModel watches every directory it has
-        # ever listed, and a change anywhere in one of them makes it re-read that
-        # directory on the GUI thread with a stat per entry - 6.4 seconds in a single
-        # event, measured. MERET_WATCH_FS=1 skips the options and leaves the stock
-        # model, i.e. exactly what the panel did before the freeze was found.
-        if not os.environ.get("MERET_WATCH_FS"):
-            self._model.setOption(QFileSystemModel.Option.DontWatchForChanges, True)
-            self._model.setOption(QFileSystemModel.Option.DontResolveSymlinks, True)
-            # A directory icon is an SHGetFileInfo call per entry on Windows
-            self._model.setOption(QFileSystemModel.Option.DontUseCustomDirectoryIcons, True)
-        self.setModel(self._model)
-        self.setHeaderHidden(True)
-        # Rows are one line high and never wrap, so the view can skip asking every
-        # item for its height - which matters with thousands of rows under a root
-        self.setUniformRowHeights(True)
-        # Sortable, even though the hidden header cannot be clicked: sortByColumn
-        # needs the view in the sorting mode to keep the indicator and the model
-        # in step
-        self.setSortingEnabled(True)
-        # ...which adopts the header's default indicator, descending: Z to A, and the
-        # drives from the last letter down. Name ascending is the window's first mode.
-        self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
-        for column in (1, 2, 3):  # size, type, date - the name column is enough
-            self.hideColumn(column)
-        self.doubleClicked.connect(self._on_double)
-        # Every listing is resolved on the GUI thread, so the cost of revealing a
-        # folder is the size of its ancestors. Naming them in the log beats guessing.
-        self._model.directoryLoaded.connect(self._log_loaded)
-        self._drive_ready.connect(self._add_drive)
-        self.show_drive(self._root_path)
-        self._probe_drives()
-        QTimer.singleShot(500, self._report_top)
-
-    def reveal(self, path: Path) -> bool:
-        """Show `path`: select it and scroll it into view, then return to the root.
-
-        Deliberately not index(path) alone: that one fetches with fetch=false and
-        hands back an invalid index for a folder that is cached but filtered out - a
-        hidden one such as AppData. So index() is tried first and setRootPath() is
-        the fallback for a path the model has not listed yet.
-
-        A path that is not on disk is not revealed. The check is on the path itself,
-        not on fileInfo(index): setRootPath() on a missing path hands back the node of
-        the nearest existing ancestor, so fileInfo(index).exists() answers about the
-        parent and says True. The stat is paid only when re-rooting is needed, which
-        is also the only case where the model has not looked at the path already.
-
-        The root goes back to `_root_path`, never to the model's own root: that one
-        is the drive list, and building it costs seconds per dead mapped drive.
-        """
-        target = str(Path(path))
-        started = time.perf_counter()
-
-        index = self._model.index(target)
-        rerooted = not index.isValid()
-        if rerooted:
-            if not Path(target).exists():
-                return False
-            index = self._model.setRootPath(target)  # never listed: this lists it
-
-        # isinstance, not just isValid: a stub that returns None must not reach Qt
-        if not isinstance(index, QModelIndex) or not index.isValid():
-            if rerooted:
-                self._restore_top()
-            return False
-
-        self._expand_ancestors(index)
-        self.setCurrentIndex(index)
-        self.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
-        self._restore_top()
-
-        logger.info(
-            "revealed %s in %.0f ms%s; root=%r, view root valid=%s, rows=%d",
-            target,
-            (time.perf_counter() - started) * 1000,
-            " (listed)" if rerooted else "",
-            self._model.rootPath(),
-            self.rootIndex().isValid(),
-            self._model.rowCount(self.rootIndex()),
-        )
-        return True
-
-    def refresh(self) -> None:
-        """Re-read the current root from scratch.
-
-        Only the explicit `refresh` command asks for this: it costs a directory
-        listing with a stat per entry, on the GUI thread, so nothing that touches the
-        database may trigger it.
-
-        The re-entrancy guard is load-bearing. A nested event loop can deliver an
-        event while a listing is already in progress, and a second listing started on
-        top of the first is how the queue stops draining.
-        """
-        if self._refreshing:
-            logger.debug("refresh already in progress, not starting another")
-            return
-        self._refreshing = True
-        try:
-            self._restore_top(force=True)
-        finally:
-            self._refreshing = False
-        self._probe_drives()
-
-    # ---------- the drive list ----------
-
-    def _probe_drives(self) -> None:
-        """Get every reachable drive on screen now, not when Qt's listing is done.
-
-        Qt lists the drives on its own thread, but it stats each one and hands the
-        whole list over in one batch at the end. A mapped network drive that is not
-        connected takes Windows ~21 s to give up on, so for those 21 s every drive but
-        the one the home folder is on is missing - measured, and only when Windows has
-        not cached the failure yet, which is why it came and went.
-
-        So each drive gets a probe on its own thread (one dead drive blocks only its
-        own), and a drive that answers is added on the GUI thread through index(),
-        which creates its row at once: the stat is cached by then, so it is instant. A
-        dead drive simply keeps blocking its probe, and turns up with Qt's batch.
-        Plain threads, not the task pool: a probe can sit there for the full timeout.
-        """
-        for drive in QDir.drives():
-            path = drive.absolutePath()
-            if path in self._probing:
-                continue
-            self._probing.add(path)
-            threading.Thread(
-                target=self._probe_drive, args=(path,), name=f"probe {path}", daemon=True
-            ).start()
-
-    @staticmethod
-    def _reachable(path: str) -> bool:
-        """Blocks as long as the drive takes: ~21 s for a dead network drive."""
-        return os.path.exists(path)
-
-    def _probe_drive(self, path: str) -> None:
-        """Runs on the probe thread: touch the drive, report it if it answered."""
-        started = time.perf_counter()
-        reachable = self._reachable(path)
-        elapsed = time.perf_counter() - started
-        if elapsed > 1:
-            logger.info(
-                "drive %s took %.1f s to answer (%s)",
-                path,
-                elapsed,
-                "reachable" if reachable else "not reachable",
-            )
-        # the panel may have been closed while the drive was still thinking
-        with contextlib.suppress(RuntimeError):
-            self._drive_ready.emit(path, reachable)
-
-    def _add_drive(self, path: str, reachable: bool) -> None:
-        """GUI thread: a probe answered. Tell the window either way."""
-        self._probing.discard(path)  # a refresh may probe it again
-        with contextlib.suppress(RuntimeError):
-            self.drive_probed.emit(path, reachable)
-        if not reachable:
-            return
-        if self._model.index(path).isValid():
-            logger.debug("drive %s on screen after %.2f s", path, time.monotonic() - self._started)
-
-    def _log_loaded(self, path: str) -> None:
-        """Log a directory the gatherer finished, with the time since start.
-
-        A directory that shows up here a minute in is the stall: the GUI thread
-        resolves every entry of it with a stat, and the model's destructor waits for
-        the listing to end. %TEMP% is an ancestor of every pytest tmp_path.
-        """
-        try:
-            logger.info(
-                "filesystem loaded after %.1f s: %s",
-                time.monotonic() - self._started,
-                path or "<drives>",
-            )
-        except RuntimeError:
-            return
-
-    def _report_top(self) -> None:
-        """One line in the log: how many entries the panel is actually showing.
-
-        A singleShot outlives the widget it was started from, so the C++ object
-        behind self can already be gone by the time this runs - which is a failure
-        in whatever test happens to be pumping events at that moment, not here.
-        """
-        try:
-            logger.info("filesystem panel: %d entries at the top", self._model.rowCount())
-        except RuntimeError:
-            return
-
-    def _restore_top(self, force: bool = False) -> None:
-        """Put the model and the view back at the panel's root.
-
-        The root is one folder (`_root_path`), never the model's own root: that one
-        is the drive list, and building it asks Windows for every drive's label and
-        free space - ~5.5 s per dead mapped drive, on the GUI thread, in one event.
-        The drives live in the window's selector instead.
-
-        `force` steps through the parent first: setRootPath() with the path it
-        already has returns early, and that early return is the only thing stopping
-        a real re-read.
-        """
-        if force:
-            parent = str(Path(self._root_path).parent)
-            if parent == self._root_path:  # a drive root: nothing above it
-                parent = QDir.homePath()
-            self._model.setRootPath(parent)
-        index = self._model.setRootPath(self._root_path)
-        # isinstance, not just isValid: a stub that returns None must not reach Qt
-        if isinstance(index, QModelIndex):
-            self.setRootIndex(index)
-
-    def _expand_ancestors(self, index: QModelIndex) -> None:
-        """Expand every row above `index`, top down, so it is on screen.
-
-        A row that is already open is skipped. Expanding makes the model list a
-        directory, and the GUI thread resolves every entry of that listing with a
-        stat, so expanding an open row repeats the whole cost for nothing - and
-        %TEMP% alone is tens of thousands of entries.
-        """
-        chain: list[QModelIndex] = []
-        parent = index.parent()
-        while parent.isValid():
-            chain.append(parent)
-            parent = parent.parent()
-        for parent in reversed(chain):
-            if not self.isExpanded(parent):
-                self.expand(parent)
-
-    def path_of(self, index: QModelIndex) -> Path | None:
-        """The real path behind a row, or None for the invalid top index."""
-        if not index.isValid():
-            return None
-        return Path(self._model.filePath(index))
-
-    def current_path(self) -> Path | None:
-        return self.path_of(self.currentIndex())
-
-    def _on_double(self, index: QModelIndex) -> None:
-        path = self.path_of(index)
-        if path is not None:
-            self.path_activated.emit(str(path))
-
-    def show_filesystem(self) -> None:
-        """Show the panel's root again and drop the selection.
-
-        Named for what it used to do. The filesystem top is no longer a place this
-        panel goes: the drive list costs ~5.5 s per dead mapped drive on the GUI
-        thread, so the drives are the window's selector and the panel always shows
-        exactly one folder.
-        """
-        self._restore_top(force=True)
-        self.setCurrentIndex(QModelIndex())
-        logger.info(
-            "show_filesystem: root=%r, view root valid=%s, rows=%d",
-            self._model.rootPath(),
-            self.rootIndex().isValid(),
-            self._model.rowCount(self.rootIndex()),
-        )
-
-    def show_home(self) -> None:
-        """Root the model AND the view at the home folder.
-
-        `setRootPath()` first, not `index()`: with an empty root path the model's
-        root node is the drive list, and building that list asks Windows for every
-        drive's label and free space. A dead mapped drive answers after ~5.5 s, and
-        the whole delivery lands on the GUI thread - the 5.4 s event the watchdog
-        names `QFileSystemModel/QEvent`. `setRootPath(home)` makes the home folder
-        the root node itself, so the drive list is never built at all.
-
-        `index()` was the bug: it looks harmless, and it resolves the path through
-        the root node, which is exactly the drive list this method exists to avoid.
-        """
-        home = QDir.homePath()
-        index = self._model.setRootPath(home)
-        self.setRootIndex(index)
-        self.setCurrentIndex(QModelIndex())
-        logger.info(
-            "show_home: root=%r, view root valid=%s", self._model.rootPath(), index.isValid()
-        )
-
-    def show_drive(self, path: str) -> None:
-        """Root the model and the view at one folder or drive.
-
-        `setRootPath()` and nothing else: it makes the path the model's root node,
-        so the drive list is never built. `index(path)` looks equivalent and is not -
-        it resolves the path through the root node, which is the drive list.
-        """
-        if not path:
-            return
-        self._root_path = path
-        index = self._model.setRootPath(path)
-        # isinstance, not just isValid: a stub that returns None must not reach Qt
-        if isinstance(index, QModelIndex):
-            self.setRootIndex(index)
-        self.setCurrentIndex(QModelIndex())
-        logger.info("show_drive: %s (valid=%s)", path, index.isValid() if index else False)
 
 
 class MainWindow(QMainWindow):
@@ -707,17 +257,13 @@ class MainWindow(QMainWindow):
 
         fs_box = QGroupBox(_("Real Filesystem"), self)
         fs_layout = QVBoxLayout(fs_box)
-        # The drives come from us, not from the model: QDir.drives() is a list of
-        # names (GetLogicalDrives, instant), and _probe_drives already tests each one
-        # on its own thread. A drive that does not answer is disabled here, so the
-        # model is never pointed at it - which is the whole point, since its drive
-        # list costs ~5.5 s per dead drive.
+        # Letters from a bitmask, not from QDir.drives(): that one queries every
+        # volume, and a dead mapped drive faults inside the provider.
         self.drives = QComboBox(self)
         self.drives.addItem(str(Path.home()))
-        for drive in QDir.drives():
-            self.drives.addItem(drive.absolutePath())
+        for root in drive_roots():
+            self.drives.addItem(root)
         self.drives.currentTextChanged.connect(self.fs.show_drive)
-        self.fs.drive_probed.connect(self._on_drive_probed)
         fs_layout.addWidget(self.drives)
         fs_layout.addWidget(self.fs)
 
@@ -793,13 +339,12 @@ class MainWindow(QMainWindow):
         in the overflow menu is still reachable by its shortcut - and the palette
         is for discovery.
 
-        MERET_NO_TOOLTIPS=1 drops the tooltips for an A/B run. A QToolTip is a
+        --debug no_tooltips drops the tooltips for an A/B run. A QToolTip is a
         top-level QLabel, and it is the one widget that shows up in the watchdog
-        report right before the window stops answering: if the freeze goes away
-        without it, the tooltip path is the bug and the key belongs in the status
-        bar instead.
+        report right before a window stops answering: if a freeze goes away without
+        it, the tooltip path is the bug.
         """
-        tooltips = not os.environ.get("MERET_NO_TOOLTIPS")
+        tooltips = not enabled("no_tooltips")
         for command, description in command_table():
             shortcut = SHORTCUTS.get(command, "")
             action = QAction(description, self)
@@ -1426,11 +971,48 @@ class MainWindow(QMainWindow):
         in that same turn: the dialog ends up behind a window that modality has
         already blocked, and the app looks dead, because Qt drops every click on
         that window. Asking again once the show has settled is what keeps the dialog
-        in front. MERET_SETTINGS_MODELESS=1 removes native modality altogether, for
+        in front. --debug settings_modeless removes native modality altogether, for
         an A/B run.
         """
         manager = get_config()
         dialog = SettingsDialog(self)
+
+        def finished(result: int) -> None:
+            """The dialog is gone: let the poll run again and apply what was chosen."""
+            self._paused = False
+            self._pump(self._tasks.generation)  # the pause cut the chain in half
+            self._poll.start()
+            if result != QDialog.DialogCode.Accepted:
+                self._status_label.setText(_("Settings unchanged"))
+            else:
+                apply_settings(dialog.values())
+                self._apply_look()
+                self._status_label.setText(
+                    _("Settings saved to {path}").format(path=manager.config_path)
+                )
+            dialog.deleteLater()
+
+        def to_front() -> None:
+            """Re-ask for the foreground on the next turn of the loop."""
+            try:
+                dialog.raise_()
+                dialog.activateWindow()
+            except RuntimeError:
+                return  # already deleted: finished() ran and deleteLater() landed
+
+        dialog.finished.connect(finished)
+        self._poll.stop()  # no rebuilds underneath a modal window
+        self._paused = True  # and no thumbnail batches painting the grid under it
+
+        started = time.perf_counter()
+        if enabled("settings_modeless"):
+            dialog.setWindowModality(Qt.WindowModality.NonModal)
+            dialog.show()
+        else:
+            dialog.open()
+        logger.info("settings shown in %.0f ms", (time.perf_counter() - started) * 1000)
+
+        QTimer.singleShot(0, to_front)  # see the docstring
 
         def finished(result: int) -> None:
             """The dialog is gone: let the poll run again and apply what was chosen."""
@@ -1774,23 +1356,6 @@ class MainWindow(QMainWindow):
                 return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
-    def _on_drive_probed(self, path: str, reachable: bool) -> None:
-        """A drive that did not answer is not offered at all.
-
-        Not merely discouraged: a disabled entry cannot be selected, and the model
-        only ever stats the folder it is rooted at, so an unreachable drive costs
-        nothing for the whole session.
-        """
-        index = self.drives.findText(path)
-        if index < 0:
-            return
-        item = self.drives.model().item(index)
-        if item is None:
-            return
-        item.setEnabled(reachable)
-        if not reachable:
-            item.setToolTip(_("Not reachable"))
-
     # ---------- outside changes ----------
 
     def _check_version(self) -> None:
@@ -1817,144 +1382,16 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-class TracedApplication(QApplication):
-    """An application that counts events and names whatever floods them.
-
-    A freeze the suite cannot reproduce has two shapes, and they need opposite
-    fixes: the loop stops turning - one event never returns, or the window system
-    never hands the input over - or it turns far too fast, a layout or paint storm.
-    The rate tells them apart, and the per-receiver table names the widget that has
-    to be fixed.
-
-    The report goes to stderr through print(), never through logging: the CLI may
-    have pointed logging at a file, and a diagnostic that can be swallowed is worse
-    than none. It is printed by a daemon thread, so the output keeps coming even
-    when the GUI thread is the thing that is stuck - a frozen counter is the answer.
-    """
-
-    SLOW_MS = 150.0
-    REPORT_MS = 1000
-    TOP = 6
-
-    def __init__(self, argv: list[str]) -> None:
-        super().__init__(argv)
-        self._events = 0
-        self._worst = 0.0
-        self._worst_where = "-"
-        self._counts: dict[tuple, int] = {}
-        self._chains: dict[tuple, str] = {}
-        self._last_report = time.perf_counter()
-        self._text = ""
-        # The event the GUI thread is inside right now, and when it last finished
-        # one. A handler that never returns never reaches notify()'s finally, so
-        # these two are the only witnesses a permanent freeze can leave behind.
-        self._current = "-"
-        self._last_event_done = time.perf_counter()
-
-        self._beat = QTimer(self)
-        self._beat.setInterval(self.REPORT_MS)
-        self._beat.timeout.connect(self._report)
-        self._beat.start()
-
-        threading.Thread(target=self._watch, daemon=True).start()
-
-    def notify(self, receiver, event) -> bool:
-        """Time every event and count it per receiver, so a storm names itself."""
-        started = time.perf_counter()
-        # Read by the watchdog thread: the only witness when an event never returns
-        self._current = f"{type(receiver).__name__}/{type(event).__name__}"
-        try:
-            return super().notify(receiver, event)
-        finally:
-            self._current = "-"
-            self._last_event_done = time.perf_counter()
-            spent = (time.perf_counter() - started) * 1000
-            self._events += 1
-            pair = (type(receiver).__name__, type(event).__name__)
-            self._counts[pair] = self._counts.get(pair, 0) + 1
-            if pair not in self._chains:
-                self._chains[pair] = self._chain(receiver)
-            if spent > self._worst:
-                self._worst = spent
-                self._worst_where = f"{pair[0]}/{pair[1]}"
-            if spent >= self.SLOW_MS:
-                print(
-                    f"[watchdog] slow: {pair[1]} took {spent:.0f} ms in {self._chains[pair]}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-
-    @staticmethod
-    def _chain(receiver) -> str:
-        """The receiver and its ancestors: a busy widget has to name its window."""
-        names: list[str] = []
-        node = receiver
-        while node is not None and len(names) < 6:
-            names.append(type(node).__name__)
-            try:
-                node = node.parent() if hasattr(node, "parent") else None
-            except RuntimeError:
-                break  # the C++ object is already gone, e.g. a finished animation
-        return " < ".join(names)
-
-    def _report(self) -> None:
-        """Once a second, on the GUI thread: compose the line the thread prints."""
-        now = time.perf_counter()
-        gap = (now - self._last_report) * 1000
-        busiest = sorted(self._counts.items(), key=lambda item: item[1], reverse=True)
-        lines = [
-            (
-                f"{self._events} events/s | worst {self._worst:.0f} ms"
-                f" ({self._worst_where}) | tick gap {gap:.0f} ms"
-                f" | active {self._name_of(self.activeWindow())}"
-                f" | modal {self._name_of(self.activeModalWidget())}"
-                f" | shown {[type(w).__name__ for w in self.topLevelWidgets() if w.isVisible()]}"
-            )
-        ]
-        for pair, count in busiest[: self.TOP]:
-            lines.append(f"    {count:>8}  {pair[1]} in {self._chains[pair]}")
-        self._text = "\n".join(lines)
-
-        self._events = 0
-        self._worst = 0.0
-        self._worst_where = "-"
-        self._counts = {}
-        self._chains = {}
-        self._last_report = now
-
-    def _watch(self) -> None:
-        """A daemon thread: keep printing while the GUI thread cannot."""
-        while True:
-            time.sleep(self.REPORT_MS / 1000 * 2)
-            if self._text:
-                print(f"[watchdog]\n{self._text}", file=sys.stderr, flush=True)
-            # A handler that never returns never reaches notify()'s finally, so the
-            # event counter freezes and no "slow" line is ever printed - the freeze
-            # is silent exactly when it is worst. This line names it instead.
-            stuck_for = time.perf_counter() - self._last_event_done
-            if self._current != "-" and stuck_for > 2.0:
-                print(
-                    f"[watchdog] stuck for {stuck_for:.1f} s in: {self._current}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-
-    @staticmethod
-    def _name_of(widget) -> str:
-        """A widget's class, or a dash when there is none."""
-        return "-" if widget is None else type(widget).__name__
-
-
 def run_gui(db_path: Path, argv: list[str] | None = None) -> int:
     """Open the database, show the window, run the event loop. Returns the exit code.
 
-    With MERET_WATCHDOG=1 the run is traced: every thread's Python stack is dumped
+    With --debug watchdog the run is traced: every thread's Python stack is dumped
     every three seconds, and the application counts and times every event. A freeze
     the suite cannot reproduce leaves no other trace, and "the loop stopped" and
     "the loop is spinning" need opposite fixes - the trace tells them apart.
     """
     quiet_media_logs()
-    watch = bool(os.environ.get("MERET_WATCHDOG"))
+    watch = enabled("watchdog")
     if watch:
         faulthandler.dump_traceback_later(3.0, repeat=True)
 

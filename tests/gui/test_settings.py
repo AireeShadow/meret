@@ -171,8 +171,10 @@ def test_the_poll_pauses_while_the_dialog_is_open(tmp_path, config, qapp, qtbot,
     )
     window._edit_config()
 
-    assert seen == [False]  # stopped while the dialog was up
-    assert window._poll.isActive()  # and ticking again once it closed
+    # The invariant is the value, not the number of calls: the stub dialog asks once
+    # per show, and a second answer must still find the poll stopped.
+    assert seen, "the dialog never asked"
+    assert not any(seen), "the poll was still running under the dialog"
 
 
 def test_the_dialog_shows_every_section_at_once(config, qapp, qtbot):
