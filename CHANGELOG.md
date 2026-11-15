@@ -7,6 +7,35 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.7\] — 2026-11-15
+
+### Added
+
+- **`meret/gui/window/contents.py` — `ContentsMixin`.** The browser left `app.py`:
+  `_refresh`, `open_folder`, `_show_nodes`, `_add_file_item`, `_pump`, the icon and
+  tooltip helpers, `_update_status`, `_say`, `_show_error`, the search pair
+  (`_run_search`, `_show_files`), the preview pair (`_show_preview`, `_set_preview`),
+  the opening helpers and the viewer stepping. `BATCH`, `PREVIEW` and `_reason_text`
+  went with them — the two constants and the tooltip table were only ever read here.
+
+### Changed
+
+- `MainWindow` is now
+  `class MainWindow(WindowBase, MountMixin, PollMixin, DatabaseMixin, ContentsMixin)`.
+  What is left in `app.py` is the layout and the commands — the last two mixins.
+- `_step_file` and `_on_real_activated` report through `_say()` instead of
+  `_status_label.setText()`. "End of the folder" and "File is not in the database"
+  are read exactly when nothing else is happening, and they used to be wiped by the
+  next status refresh — the same bug `_say()` was written for, in two more places.
+
+### Fixed
+
+- `_reason_text` was left behind in `app.py` after the move, and `Reason` had already
+  been dropped from that module's imports: the function raised `NameError` on the
+  first file without a preview. A move is not done until the old copy is deleted, and
+  `ruff` names the leftover as `F821 Undefined name` — which is why the lint step goes
+  before the tests, not after them.
+
 ## \[0.9.6\] — 2026-11-15
 
 ### Added
