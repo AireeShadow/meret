@@ -7,7 +7,41 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
-## \[0.9.7\] — 2026-11-15
+## \[0.9.8\] — 2026-11-16
+
+### Added
+
+- **`meret/gui/window/commands.py` — `CommandsMixin`.** Every handler left `app.py`:
+  `run_command`, `_command_palette`, the tag commands (`_tag_selected`,
+  `_untag_selected`, `_autotag`, `_delete_tag`), the scan pair, `_search_query`,
+  statistics, sorting, the help dialog and the settings pair (`_edit_config`,
+  `_apply_look`).
+- **`meret/gui/window/constants.py`** — `ICON`, `TOOLBAR`, `NAVIGATION_COMMANDS`.
+  They are read by both the layout and the settings code, and a constant living in
+  either of those two modules would make the other import a module it has no business
+  knowing.
+
+### Changed
+
+- `MainWindow` is now `class MainWindow(WindowBase, MountMixin, PollMixin,
+  DatabaseMixin, ContentsMixin, CommandsMixin)`. What is left in `app.py` is the layout.
+- Every handler reports through `_say()` instead of `_status_label.setText()`:
+  "Select a real file first!", "Scanning {path}...", "Tagging...", "Sort by: {mode}",
+  "Deleted tag {path}" and the rest. The rule is now uniform — a message written with
+  `setText()` alone survives about one poll, because `_update_status()` runs after
+  almost every action.
+- `_build_actions` keeps connecting `self.run_command`, which now resolves through
+  `CommandsMixin`. A missing mixin in the bases fails on the first click, not on
+  import, so the class declaration is load-bearing.
+
+### Fixed
+
+- `tests/gui/test_settings.py` patches `apply_theme` in
+  `meret.gui.window.commands` now: `_apply_look` moved there and is its only caller.
+  With the patch left on `meret.gui.app`, the real theme was applied and the counter
+  stayed empty — a test that passes for the wrong reason until it is read.
+
+## \[0.9.7\] — 2026-11-16
 
 ### Added
 

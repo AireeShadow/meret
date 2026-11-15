@@ -12,7 +12,6 @@ importing a backend, so opening a window never drags FUSE or WinFsp in.
 import faulthandler
 import logging
 import sys
-import time
 from functools import partial
 from pathlib import Path
 
@@ -21,12 +20,9 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
-    QDialog,
     QGroupBox,
-    QInputDialog,
     QLabel,
     QListWidget,
-    QMessageBox,
     QSplitter,
     QStatusBar,
     QTabWidget,
@@ -35,28 +31,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from meret.core import tagpaths
-from meret.core.autotag import AutoTagger
-from meret.core.config import get_config
 from meret.core.debug import enabled
-from meret.core.indexer import Indexer
 from meret.core.locale import _
 from meret.core.sqlite_repo import SQLiteRepository
 from meret.gui import icons
-from meret.gui.commands import SHORTCUTS, CommandPalette, command_table, menu_table, short_label
+from meret.gui.commands import SHORTCUTS, command_table, menu_table, short_label
 from meret.gui.diagnostics import TracedApplication, quiet_media_logs
 from meret.gui.drives import drive_roots
 from meret.gui.fs_panel import RealFsPanel
-from meret.gui.settings import SettingsDialog, apply_settings
 from meret.gui.tag_tree import TagTree
-from meret.gui.theme import apply_theme
-from meret.gui.thumbnails import ThumbnailCache
 from meret.gui.viewer import ViewerView
 from meret.gui.window.base import WindowBase
 from meret.gui.window.contents import ContentsMixin
 from meret.gui.window.databases import DatabaseMixin
 from meret.gui.window.mounts import MountMixin
 from meret.gui.window.polling import PollMixin
+from meret.gui.window.commands import CommandsMixin
+from meret.gui.window.constants import ICON, TOOLBAR
 
 logger = logging.getLogger(__name__)
 
@@ -67,51 +58,13 @@ POLL_MS = 1500
 #: Preview size, in pixels.
 PREVIEW = 512
 
-#: Toolbar icon size. Small enough that all 21 commands fit without Qt hiding any
-#: behind its ">>" overflow button, which reads as missing commands.
-ICON = 28
 
-#: Toolbar buttons, in order. None is a separator. This is every command: a panel
-#: that hides half of them is not "one to one with the TUI".
-#: Toolbar buttons, in order. None is a separator. This is every command: a panel
-#: that hides half of them is not "one to one with the TUI".
-TOOLBAR: tuple = (
-    "refresh",
-    "scan",
-    "search",
-    None,
-    "tag",
-    "untag",
-    "autotag",
-    "delete",
-    None,
-    "sort_files",
-    None,
-    "init_db",
-    "config",
-    "stats",
-    "tree",
-    "prune",
-    None,
-    "mount",
-    "umount",
-    None,
-    "command_palette",
-    "help",
-    None,
-    "quit",
-)
-
-#: The help dialog groups these under Navigation, as the TUI's help does.
-NAVIGATION_COMMANDS = ("sort_files",)
-
-
-class MainWindow(WindowBase, MountMixin, PollMixin, DatabaseMixin, ContentsMixin):
+class MainWindow(WindowBase, MountMixin, PollMixin, DatabaseMixin, ContentsMixin, CommandsMixin):
     """Browse the tag tree, the files under one tag, and a preview.
 
-    The state and the lifetime are WindowBase's, the shell-outs MountMixin's, the poll
-    PollMixin's, the database switch DatabaseMixin's and the browser ContentsMixin's;
-    what is left here is the layout and the commands, which are the last two mixins.
+    The state and the lifetime are WindowBase's; the shell-outs, the poll, the database
+    switch, the browser and the commands are one mixin each. What is left here is the
+    layout, which is the last mixin to move.
     """
 
     def __init__(self, repo, db_path, parent: QWidget | None = None) -> None:
@@ -282,289 +235,6 @@ class MainWindow(WindowBase, MountMixin, PollMixin, DatabaseMixin, ContentsMixin
                 else:
                     menu.addAction(self._actions[command])
 
-    # ---------- commands from the palette ----------
-
-    def _command_palette(self) -> None:
-        """The TUI's ':' palette, with the same commands and descriptions."""
-        dialog = CommandPalette(self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        command = dialog.chosen()
-        if command:
-            self.run_command(command)
-
-    def run_command(self, cmd: str) -> None:
-        """Run a command. The table is the TUI's bindings and palette, plus untag."""
-        logger.info("palette: %s", cmd)
-        self._notice = None  # a new action replaces whatever was on the line
-        handlers = {
-            # the one command that re-reads the disk: see _refresh's `panel`
-            "refresh": partial(self._refresh, panel=True),
-            "scan": self._scan,
-            "search": self._search_query,
-            "tag": self._tag_selected,
-            "untag": self._untag_selected,
-            "autotag": self._autotag,
-            "delete": self._delete_tag,
-            "sort_files": self._sort,
-            "init_db": self._init_db,
-            "config": self._edit_config,
-            "stats": self._stats,
-            "tree": self._show_tree,
-            "prune": self._prune,
-            "mount": self._mount,
-            "umount": self._umount,
-            "command_palette": self._command_palette,
-            "help": self._help,
-            "quit": self.close,
-        }
-        handler = handlers.get(cmd)
-        if handler is None:
-            self._status_label.setText(_("'{cmd}' isn't available in the GUI yet").format(cmd=cmd))
-            return
-        handler()
-
-    # ---------- commands ----------
-
-    def _target_files(self) -> list[tuple]:
-        """(file_id, path) for the grid selection, else the real-FS selection."""
-        chosen = [
-            (item.data(self.ROLE_FILE_ID), item.data(self.ROLE_SOURCE))
-            for item in self.grid.selectedItems()
-            if item.data(self.ROLE_FILE_ID) is not None
-        ]
-        if chosen:
-            return chosen
-
-        path = self.fs.current_path()
-        if path is None or path.is_dir():
-            return []
-        entry = self._repo.get_file_by_path(str(path))
-        return [(entry.id, entry.filepath)] if entry else []
-
-    def _tag_selected(self) -> None:
-        """Add a tag (a path creates missing parents) to the selected files."""
-        targets = self._target_files()
-        if not targets:
-            self._status_label.setText(_("Select a real file first!"))
-            return
-
-        name, accepted = QInputDialog.getText(self, _("Tag"), _("Enter tag (e.g., vacation/beach)"))
-        if not accepted or not name.strip():
-            return
-        for file_id, _path in targets:
-            self._repo.add_tag(file_id, name.strip())
-        self._refresh()
-
-    def _untag_selected(self) -> None:
-        """Remove a tag from the selected files."""
-        targets = self._target_files()
-        if not targets:
-            self._status_label.setText(_("Select a real file first!"))
-            return
-
-        name, accepted = QInputDialog.getText(self, _("Remove tag from file"), _("Tag path"))
-        if not accepted or not name.strip():
-            return
-        for file_id, _path in targets:
-            self._repo.remove_tag(file_id, name.strip())
-        self._refresh()
-
-    def _autotag(self) -> None:
-        """Apply the auto-tagging rules to the whole library, off the GUI thread.
-
-        The rules live in a file, so this is the same work `meret autotag` does - the
-        window only decides when. No `only_untagged` override and no `dry_run`: the
-        config decides, exactly as it does for the CLI, so one file drives both.
-
-        The poll is stopped for the duration, like a scan: the run commits the whole
-        time, and a refresh every 1.5 s would rebuild the tree and the grid underneath
-        it. The task is sticky, so browsing during a long run cannot swallow its end.
-        """
-        tagger = AutoTagger.from_config()
-        if not tagger.rules:
-            self._status_label.setText(
-                _("No auto-tagging rules: set autotag.rules_file or pass --rules on the CLI")
-            )
-            return
-
-        self._status_label.setText(_("Tagging..."))
-        self._poll.stop()
-
-        def done(stats: dict) -> None:
-            self._say(
-                _("Tagged: {files} files, {tags} tags").format(
-                    files=stats["changed"], tags=stats["tags"]
-                )
-            )
-            # the run itself was the change: re-baseline, so the first poll after it
-            # does not refresh a second time on data the refresh below already read
-            self._version = None
-            self._refresh()
-            self._poll.start()
-
-        def failed(error: Exception) -> None:
-            logger.warning("autotag failed: %s", error)
-            self._say(_("Error: {error}").format(error=error))
-            self._version = None
-            self._poll.start()
-
-        self._tasks.run(tagger.run, on_done=done, on_failed=failed, args=(self._repo,), sticky=True)
-
-    def _delete_tag(self) -> None:
-        """Delete the tag selected in the tree. Its children move up one level."""
-        item = self.tags.currentItem()
-        if item is None or item.data(0, Qt.ItemDataRole.UserRole) == "/":
-            self._status_label.setText(_("Select a tag folder in the virtual panel first"))
-            return
-
-        # The tree shows sanitized names; the repository needs the raw tag path
-        tag_id = item.data(0, TagTree.ROLE_TAG_ID)
-        by_id = {tag.id: tag for tag in self._repo.get_all_tags()}
-        tag = by_id.get(tag_id)
-        if tag is None:
-            self._status_label.setText(_("No such path: {path}").format(path=item.text(0)))
-            return
-
-        path = tagpaths.path_of(tag, by_id)
-        if not self._repo.delete_tag(path):
-            self._status_label.setText(_("No such path: {path}").format(path=path))
-            return
-        self._status_label.setText(_("Deleted tag {path}").format(path="/" + path))
-        self._refresh()
-
-    def _scan(self) -> None:
-        """Index the folder picked in the real filesystem panel.
-
-        The poll is stopped for the duration: the scan commits the whole time, and
-        a refresh every 1.5 s would rebuild the tree and the grid underneath it.
-        The task is sticky, so browsing during a long scan cannot swallow its end.
-        """
-        target = self.fs.current_path()
-        if target is None:
-            self._status_label.setText(_("Select a real file first!"))
-            return
-
-        folder = target if target.is_dir() else target.parent
-        self._status_label.setText(_("Scanning {path}...").format(path=folder))
-        self._poll.stop()
-        indexer = Indexer(self._repo, folder)
-        self._tasks.run(
-            indexer.run,
-            on_done=self._on_scan_done,
-            on_failed=self._on_scan_failed,
-            sticky=True,
-        )
-
-    def _on_scan_done(self, _stats: dict) -> None:
-        self._say(_("Scan complete!"))
-        # The scan itself was the change: re-baseline, so the first poll after it
-        # does not refresh a second time on data the refresh below already read
-        self._version = None
-        self._refresh()
-        self._poll.start()
-
-    def _on_scan_failed(self, error: Exception) -> None:
-        logger.warning("scan failed: %s", error)
-        self._say(_("Error: {error}").format(error=error))
-        self._version = None
-        self._poll.start()
-
-    def _search_query(self) -> None:
-        """Ask for a query: a name, or `tag:travel` - the TUI's own rule."""
-        query, accepted = QInputDialog.getText(self, _("Search"), _("Text in the file name"))
-        if not accepted or not query.strip():
-            return
-        self._run_search(query.strip())
-
-    def _edit_config(self) -> None:
-        """Open the settings and apply the result when the window closes.
-
-        Deliberately not exec(): that runs a nested event loop, and the poll, the
-        thread pool and the dialog end up fighting over the same window.
-
-        The raise_/activateWindow pair is deferred, not immediate. open() already
-        raises and activates, but on Windows the owner can take the foreground back
-        in that same turn: the dialog ends up behind a window that modality has
-        already blocked, and the app looks dead, because Qt drops every click on
-        that window. --debug settings_modeless removes native modality altogether.
-
-        One copy of this body, not two: the duplicate that used to sit below the
-        return connected `finished` twice, so every save ran its callback twice and
-        the poll was restarted by the second run.
-        """
-        manager = get_config()
-        dialog = SettingsDialog(self)
-
-        def finished(result: int) -> None:
-            """The dialog is gone: let the poll run again and apply what was chosen."""
-            self._paused = False
-            self._pump(self._tasks.generation)  # the pause cut the chain in half
-            self._poll.start()
-            if result != QDialog.DialogCode.Accepted:
-                self._say(_("Settings unchanged"))
-            else:
-                apply_settings(dialog.values())
-                self._apply_look()
-                self._say(_("Settings saved to {path}").format(path=manager.config_path))
-            dialog.deleteLater()
-
-        def to_front() -> None:
-            """Re-ask for the foreground on the next turn of the loop."""
-            try:
-                dialog.raise_()
-                dialog.activateWindow()
-            except RuntimeError:
-                return  # already deleted: finished() ran and deleteLater() landed
-
-        dialog.finished.connect(finished)
-        self._poll.stop()  # no rebuilds underneath a modal window
-        self._paused = True  # and no thumbnail batches painting the grid under it
-
-        started = time.perf_counter()
-        if enabled("settings_modeless"):
-            dialog.setWindowModality(Qt.WindowModality.NonModal)
-            dialog.show()
-        else:
-            dialog.open()
-        logger.info("settings shown in %.0f ms", (time.perf_counter() - started) * 1000)
-
-        QTimer.singleShot(0, to_front)  # see the docstring
-
-    def _apply_look(self) -> None:
-        """Re-read what the window shows itself with - and only what actually changed.
-
-        Applying a style re-polishes every widget in the app, which is a visible stall
-        with a filled grid, so it is skipped when the theme is the same. The window
-        size is left alone (the user may have resized it by hand), and a language
-        change waits for a restart, since the strings are already built.
-        """
-        gui = get_config().config.gui
-
-        if gui.theme != self._theme:
-            apply_theme(QApplication.instance(), gui.theme)
-            self._theme = gui.theme
-            # The glyphs are painted in the palette colour: re-tint them with it
-            icons.clear_cache()
-            for command, action in self._actions.items():
-                action.setIcon(icons.command_icon(command, ICON))
-            self.viewer.retint()
-
-        if gui.thumbnail_size != self._thumbs.size:
-            self.grid.setIconSize(QSize(gui.thumbnail_size, gui.thumbnail_size))
-            self._thumbs = ThumbnailCache(size=gui.thumbnail_size, scope=str(self._db_path))
-
-    def _stats(self) -> None:
-        """Database statistics, read off the event loop."""
-        self._tasks.run(self._repo.get_stats, on_done=self._on_stats)
-
-    def _on_stats(self, stats: dict) -> None:
-        self._say(
-            _("Files: {files}, tags: {tags}").format(
-                files=stats.get("total_files", 0), tags=stats.get("total_tags", 0)
-            )
-        )
-
     def _show_tree(self) -> None:
         """The tag tree is the virtual panel: reload it and move focus there."""
         self.tags.reload()
@@ -577,41 +247,6 @@ class MainWindow(WindowBase, MountMixin, PollMixin, DatabaseMixin, ContentsMixin
     def _on_pruned(self, removed: int) -> None:
         self._say(_("Tags deleted: {n}").format(n=removed))
         self._refresh()
-
-    def _sort(self) -> None:
-        """Cycle the real-FS panel sorting: name, then size, then date.
-
-        The header is hidden, so clicking cannot sort and the view's own slot is
-        the only way in: sortByColumn, not sort - QTreeView has no sort(). Column
-        3 is the date, and the two largest-first modes are the useful ones there.
-        """
-        modes = [_("name"), _("size"), _("date")]
-        self._sort_index = (self._sort_index + 1) % len(modes)
-        column = (0, 1, 3)[self._sort_index]
-        order = (
-            Qt.SortOrder.AscendingOrder if self._sort_index == 0 else Qt.SortOrder.DescendingOrder
-        )
-        self.fs.sortByColumn(column, order)
-        self._status_label.setText(_("Sort by: {mode}").format(mode=modes[self._sort_index]))
-
-    def _help(self) -> None:
-        """Every command with its key: the TUI's footer, as a dialog."""
-        descriptions = dict(command_table())
-        # Width from the data: "Ctrl+Shift+T" is longer than any fixed 12, and a
-        # hardcoded column glues it to the description
-        key_width = max((len(key) for key in SHORTCUTS.values()), default=1) + 2
-
-        def line(name: str) -> str:
-            key = SHORTCUTS.get(name) or "—"
-            return f"    {key:<{key_width}}{descriptions[name]}"
-
-        lines = [f"{_('Navigation')}:", *(line(name) for name in NAVIGATION_COMMANDS)]
-        lines.append("")
-        lines.append(f"{_('Commands')}:")
-        lines.extend(
-            line(name) for name, _description in command_table() if name not in NAVIGATION_COMMANDS
-        )
-        QMessageBox.information(self, _("Help"), "\n".join(lines))
 
 
 def run_gui(db_path: Path, argv: list[str] | None = None) -> int:

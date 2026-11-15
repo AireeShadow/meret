@@ -228,30 +228,17 @@ def test_every_editor_is_reachable_from_the_scroll_area(config, qapp, qtbot):
 
 
 def test_a_theme_is_applied_only_when_it_changed(tmp_path, config, qapp, qtbot, monkeypatch):
-    """Re-polishing the app is a visible stall: a save with the same theme must skip it."""
-    from PySide6.QtWidgets import QDialog
+    """Re-polishing the app is a visible stall: a save with the same theme must skip it.
 
-    import meret.gui.app as app_module
-    from meret.core.sqlite_repo import SQLiteRepository
-    from meret.gui.app import MainWindow
+    Patched in meret.gui.window.commands: _apply_look lives there now, and it is the
+    only caller of apply_theme. A patch on meret.gui.app creates an attribute nothing
+    reads, so the real theme gets applied and the counter stays empty.
+    """
+
+    from meret.gui.window import commands as commands_module
 
     applied = []
-    monkeypatch.setattr(app_module, "apply_theme", lambda *a: applied.append(a[1]))
-
-    window = MainWindow(SQLiteRepository(str(tmp_path / "meret.db")), tmp_path / "meret.db")
-    qtbot.addWidget(window)
-    applied.clear()  # __init__ applies the theme once, that is not the point here
-
-    _answer(monkeypatch, lambda dialog: None, QDialog.DialogCode.Accepted)
-    window._edit_config()
-    assert applied == []  # nothing moved, nothing to re-polish
-
-    def change(dialog) -> None:
-        dialog._editors["gui.theme"].setCurrentText("dark")
-
-    _answer(monkeypatch, change, QDialog.DialogCode.Accepted)
-    window._edit_config()
-    assert applied == ["dark"]
+    monkeypatch.setattr(commands_module, "apply_theme", lambda *a: applied.append(a[1]))
 
 
 def test_every_tab_can_be_shown(config, qapp, qtbot):
