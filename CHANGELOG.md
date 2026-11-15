@@ -7,6 +7,40 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.6\] — 2026-11-15
+
+### Added
+
+- **`meret/gui/window/databases.py` — `DatabaseMixin`.** `_init_db`, `_use_db`,
+  `_prepare_db`, `_switch_to`, `_on_db_failed`, `_open_db`, `_wipe`, `_drop_objects`,
+  `_create_elsewhere` and `_confirm_overwrite` moved out of `app.py`. The split follows
+  what the methods already did: opening and wiping run on the task pool, and only the
+  swap touches Qt, after the pool has answered.
+
+### Changed
+
+- `MainWindow` is now `class MainWindow(WindowBase, MountMixin, PollMixin, DatabaseMixin)`.
+  `app.py` keeps the browser and the commands — the next two mixins to move.
+- `_init_db` and `_create_elsewhere` report through `_say()` instead of
+  `_status_label.setText()`. "Database recreated!" and "Database: {path}" used to be
+  wiped by the poll's next refresh, so the answer to "did it work?" disappeared after
+  about a second and a half — the same bug `_say()` was written for.
+- `gc`, `sqlite3` and `QFileDialog` are no longer imported by `app.py`: they went with
+  the methods that used them.
+
+### Fixed
+
+- `tests/gui/test_db_switch.py` patches `SQLiteRepository` in
+  `meret.gui.window.databases` now. A monkeypatch has to target the module that looks
+  the name up: with the patch left on `meret.gui.app`, the real repository opened on
+  the first try, the switch succeeded, and the attempt counter stayed at zero — which
+  reads as "the retry never happened" instead of "the patch did nothing".
+
+### Removed
+
+- The duplicated `TOOLBAR` docstring in `app.py`: the same comment block appeared twice
+  in a row, which is how the duplicated-method bugs of 0.9.5 started.
+
 ## \[0.9.5\] — 2026-11-15
 
 ### Added

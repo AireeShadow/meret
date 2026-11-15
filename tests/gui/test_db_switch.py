@@ -89,9 +89,16 @@ def test_wiping_runs_off_the_gui_thread(window, tmp_path, qtbot):
 
 
 def test_open_db_waits_out_a_lock(window, tmp_path, qtbot, monkeypatch):
-    """A lock is waited out, not reported: the second or third attempt gets through."""
+    """A lock is waited out, not reported: the second or third attempt gets through.
+
+    Patched in meret.gui.window.databases: that is the module whose _open_db calls
+    SQLiteRepository. A patch on meret.gui.app creates an attribute nothing reads, so
+    the real repository opens on the first try, the switch succeeds - and the attempt
+    counter stays at zero, which reads as "the retry never happened".
+    """
+
     from meret.core.sqlite_repo import SQLiteRepository
-    from meret.gui import app as app_module
+    from meret.gui.window import databases as db_module
 
     attempts = []
 
@@ -102,7 +109,7 @@ def test_open_db_waits_out_a_lock(window, tmp_path, qtbot, monkeypatch):
                 raise sqlite3.OperationalError("database is locked")
             super().__init__(path)
 
-    monkeypatch.setattr(app_module, "SQLiteRepository", Flaky)
+    monkeypatch.setattr(db_module, "SQLiteRepository", Flaky)
     target = tmp_path / "other.db"
 
     window._use_db(target)
