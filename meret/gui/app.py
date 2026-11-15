@@ -9,19 +9,17 @@ Mounting and unmounting shell out to `meret mount` / `meret umount` instead of
 importing a backend, so opening a window never drags FUSE or WinFsp in.
 """
 
-import os
 import faulthandler
 import gc
 import logging
 import sqlite3
-import subprocess
 import sys
 import time
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QSize, Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QPixmap
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -32,7 +30,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QMainWindow,
     QMessageBox,
     QSplitter,
     QStatusBar,
@@ -44,29 +41,26 @@ from PySide6.QtWidgets import (
 )
 
 from meret.core import tagpaths
+from meret.core.autotag import AutoTagger
 from meret.core.config import get_config
 from meret.core.debug import enabled
 from meret.core.indexer import Indexer
 from meret.core.locale import _
 from meret.core.models import FileEntry, FileType
 from meret.core.sqlite_repo import SQLiteRepository
-from meret.core.autotag import AutoTagger
 from meret.gui import icons
-from meret.gui.commands import (
-    SHORTCUTS,
-    CommandPalette,
-    command_table,
-    menu_table,
-    short_label,
-)
+from meret.gui.commands import SHORTCUTS, CommandPalette, command_table, menu_table, short_label
 from meret.gui.diagnostics import TracedApplication, quiet_media_logs
+from meret.gui.drives import drive_roots
 from meret.gui.fs_panel import RealFsPanel
 from meret.gui.settings import SettingsDialog, apply_settings
 from meret.gui.tag_tree import TagTree
+from meret.gui.theme import apply_theme
 from meret.gui.thumbnails import Reason, Thumbnail, ThumbnailCache
-from meret.gui.workers import TaskRunner
 from meret.gui.viewer import ViewerView
-from meret.gui.drives import drive_roots
+from meret.gui.window.base import WindowBase
+from meret.gui.window.mounts import MountMixin
+from meret.gui.window.polling import PollMixin
 from meret.vfs.tree import Node, VirtualTree
 
 logger = logging.getLogger(__name__)
@@ -116,55 +110,6 @@ TOOLBAR: tuple = (
 #: The help dialog groups these under Navigation, as the TUI's help does.
 NAVIGATION_COMMANDS = ("sort_files",)
 
-_DARK_PALETTE = {
-    "Window": "#1e1f22",
-    "WindowText": "#e6e6e6",
-    "Base": "#25262a",
-    "AlternateBase": "#2b2d31",
-    "Text": "#e6e6e6",
-    "Button": "#2b2d31",
-    "ButtonText": "#e6e6e6",
-    "BrightText": "#ffffff",
-    "Highlight": "#3d6ea5",
-    "HighlightedText": "#ffffff",
-    "ToolTipBase": "#2b2d31",
-    "ToolTipText": "#e6e6e6",
-    "PlaceholderText": "#9aa0a6",
-    "Link": "#6ea8dc",
-}
-
-#: Without these, disabled buttons and dimmed text stay bright in dark mode.
-_DISABLED_PALETTE = {
-    "WindowText": "#7a7d82",
-    "Text": "#7a7d82",
-    "ButtonText": "#7a7d82",
-    "HighlightedText": "#9aa0a6",
-}
-
-
-def _apply_theme(app: QCoreApplication | None, theme: str) -> None:
-    """`system` keeps the platform look; `dark` sets a Fusion palette.
-
-    QCoreApplication, not QApplication, because instance() hands back the base type:
-    a caller should not have to cast, and an app without a palette is simply left be.
-    """
-    if not isinstance(app, QApplication) or theme == "system":
-        return
-    app.setStyle("Fusion")
-    if theme != "dark":
-        app.setPalette(app.style().standardPalette())
-        return
-    palette = QPalette()
-    for role, colour in _DARK_PALETTE.items():
-        palette.setColor(getattr(QPalette.ColorRole, role), QColor(colour))
-    for role, colour in _DISABLED_PALETTE.items():
-        palette.setColor(
-            QPalette.ColorGroup.Disabled,
-            getattr(QPalette.ColorRole, role),
-            QColor(colour),
-        )
-    app.setPalette(palette)
-
 
 def _reason_text(reason: str) -> str:
     """Translated tooltip for a missing preview. Resolved at call time."""
@@ -177,72 +122,26 @@ def _reason_text(reason: str) -> str:
     return table.get(reason, "")
 
 
-class MainWindow(QMainWindow):
-    """Browse the tag tree, the files under one tag, and a preview."""
+class MainWindow(WindowBase, MountMixin, PollMixin):
+    """Browse the tag tree, the files under one tag, and a preview.
 
-    ROLE_VPATH = Qt.ItemDataRole.UserRole
-    ROLE_SOURCE = Qt.ItemDataRole.UserRole + 1
-    ROLE_MTIME = Qt.ItemDataRole.UserRole + 2
-    ROLE_FILE_ID = Qt.ItemDataRole.UserRole + 3
+    The state and the lifetime are WindowBase's, the shell-outs MountMixin's and the
+    poll PollMixin's; what is left here is the browser and the commands, which are the
+    next two mixins to move.
 
-    #: A message that must outlive the next refresh. Set through _say(), read by
-    #: _update_status(), cleared when the user asks for something new.
-    _notice: str | None = None
+    The explicit __init__ is not decoration. Without it the call is forwarded by
+    whatever happens to be first in the MRO, and a plain-class mixin in the chain
+    turns `MainWindow(repo, db_path)` into `WindowBase.__init__()` with the arguments
+    eaten - a TypeError about a missing parameter, nowhere near the real cause.
+
+    It must not do any of the building itself. WindowBase.__init__ builds the widgets,
+    and a second copy here does not replace them: the menu bar is one object per
+    window, so `_build_menus` runs twice on it and every menu appears twice, while
+    `self.toolbar` is merely overwritten and the duplicate hides.
+    """
 
     def __init__(self, repo, db_path, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-
-        config = get_config().config.gui
-
-        # State first: the first paint happens on the last line of __init__
-        self._repo = repo
-        self._db_path = Path(db_path)
-        # None only for the moment set_tree() is given nothing, see TagTree.set_tree
-        self._tree: VirtualTree | None = VirtualTree(repo)
-        # The scope keeps two databases from sharing thumbnail keys: a file id is
-        # only unique inside one of them
-        self._thumbs = ThumbnailCache(size=config.thumbnail_size, scope=str(self._db_path))
-        self._tasks = TaskRunner(self)
-        self._queue: list[tuple] = []
-        self._selection: set[str] = set()
-        self._vpath = "/"
-        self._search: str | None = None
-        self._version: int | None = None
-        self._preview_token = 0
-        self._sort_index = 0
-        self._actions: dict[str, QAction] = {}
-        # True while a modal dialog is up: the grid underneath is not looked at, so
-        # nothing has to be decoded and painted into it
-        self._paused = False
-
-        # The palette before the icons: they are tinted with its WindowText colour,
-        # so a dark theme must be in place or every icon renders black
-        _apply_theme(QApplication.instance(), config.theme)
-        # The theme in effect, so a settings save can tell a change from a no-op:
-        # re-polishing the app is a visible stall while the grid is full
-        self._theme = config.theme
-
-        # Widgets next
-        self._build_ui()
-        self._build_actions()
-        self._build_toolbar()
-        self._build_menus()
-
-        self.setWindowTitle(_("meret"))
-        self.resize(config.window_width, config.window_height)
-
-        # Outside changes: the tree is invalidated, never re-read per stat
-        self._poll = QTimer(self)
-        self._poll.setInterval(POLL_MS)
-        self._poll.timeout.connect(self._check_version)
-        self._poll.start()
-
-        # The tree has to be filled once by hand: reload() is otherwise only
-        # reached through the outside-change path, which leaves it empty on start
-        self.tags.reload()
-
-        # First paint - nothing may come after this
-        self.open_folder("/")
+        super().__init__(repo, db_path, parent)
 
     def _build_ui(self) -> None:
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
@@ -395,6 +294,10 @@ class MainWindow(QMainWindow):
 
         Not copies: the same QAction, so one command has one shortcut, one icon and
         one enabled state wherever it appears - and no way for the two to drift.
+
+        One loop, not two. A duplicated body adds a second set of menus to the same
+        bar: the tests see eight top-level menus instead of four and twice as many
+        entries, which looks like a wiring bug and is a paste.
         """
         bar = self.menuBar()
         for title, commands in menu_table():
@@ -724,7 +627,7 @@ class MainWindow(QMainWindow):
         self._poll.stop()
 
         def done(stats: dict) -> None:
-            self._status_label.setText(
+            self._say(
                 _("Tagged: {files} files, {tags} tags").format(
                     files=stats["changed"], tags=stats["tags"]
                 )
@@ -737,7 +640,7 @@ class MainWindow(QMainWindow):
 
         def failed(error: Exception) -> None:
             logger.warning("autotag failed: %s", error)
-            self._status_label.setText(_("Error: {error}").format(error=error))
+            self._say(_("Error: {error}").format(error=error))
             self._version = None
             self._poll.start()
 
@@ -856,11 +759,6 @@ class MainWindow(QMainWindow):
             return float((entry.metadata or {}).get("modified_at") or 0.0)
         except (TypeError, ValueError):
             return 0.0
-
-    def _open_selected(self) -> None:
-        selected = self.grid.selectedItems()
-        if selected:
-            self._open_external(selected[0])
 
     def _init_db(self) -> None:
         """Create the database - or ask what to do when one is already here.
@@ -1038,9 +936,11 @@ class MainWindow(QMainWindow):
         raises and activates, but on Windows the owner can take the foreground back
         in that same turn: the dialog ends up behind a window that modality has
         already blocked, and the app looks dead, because Qt drops every click on
-        that window. Asking again once the show has settled is what keeps the dialog
-        in front. --debug settings_modeless removes native modality altogether, for
-        an A/B run.
+        that window. --debug settings_modeless removes native modality altogether.
+
+        One copy of this body, not two: the duplicate that used to sit below the
+        return connected `finished` twice, so every save ran its callback twice and
+        the poll was restarted by the second run.
         """
         manager = get_config()
         dialog = SettingsDialog(self)
@@ -1051,13 +951,11 @@ class MainWindow(QMainWindow):
             self._pump(self._tasks.generation)  # the pause cut the chain in half
             self._poll.start()
             if result != QDialog.DialogCode.Accepted:
-                self._status_label.setText(_("Settings unchanged"))
+                self._say(_("Settings unchanged"))
             else:
                 apply_settings(dialog.values())
                 self._apply_look()
-                self._status_label.setText(
-                    _("Settings saved to {path}").format(path=manager.config_path)
-                )
+                self._say(_("Settings saved to {path}").format(path=manager.config_path))
             dialog.deleteLater()
 
         def to_front() -> None:
@@ -1082,43 +980,6 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(0, to_front)  # see the docstring
 
-        def finished(result: int) -> None:
-            """The dialog is gone: let the poll run again and apply what was chosen."""
-            self._paused = False
-            self._pump(self._tasks.generation)  # the pause cut the chain in half
-            self._poll.start()
-            if result != QDialog.DialogCode.Accepted:
-                self._status_label.setText(_("Settings unchanged"))
-            else:
-                apply_settings(dialog.values())
-                self._apply_look()
-                self._status_label.setText(
-                    _("Settings saved to {path}").format(path=manager.config_path)
-                )
-            dialog.deleteLater()
-
-        def to_front() -> None:
-            """Re-ask for the foreground on the next turn of the loop."""
-            try:
-                dialog.raise_()
-                dialog.activateWindow()
-            except RuntimeError:
-                return  # already deleted: finished() ran and deleteLater() landed
-
-        dialog.finished.connect(finished)
-        self._poll.stop()  # no rebuilds underneath a modal window
-        self._paused = True  # and no thumbnail batches painting the grid under it
-
-        started = time.perf_counter()
-        if os.environ.get("MERET_SETTINGS_MODELESS"):
-            dialog.setWindowModality(Qt.WindowModality.NonModal)
-            dialog.show()
-        else:
-            dialog.open()
-        logger.info("settings shown in %.0f ms", (time.perf_counter() - started) * 1000)
-
-        QTimer.singleShot(0, to_front)  # see the docstring
-
     def _apply_look(self) -> None:
         """Re-read what the window shows itself with - and only what actually changed.
 
@@ -1130,7 +991,7 @@ class MainWindow(QMainWindow):
         gui = get_config().config.gui
 
         if gui.theme != self._theme:
-            _apply_theme(QApplication.instance(), gui.theme)
+            apply_theme(QApplication.instance(), gui.theme)
             self._theme = gui.theme
             # The glyphs are painted in the palette colour: re-tint them with it
             icons.clear_cache()
@@ -1165,101 +1026,6 @@ class MainWindow(QMainWindow):
     def _on_pruned(self, removed: int) -> None:
         self._say(_("Tags deleted: {n}").format(n=removed))
         self._refresh()
-
-    def _mount(self) -> None:
-        """Start `meret mount` in its own process, so `meret umount` can stop it.
-
-        The backend is deliberately not imported: keeping it out of meret.gui means
-        no FUSE or WinFsp import just to open a window.
-        """
-        default = "M:" if sys.platform == "win32" else str(Path.home() / "meret-tags")
-        point, accepted = QInputDialog.getText(
-            self, _("Mount virtual filesystem"), _("Where to mount, e.g. M:"), text=default
-        )
-        if not accepted or not point.strip():
-            return
-        self._status_label.setText(_("Mounting at {path}...").format(path=point.strip()))
-        self._spawn(self._cli("mount", point.strip()))
-
-    def _umount(self) -> None:
-        """Stop the mount process. It takes no --db, only the mount point."""
-        point, accepted = QInputDialog.getText(
-            self, _("Unmount"), _("Mount point, e.g. M: or K:\\tags")
-        )
-        if not accepted or not point.strip():
-            return
-        point = point.strip()
-        self._run(self._cli("umount", point, with_db=False))
-        self._status_label.setText(_("Unmounted {path}").format(path=point))
-
-    def _on_umount_done(self, point: str, result: tuple[int, str]) -> None:
-        """Say what actually happened.
-
-        The old code announced "Unmounted" before the command returned, so an unmount
-        that found nothing looked like a success. The CLI exits 1 with "Nothing is
-        mounted at ..." and that sentence is the honest answer.
-        """
-        code, message = result
-        if code == 0:
-            self._say(_("Unmounted {path}").format(path=point))
-            return
-        logger.info("umount %s: exit %s: %s", point, code, message)
-        self._say(message or _("Nothing is mounted at {path}").format(path=point))
-
-    def _spawn_cli(self, *args: str) -> None:
-        """Run the CLI without waiting - a mount lives until it is unmounted."""
-        command = ["meret", *args, "--db", str(self._db_path)]
-        logger.info("run: %s", command)
-        try:
-            subprocess.Popen(command)
-        except OSError as e:
-            logger.warning("cannot run %s: %s", command, e)
-            self._status_label.setText(_("Error: {error}").format(error=e))
-
-    def _run_cli(self, *args: str) -> None:
-        """Run the CLI and wait - for a command that ends on its own."""
-        command = ["meret", *args]
-        logger.info("run: %s", command)
-        try:
-            done = subprocess.run(command, capture_output=True, text=True)
-        except OSError as e:
-            logger.warning("cannot run %s: %s", command, e)
-            self._status_label.setText(_("Error: {error}").format(error=e))
-            return
-        if done.returncode != 0:
-            logger.warning("exit %s: %s", done.returncode, (done.stderr or "").strip())
-
-    def _cli(self, *args: str, with_db: bool = True) -> list[str]:
-        """A `meret` command line.
-
-        `with_db=False` for `umount`: it finds the mount process by the mount point
-        alone, so `umount_cmd` declares no --db and typer rejects an unknown option.
-        """
-        command = ["meret", *args]
-        if with_db:
-            command += ["--db", str(self._db_path)]
-        return command
-
-    def _spawn(self, command: list[str]) -> None:
-        """Run without waiting - a mount lives until it is unmounted."""
-        logger.info("run: %s", command)
-        try:
-            subprocess.Popen(command)
-        except OSError as e:
-            logger.warning("cannot run %s: %s", command, e)
-            self._status_label.setText(_("Error: {error}").format(error=e))
-
-    def _run(self, command: list[str]) -> None:
-        """Run and wait - for a command that ends on its own."""
-        logger.info("run: %s", command)
-        try:
-            done = subprocess.run(command, capture_output=True, text=True)
-        except OSError as e:
-            logger.warning("cannot run %s: %s", command, e)
-            self._status_label.setText(_("Error: {error}").format(error=e))
-            return
-        if done.returncode != 0:
-            logger.warning("exit %s: %s", done.returncode, (done.stderr or "").strip())
 
     def _sort(self) -> None:
         """Cycle the real-FS panel sorting: name, then size, then date.
@@ -1437,31 +1203,6 @@ class MainWindow(QMainWindow):
                 self.open_folder("/" + first)
                 return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
-
-    # ---------- outside changes ----------
-
-    def _check_version(self) -> None:
-        """Pick up tagging done by another process (the CLI, a mount, a scan).
-
-        Sticky: every folder change bumps the generation, so a probe that got
-        dropped each time would never report anything while the user browses.
-        """
-        self._tasks.run(self._repo.data_version, self._on_version, sticky=True)
-
-    def _on_version(self, version: int | None) -> None:
-        if version is None or version == self._version:
-            return
-        known = self._version is not None
-        self._version = version
-        if not known:
-            return  # the first reading is just a baseline
-        logger.debug("data_version moved to %s, reloading", version)
-        self._refresh()
-
-    def closeEvent(self, event) -> None:
-        self._poll.stop()
-        self._tasks.shutdown()
-        super().closeEvent(event)
 
 
 def run_gui(db_path: Path, argv: list[str] | None = None) -> int:

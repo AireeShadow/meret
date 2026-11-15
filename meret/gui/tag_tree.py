@@ -1,6 +1,7 @@
 """The tag hierarchy as folders, filled lazily and off the GUI thread."""
 
 import logging
+import shiboken6
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem, QWidget
@@ -78,7 +79,17 @@ class TagTree(QTreeWidget):
         )
 
     def _filled(self, item: QTreeWidgetItem, nodes: list[Node], generation: int) -> None:
-        """Replace the placeholder with the real subfolders."""
+        """Replace the placeholder with the real subfolders.
+
+        `shiboken6.isValid` before anything else, and for both objects. A delivery can
+        land after the tree - or the whole window - was destroyed: clear() deletes
+        every QTreeWidgetItem, and the callback still holds a Python wrapper whose C++
+        side is gone. Touching it then corrupts the heap (0xc0000374), which is a crash
+        and not an exception, so no try/except can catch it.
+        """
+        if not shiboken6.isValid(self) or not shiboken6.isValid(item):
+            logger.debug("tag tree is gone, dropping a listing for %s", generation)
+            return
         if generation != self._generation:
             return  # the tree was rebuilt; this row is gone
         item.takeChildren()
@@ -94,7 +105,13 @@ class TagTree(QTreeWidget):
         item.setData(0, self.FILLED, True)
 
     def _failed(self, item: QTreeWidgetItem, error: Exception, generation: int) -> None:
-        """A row that failed must say so, never look empty."""
+        """A row that failed must say so, never look empty.
+
+        Same validity check as _filled(): a failure that arrives after the tree was
+        destroyed used to take the process down instead of being dropped.
+        """
+        if not shiboken6.isValid(self) or not shiboken6.isValid(item):
+            return
         if generation != self._generation:
             return
         logger.warning("tag tree: cannot list: %s", error)

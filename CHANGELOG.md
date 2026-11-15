@@ -7,6 +7,56 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.5\] — 2026-11-15
+
+### Added
+
+- **`meret/gui/window/` — the window, split by responsibility.** `WindowBase` holds the
+  state, the first paint and the shutdown; `PollMixin` the poll that notices writes
+  from other processes; `MountMixin` the shell-outs. Each one is a plain class with no
+  state of its own: everything it touches is created in `WindowBase.__init__`, so the
+  split needs no constructor arguments and no wiring.
+- `meret/gui/theme.py`: `apply_theme()` and the two palettes, out of `app.py`. The
+  theme has nothing to do with the window, and keeping it there meant `app.py` imported
+  `QCoreApplication` only for a type hint.
+
+### Changed
+
+- `MainWindow` is now assembled: `class MainWindow(WindowBase, MountMixin, PollMixin)`.
+  Its `__init__` does one thing — `super().__init__(repo, db_path, parent)`.
+- `_apply_theme` became the public `theme.apply_theme`; `_apply_look` calls it by that
+  name.
+- The CLI plumbing lives in `mounts.py` with `CLI_TIMEOUT` next to it: `_cli`,
+  `_cli_call`, `_run_async`, `_spawn`. `_run`, `_run_cli` and `_spawn_cli` are gone.
+
+### Fixed
+
+- **The menu bar showed every menu twice.** `MainWindow.__init__` kept the old body —
+  `_build_ui`, `_build_actions`, `_build_toolbar`, `_build_menus` — *and* called
+  `super().__init__`, so `WindowBase` built everything a second time. The menu bar is
+  one object per window, so `addMenu` ran twice on it and every menu appeared twice;
+  `self.toolbar` and `self.grid` were merely overwritten by the second copy, which is
+  why only the menus gave the duplication away (36 entries against a table of 18).
+- **Settings ran every callback twice.** `_edit_config` contained its whole body twice,
+  so `finished` was connected twice: a save applied the values, restarted the poll and
+  ran the callback again. One body, one connection.
+- **`_umount` still blocked the GUI thread.** It called `_run`, the synchronous
+  `subprocess.run`, and `meret umount` finds its target with PowerShell on Windows —
+  seconds of WMI enumeration. It goes through `_run_async` now, so the window keeps
+  answering while the CLI works.
+- **`TagTree` corrupted the heap (0xc0000374).** A listing delivered from the task pool
+  can land after the tree — or the whole window — was destroyed, and `clear()` deletes
+  every `QTreeWidgetItem`. The callback still held one, and `takeChildren()` on a
+  deleted item is a crash inside Qt, not an exception: `QTreeWidgetItem` is not a
+  `QObject`, so PySide cannot raise `RuntimeError` for it. `_filled` and `_failed` ask
+  `shiboken6.isValid()` for both the tree and the item first — the same guard
+  `RealFsPanel` already uses for its probe results.
+
+### Removed
+
+- `MainWindow._open_selected`, dead since the viewer took over opening files, and the
+  duplicated `TOOLBAR` docstring.
+
 ## \[0.9.4\] — 2026-11-15
 
 ### Added

@@ -196,10 +196,10 @@ def test_the_dialog_shows_every_section_at_once(config, qapp, qtbot):
 
 def test_the_dialog_settles_after_being_shown(config, qapp, qtbot):
     """A window that keeps resizing itself is a window in a loop: the size must hold."""
-    from meret.gui.app import _apply_theme
+    from meret.gui.theme import apply_theme
     from meret.gui.settings import SettingsDialog
 
-    _apply_theme(qapp, "dark")  # the app runs with a palette, the suite does not
+    apply_theme(qapp, "dark")  # the app runs with a palette, the suite does not
 
     dialog = SettingsDialog()
     qtbot.addWidget(dialog)
@@ -236,7 +236,7 @@ def test_a_theme_is_applied_only_when_it_changed(tmp_path, config, qapp, qtbot, 
     from meret.gui.app import MainWindow
 
     applied = []
-    monkeypatch.setattr(app_module, "_apply_theme", lambda *a: applied.append(a[1]))
+    monkeypatch.setattr(app_module, "apply_theme", lambda *a: applied.append(a[1]))
 
     window = MainWindow(SQLiteRepository(str(tmp_path / "meret.db")), tmp_path / "meret.db")
     qtbot.addWidget(window)
@@ -262,10 +262,10 @@ def test_every_tab_can_be_shown(config, qapp, qtbot):
     """
     from PySide6.QtWidgets import QGroupBox
 
-    from meret.gui.app import _apply_theme
+    from meret.gui.theme import apply_theme
     from meret.gui.settings import SettingsDialog, sections
 
-    _apply_theme(qapp, "dark")  # the app applies one before any window is built
+    apply_theme(qapp, "dark")  # the app applies one before any window is built
 
     dialog = SettingsDialog()
     qtbot.addWidget(dialog)
@@ -288,10 +288,10 @@ def test_switching_pages_back_and_forth_keeps_the_dialog_settled(config, qapp, q
     """
     from PySide6.QtWidgets import QScrollArea
 
-    from meret.gui.app import _apply_theme
+    from meret.gui.theme import apply_theme
     from meret.gui.settings import SettingsDialog
 
-    _apply_theme(qapp, "dark")  # the app runs with a palette, the suite does not
+    apply_theme(qapp, "dark")  # the app runs with a palette, the suite does not
 
     dialog = SettingsDialog()
     qtbot.addWidget(dialog)

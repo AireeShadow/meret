@@ -964,3 +964,9 @@ msgstr "Автотеггинг не удался"
 
 msgid "Tagging complete!"
 msgstr "Теггирование завершено!"
+
+msgid "Unmounting {path}..."
+msgstr "Размонтирую {path}..."
+
+msgid "Timed out after {seconds:.0f} s"
+msgstr "Не уложилось в {seconds:.0f} с"
