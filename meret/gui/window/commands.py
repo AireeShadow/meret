@@ -26,6 +26,7 @@ from meret.gui.tag_tree import TagTree
 from meret.gui.theme import apply_theme
 from meret.gui.thumbnails import ThumbnailCache
 from meret.gui.window.constants import ICON, NAVIGATION_COMMANDS
+from meret.gui.window.progress import ProgressDialog
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ class CommandsMixin:
         self._refresh()
 
     def _autotag(self) -> None:
-        """Apply the auto-tagging rules to the whole library, off the GUI thread.
+        """Apply the auto-tagging rules to the whole library, with a progress window.
 
         The rules live in a file, so this is the same work `meret autotag` does - the
         window only decides when. No `only_untagged` override and no `dry_run`: the
@@ -131,16 +132,25 @@ class CommandsMixin:
         The poll is stopped for the duration, like a scan: the run commits the whole
         time, and a refresh every 1.5 s would rebuild the tree and the grid underneath
         it. The task is sticky, so browsing during a long run cannot swallow its end.
+
+        The tagger reports (done, total) and has no phases, so the phase argument is
+        empty: the dialog then keeps whatever label it already has.
         """
         tagger = AutoTagger.from_config()
         if not tagger.rules:
             self._say(_("No auto-tagging rules: set autotag.rules_file or pass --rules on the CLI"))
             return
 
-        self._say(_("Tagging..."))
         self._poll.stop()
+        dialog = ProgressDialog(_("Tagging..."), self)
+        dialog.show()
+
+        def report(done: int, total: int) -> None:
+            """Pool thread: hand the step to the GUI thread through the signal."""
+            dialog.report("", done, total)
 
         def done(stats: dict) -> None:
+            dialog.close()
             self._say(
                 _("Tagged: {files} files, {tags} tags").format(
                     files=stats["changed"], tags=stats["tags"]
@@ -153,12 +163,20 @@ class CommandsMixin:
             self._poll.start()
 
         def failed(error: Exception) -> None:
+            dialog.close()
             logger.warning("autotag failed: %s", error)
             self._say(_("Error: {error}").format(error=error))
             self._version = None
             self._poll.start()
 
-        self._tasks.run(tagger.run, on_done=done, on_failed=failed, args=(self._repo,), sticky=True)
+        self._tasks.run(
+            tagger.run,
+            on_done=done,
+            on_failed=failed,
+            args=(self._repo,),
+            kwargs={"progress": report},
+            sticky=True,
+        )
 
     def _delete_tag(self) -> None:
         """Delete the tag selected in the tree. Its children move up one level."""
@@ -198,11 +216,15 @@ class CommandsMixin:
     # ---------- scan and search ----------
 
     def _scan(self) -> None:
-        """Index the folder picked in the real filesystem panel.
+        """Index the folder picked in the real filesystem panel, with a progress window.
 
-        The poll is stopped for the duration: the scan commits the whole time, and
-        a refresh every 1.5 s would rebuild the tree and the grid underneath it.
-        The task is sticky, so browsing during a long scan cannot swallow its end.
+        The poll is stopped for the duration: the scan commits the whole time, and a
+        refresh every 1.5 s would rebuild the tree and the grid underneath it. The task
+        is sticky, so browsing during a long scan cannot swallow its end.
+
+        The callback handed to the indexer is the dialog's `report`, which only emits a
+        signal: the indexer calls it from a pool thread, and a widget touched there is
+        a crash, not a glitch.
         """
         target = self.fs.current_path()
         if target is None:
@@ -210,13 +232,25 @@ class CommandsMixin:
             return
 
         folder = target if target.is_dir() else target.parent
-        self._say(_("Scanning {path}...").format(path=folder))
         self._poll.stop()
+        dialog = ProgressDialog(_("Scanning {path}").format(path=folder), self)
+        dialog.show()
+
         indexer = Indexer(self._repo, folder)
+
+        def done(stats: dict) -> None:
+            dialog.close()
+            self._on_scan_done(stats)
+
+        def failed(error: Exception) -> None:
+            dialog.close()
+            self._on_scan_failed(error)
+
         self._tasks.run(
             indexer.run,
-            on_done=self._on_scan_done,
-            on_failed=self._on_scan_failed,
+            on_done=done,
+            on_failed=failed,
+            kwargs={"progress_callback": dialog.report},
             sticky=True,
         )
 

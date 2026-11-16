@@ -1,9 +1,16 @@
 """Toolbar glyphs and the tiles that stand in for a missing preview.
 
 Two jobs, one rule: never show a hole. The command glyphs are vendored from Lucide
-(ISC, see icons/LICENSE) by scripts/fetch_icons.py and named after the command, so
-an upstream rename never reaches this code; anything missing falls back to a tile
-drawn by hand. Nothing is downloaded at runtime.
+(ISC, see icons/LICENSE) by scripts/fetch_icons.py and named after the command, so an
+upstream rename never reaches this code; anything missing falls back to a tile drawn
+by hand. Nothing is downloaded at runtime.
+
+The cache holds the SVG *bytes*, never a pixmap. A QPixmap belongs to the
+QGuiApplication that created it, and the test suite builds and drops applications
+between modules: a cached pixmap then points at a dead application, and drawing it is
+an access violation inside Qt - no exception, no traceback, just a dead process. That
+was the intermittent crash in `_build_actions`, and it is why nothing here is
+`lru_cache`d at the pixmap level.
 
 `icons` is a module sitting next to an `icons/` directory, and that only works while
 the directory has no __init__.py: with one, the package shadows this module and
@@ -13,7 +20,7 @@ the directory has no __init__.py: with one, the package shadows this module and
 from functools import lru_cache
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QByteArray, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPalette, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication
@@ -71,17 +78,31 @@ def _ratio() -> float:
     return float(app.devicePixelRatio()) if app is not None else 1.0
 
 
-@lru_cache(maxsize=512)
-def _tinted(name: str, size: int, colour: str, ratio: float) -> QPixmap | None:
-    """Render one vendored SVG in `colour`. None when the file cannot be used.
+@lru_cache(maxsize=256)
+def _svg(name: str) -> bytes | None:
+    """The vendored SVG's bytes, or None when the file is not there.
 
-    Cached on its arguments, so a repaint costs a dict lookup - and a palette switch
-    is a different colour, hence a different key, never a stale pixmap.
+    Bytes, not a pixmap: this is the only thing worth caching, because it is the only
+    thing that does not belong to an application. Cached on the name alone, so a
+    palette switch is still a fresh render - and a fresh application is a fresh
+    pixmap, which is the whole point.
     """
-    path = ICON_DIR / f"{name}{ICON_SUFFIX}"
-    if not path.is_file():
+    try:
+        return (ICON_DIR / f"{name}{ICON_SUFFIX}").read_bytes()
+    except OSError:
         return None
-    renderer = QSvgRenderer(str(path))
+
+
+def _tinted(name: str, size: int, colour: str, ratio: float) -> QPixmap | None:
+    """Render one vendored SVG in `colour`. None when it cannot be used.
+
+    No pixmap without a QGuiApplication: QPixmap is a paint device and needs one, and
+    building it outside an application is a crash rather than an error.
+    """
+    data = _svg(name)
+    if data is None or _app() is None:
+        return None
+    renderer = QSvgRenderer(QByteArray(data))
     if not renderer.isValid():
         return None
 
@@ -99,6 +120,9 @@ def _tinted(name: str, size: int, colour: str, ratio: float) -> QPixmap | None:
 
 def _tile(letter: str, size: int, colour: QColor, background: str) -> QIcon:
     """A rounded tile with one letter on it: the fallback that always draws."""
+    if _app() is None:
+        return QIcon()  # a pixmap needs an application; an empty icon is honest
+
     ratio = _ratio()
     pixmap = QPixmap(int(size * ratio), int(size * ratio))
     pixmap.setDevicePixelRatio(ratio)
@@ -148,5 +172,5 @@ def placeholder_for(file_type: FileType | None, size: int) -> QIcon:
 
 
 def clear_cache() -> None:
-    """Drop the rendered glyphs. Tests need this after switching the palette."""
-    _tinted.cache_clear()
+    """Drop the cached SVG bytes. Tests need this after switching the palette."""
+    _svg.cache_clear()

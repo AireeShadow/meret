@@ -970,3 +970,6 @@ msgstr "Размонтирую {path}..."
 
 msgid "Timed out after {seconds:.0f} s"
 msgstr "Не уложилось в {seconds:.0f} с"
+
+msgid "Scanning {path}"
+msgstr "Сканирую {path}"

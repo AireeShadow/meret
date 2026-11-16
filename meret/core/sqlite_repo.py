@@ -835,6 +835,39 @@ class SQLiteRepository(AbstractRepository):
                 for row in conn.execute("SELECT filepath, size_bytes, mtime FROM files")
             }
 
+    @_traced
+    def count_files(self, untagged_only: bool = False) -> int:
+        """One COUNT, not a walk: the progress bar needs its total before the walk."""
+        sql = "SELECT COUNT(*) FROM files"
+        if untagged_only:
+            sql += " WHERE id NOT IN (SELECT file_id FROM file_tags)"
+        with self._session() as conn:
+            return int(conn.execute(sql).fetchone()[0])
+
+    @_traced
+    def add_tags(self, file_id: int, tags: list[tuple[str, str | None]]) -> int:
+        """Several tags on one file in ONE transaction.
+
+        add_tag() opens a connection and commits per tag. Auto-tagging adds a few tags
+        to every file in a library, so that is thousands of connections and thousands
+        of commits, each waiting on fsync - the run crawled, and the progress bar sat
+        in its busy state for minutes. One session, one commit.
+        """
+        if not tags:
+            return 0
+
+        added = 0
+        with self._session() as conn:
+            for tag, colour in tags:
+                tag_id = self._ensure_tag(conn, tag, colour)
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO file_tags (file_id, tag_id) VALUES (?, ?)",
+                    (file_id, tag_id),
+                )
+                added += cur.rowcount
+            conn.commit()
+        return added
+
     # ---------- change tracking ----------
     def data_version(self) -> int | None:
         """PRAGMA data_version on a dedicated long-lived connection.

@@ -133,6 +133,29 @@ class AbstractRepository(ABC):
         """
         raise NotImplementedError(f"{type(self).__name__} cannot enumerate files")
 
+    def count_files(self, untagged_only: bool = False) -> int:
+        """How many files a walk would see, without walking them.
+
+        A default that cannot be wrong, only slow: an implementation that can answer
+        with one query should override it. The auto-tagger needs the number before it
+        starts, because a progress bar with no total is a bar that cannot move.
+        """
+        return sum(1 for _ in self.iter_files(untagged_only=untagged_only))
+
+    def add_tags(self, file_id: int, tags: list[tuple[str, str | None]]) -> int:
+        """Several tags on one file, as (tag path, colour) pairs. Returns how many stuck.
+
+        A default in terms of add_tag(), so every backend keeps working - but a backend
+        that opens a transaction per call should override this. Auto-tagging adds a
+        handful of tags to every file in a library, and one commit per tag is the
+        difference between seconds and minutes.
+        """
+        added = 0
+        for tag, colour in tags:
+            self.add_tag(file_id, tag, colour)
+            added += 1
+        return added
+
     # --- change tracking ---
     def data_version(self) -> int | None:
         """A number that changes whenever the stored data changes.

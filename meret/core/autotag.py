@@ -436,11 +436,12 @@ class AutoTagger:
             return []
         if self.only_untagged and entry.labels:
             return []
-        added: list[str] = []
-        for tag, colour in self.plan(entry):
-            repo.add_tag(entry.id, tag, colour)
-            added.append(tag)
-        return added
+        planned = self.plan(entry)
+        if not planned:
+            return []
+        # add_tags, not add_tag per tag: one transaction per file instead of one per tag
+        repo.add_tags(entry.id, planned)
+        return [tag for tag, _colour in planned]
 
     def run(
         self,
@@ -450,16 +451,27 @@ class AutoTagger:
         dry_run: bool = False,
         only_untagged: bool | None = None,
         paths: set[str] | None = None,
-        progress: Callable[[int, int | None], None] | None = None,
+        progress: Callable[[int, int], None] | None = None,
     ) -> dict[str, int]:
         """Walk the library and tag it.
 
-        ``paths`` narrows the walk to a set of file paths (a fresh scan).
-        ``limit`` caps how many files are *read* from the database, before the
-        path filter — so a limit plus a path filter can scan fewer files.
-        The total is unknown while streaming, hence ``progress(done, None)``.
+        ``paths`` narrows the walk to a set of file paths (a fresh scan). ``limit`` caps
+        how many files are *read* from the database, before the path filter.
+
+        The total is counted up front, because a progress bar without one cannot move:
+        it stays in its busy state and reads as "nothing is happening" while the run
+        works. With a path filter the number of paths is the total; otherwise one COUNT
+        answers, and a limit caps it.
         """
         untagged_only = self.only_untagged if only_untagged is None else only_untagged
+        # Two different questions, so not a ternary: with a path filter the answer is
+        # how many paths the scan handed over, otherwise it is one COUNT from the
+        # repository. Squeezing both into one line hides that they are not the same
+        # kind of fact.
+        total = len(paths) if paths is not None else repo.count_files(untagged_only=untagged_only)
+        if limit is not None:
+            total = min(total, limit)
+
         stats = {"scanned": 0, "changed": 0, "tags": 0}
 
         for entry in repo.iter_files(limit=limit, untagged_only=untagged_only):
@@ -472,10 +484,9 @@ class AutoTagger:
                 stats["changed"] += 1
                 stats["tags"] += len(planned)
                 if not dry_run and entry.id is not None:
-                    for tag, colour in planned:
-                        repo.add_tag(entry.id, tag, colour)
+                    repo.add_tags(entry.id, planned)
 
             if progress is not None:
-                progress(stats["scanned"], None)
+                progress(stats["scanned"], total)
 
         return stats

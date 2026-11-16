@@ -7,6 +7,56 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.10\] — 2026-11-16
+
+### Added
+
+- **`meret/gui/window/progress.py` — `ProgressDialog`.** A modal window with a label and
+  a bar for the two long runs: `scan` shows the indexer's phases (finding files,
+  reading metadata, writing to database), `autotag` shows files processed against the
+  library's size. The callback the work is given only emits a signal: the indexer and
+  the tagger call it on a pool thread, and a widget touched there is a crash, not a
+  glitch. Qt queues the signal to the GUI thread, which is exactly the hop needed.
+- `AbstractRepository.count_files(untagged_only=False)` and `add_tags(file_id, tags)`.
+  Both have working defaults in terms of the existing methods, so a backend that cannot
+  do better still works — and both exist to be overridden.
+
+### Changed
+
+- `ProgressDialog` is opened, never `exec()`'d: `exec()` runs a nested event loop, and
+  this window has already paid for that once (see `_edit_config`). Modality is a flag,
+  `ApplicationModal`, not a loop.
+- The dialog reports percentages as soon as the first total arrives, and stays in its
+  busy state until then: a bar that claims 0% of something nobody has counted is worse
+  than a bar that admits it does not know yet.
+- No new locale entries: the titles reuse `"Scanning {path}"` and `"Tagging..."`, and
+  the phases reuse the three strings the CLI already prints. Two front-ends naming the
+  same phase differently would be two translations of one fact.
+
+### Fixed
+
+- **Auto-tagging was slow because every tag was its own transaction.**
+  `repo.add_tag()` opens a connection and commits per call, which is right for a GUI
+  where each call arrives on a different thread — and catastrophic for a batch: a
+  10 000-file library with three tags each is 30 000 connections and 30 000 commits,
+  each waiting on fsync. `add_tags` does one session and one commit per file, which is
+  the difference between seconds and minutes. The rule is not broken, it is skipped
+  where it does not apply: one operation, one session, however many tags are in it.
+- **The auto-tag progress bar could not move.** `run()` passed `progress(done, None)`,
+  so the dialog never left its busy state: the run looked stuck while it worked. The
+  total is counted up front now — one `COUNT` from the repository, or the number of
+  paths when a scan narrows the walk, capped by `--limit`.
+- **`icons.py` cached `QPixmap` objects, which crashed the test suite at random.** A
+  `QPixmap` is a paint device and belongs to the `QGuiApplication` that created it;
+  `@lru_cache` kept them across applications, and `_build_actions` then drew a pixmap
+  whose application was gone — an access violation inside Qt, with no exception and no
+  traceback. The cache holds the SVG **bytes** now, which belong to no application, and
+  a missing application is an explicit `None`/`QIcon()` instead of a doomed render.
+- `AutoTagger.run()` had `else untagged_only` where it meant `else only_untagged`, which
+  raised `UnboundLocalError` whenever `only_untagged=True` was passed. `mypy` names this
+  as `used-before-assignment`; `ruff` cannot, because it is a syntactically valid
+  reference to a local name.
+
 ## \[0.9.9\] — 2026-11-16
 
 ### Added

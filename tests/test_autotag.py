@@ -140,7 +140,12 @@ def test_disabled_rules_are_ignored():
 
 
 class StubRepo:
-    """Only what AutoTagger.run touches."""
+    """Only what AutoTagger.run and AutoTagger.apply touch.
+
+    Not an AbstractRepository subclass, so the two batch methods have to be listed
+    here: the base class gives count_files and add_tags a working default, and a stub
+    that does not inherit from it does not get one.
+    """
 
     def __init__(self, entries):
         self.entries = entries
@@ -150,9 +155,19 @@ class StubRepo:
         items = [e for e in self.entries if not (untagged_only and e.labels)]
         return iter(items[:limit] if limit else items)
 
+    def count_files(self, untagged_only=False):
+        """What a walk would see, without walking: the progress bar's total."""
+        return len([e for e in self.entries if not (untagged_only and e.labels)])
+
     def add_tag(self, file_id, tag, colour=None):
         self.added.append((file_id, tag, colour))
         return 1
+
+    def add_tags(self, file_id, tags):
+        """One call per file, as the tagger uses it. Records the same triples."""
+        for tag, colour in tags:
+            self.added.append((file_id, tag, colour))
+        return len(tags)
 
 
 def test_run_writes_tags_and_counts_them():
