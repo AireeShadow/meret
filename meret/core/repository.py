@@ -23,11 +23,14 @@ class AbstractRepository(ABC):
         files: list[FileEntry],
         chunk_size: int = 1000,
         on_progress: Callable[[int, int], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> dict[str, int]:
         """Batch write: one transaction per chunk_size files.
 
         Returns {"indexed": n, "updated": m, "errors": k}.
         on_progress(done, total) is called after each chunk.
+        should_stop() is asked between chunks; a True answer ends the write early and
+        what was already committed stays committed.
         """
 
     @abstractmethod

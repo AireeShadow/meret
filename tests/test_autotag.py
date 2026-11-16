@@ -177,7 +177,7 @@ def test_run_writes_tags_and_counts_them():
 
     stats = tagger.run(repo)
 
-    assert stats == {"scanned": 1, "changed": 1, "tags": 1}
+    assert stats == {"scanned": 1, "changed": 1, "tags": 1, "interrupted": False}
     assert repo.added == [(7, "big", None)]
 
 

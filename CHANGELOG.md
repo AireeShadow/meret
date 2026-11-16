@@ -7,6 +7,47 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.11\] — 2026-11-16
+
+### Added
+
+- **A Cancel button in the progress window, and a cancel that is honest about what it
+  can do.** `Indexer.cancel()` sets a `threading.Event` that is checked between files
+  while metadata is read and between chunks while rows are written, so a cancel lands
+  on a boundary where everything already committed is consistent. `AutoTagger.run()`
+  takes `should_stop()` for the same reason: the library is left with every processed
+  file fully tagged, and the report says "Tagging cancelled" rather than pretending the
+  run finished.
+- `AbstractRepository.save_files(..., should_stop=None)`: the batch write asks between
+  chunks, never inside one. A half-written transaction is the one thing a cancel must
+  not leave behind.
+- `AutoTagger.run()` returns `interrupted` in its stats. `Indexer` keeps
+  `self.interrupted`, but the tagger is stateless — one tagger can run twice — so the
+  answer has to travel with the result the GUI already reads.
+
+### Changed
+
+- **The progress window refuses to close while work runs.** The title bar has no X and
+  `Esc` is ignored; cancelling is the button, and the button asks the work to stop. A
+  window that closes and leaves the work behind it is a lie: the poll stays stopped and
+  the application looks dead.
+- The window is closed by the completion callback, not by the user, so `dialog.finish()`
+  replaced `dialog.close()` in both handlers.
+- `test_chunk_size_reaches_the_repository`'s spy and `MockRepository.save_files` accept
+  the new keyword. A mock that mirrors a signature has to mirror it completely, or the
+  difference shows up as `TypeError` in nine unrelated tests.
+
+### Fixed
+
+- **A duplicate `if limit is not None` block** in `AutoTagger.run()`: the total was
+  clamped twice, and the second clamp sat between the two halves of a block that had
+  already been replaced by a ternary. Both the duplicate and the `noqa` that tried to
+  silence the rule are gone; the ternary is wrapped in parentheses, which is what
+  `ruff format` does to it anyway.
+- A `noqa: SIM108` that ruff reported as unused: the directive sat on the `else` branch
+  while the rule is reported on the `if`. A directive in the wrong place is worse than
+  none — it reads as a decision and silences nothing.
+
 ## \[0.9.10\] — 2026-11-16
 
 ### Added

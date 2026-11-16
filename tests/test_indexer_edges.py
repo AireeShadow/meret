@@ -88,7 +88,7 @@ def test_chunk_size_reaches_the_repository(tmp_path, make_png, mock_repo, monkey
     seen = {}
     original = mock_repo.save_files
 
-    def spy(entries, chunk_size=None, on_progress=None):
+    def spy(entries, chunk_size=None, on_progress=None, should_stop=None):
         seen["chunk_size"] = chunk_size
         return original(entries, chunk_size=chunk_size, on_progress=on_progress)
 

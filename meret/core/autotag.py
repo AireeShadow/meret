@@ -452,6 +452,7 @@ class AutoTagger:
         only_untagged: bool | None = None,
         paths: set[str] | None = None,
         progress: Callable[[int, int], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
     ) -> dict[str, int]:
         """Walk the library and tag it.
 
@@ -461,20 +462,24 @@ class AutoTagger:
         The total is counted up front, because a progress bar without one cannot move:
         it stays in its busy state and reads as "nothing is happening" while the run
         works. With a path filter the number of paths is the total; otherwise one COUNT
-        answers, and a limit caps it.
+        answers, and a limit caps it. The expression is lazy on purpose - the COUNT must
+        not run when a path filter already knows the answer.
+
+        ``should_stop()`` is asked before each file: a cancel lands on a file boundary,
+        so the library is left in a state where every processed file is fully tagged.
         """
         untagged_only = self.only_untagged if only_untagged is None else only_untagged
-        # Two different questions, so not a ternary: with a path filter the answer is
-        # how many paths the scan handed over, otherwise it is one COUNT from the
-        # repository. Squeezing both into one line hides that they are not the same
-        # kind of fact.
         total = len(paths) if paths is not None else repo.count_files(untagged_only=untagged_only)
         if limit is not None:
             total = min(total, limit)
 
-        stats = {"scanned": 0, "changed": 0, "tags": 0}
+        stats = {"scanned": 0, "changed": 0, "tags": 0, "interrupted": False}
 
         for entry in repo.iter_files(limit=limit, untagged_only=untagged_only):
+            if should_stop is not None and should_stop():
+                stats["interrupted"] = True
+                logger.info("Auto-tagging cancelled after %d files", stats["scanned"])
+                break
             if paths is not None and entry.filepath not in paths:
                 continue
 

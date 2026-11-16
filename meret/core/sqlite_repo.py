@@ -316,6 +316,7 @@ class SQLiteRepository(AbstractRepository):
         files: list[FileEntry],
         chunk_size: int = 1000,
         on_progress=None,
+        should_stop=None,
     ) -> dict[str, int]:
         """Batch of files: one connection, a transaction per chunk, executemany."""
         stats = {"indexed": 0, "updated": 0, "errors": 0}
@@ -327,6 +328,11 @@ class SQLiteRepository(AbstractRepository):
             known = {row[0] for row in conn.execute("SELECT filepath FROM files")}
 
             for start in range(0, total, chunk_size):
+                # Between chunks, never inside one: a half-written transaction is the
+                # one thing a cancel must not leave behind
+                if should_stop is not None and should_stop():
+                    break
+
                 part = files[start : start + chunk_size]
                 rows = []
                 for entry in part:

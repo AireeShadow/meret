@@ -4,6 +4,7 @@ It knows nothing about formats: extractors handle metadata and the
 repository handles storage. Only traversal and coordination logic lives here.
 """
 
+import threading
 import logging
 import time
 from collections.abc import Generator
@@ -42,6 +43,8 @@ class Indexer:
         self.autotag = autotag
         self.registry = ExtractorRegistry()
         self.interrupted = False
+        # Set from another thread (a Cancel button, a signal handler), read here
+        self._cancel = threading.Event()
 
     # ---------- traversal ----------
 
@@ -110,7 +113,7 @@ class Indexer:
         files: list[Path],
         progress_callback=None,
     ) -> list[FileEntry]:
-        """STAGE 2: extract metadata in parallel."""
+        """STAGE 2: extract metadata in parallel, stopping early when cancelled."""
         entries: list[FileEntry] = []
         if not files:
             return entries
@@ -120,6 +123,10 @@ class Indexer:
 
         try:
             for done, future in enumerate(as_completed(futures), start=1):
+                if self._cancel.is_set():
+                    self.interrupted = True
+                    logger.info("Extraction cancelled after %d/%d files", done, len(files))
+                    break
                 try:
                     entry = future.result()
                     if entry:
@@ -135,11 +142,13 @@ class Indexer:
             logger.warning(
                 "Extraction interrupted by user after %d/%d files", len(entries), len(files)
             )
-            for future in futures:
-                future.cancel()
-            pool.shutdown(wait=False, cancel_futures=True)
-        else:
-            pool.shutdown(wait=True)
+        finally:
+            if self.interrupted:
+                for future in futures:
+                    future.cancel()
+                pool.shutdown(wait=False, cancel_futures=True)
+            else:
+                pool.shutdown(wait=True)
 
         return entries
 
@@ -154,7 +163,16 @@ class Indexer:
             if progress_callback:
                 progress_callback(PHASE_INDEX, done, total)
 
-        return self.repo.save_files(entries, chunk_size=self.chunk_size, on_progress=on_chunk)
+        stats = self.repo.save_files(
+            entries,
+            chunk_size=self.chunk_size,
+            on_progress=on_chunk,
+            should_stop=self._cancel.is_set,
+        )
+        if self._cancel.is_set():
+            self.interrupted = True
+            logger.info("Indexing cancelled after %s", stats)
+        return stats
 
     # ---------- orchestration ----------
 
@@ -243,3 +261,12 @@ class Indexer:
         recorded = known.get(str(path))
         current = self._fingerprint(path)
         return recorded is not None and current is not None and recorded == current
+
+    def cancel(self) -> None:
+        """Ask the run to stop. Safe from any thread.
+
+        Checked between files while reading metadata and between chunks while writing,
+        so a cancel lands within a batch rather than after the whole library. What was
+        written stays written: a scan is not a transaction.
+        """
+        self._cancel.set()

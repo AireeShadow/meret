@@ -6,6 +6,7 @@ with setText() survives about one poll - and the messages here ("Select a real f
 first!", "Scan complete!") are exactly the ones read when nothing else is happening.
 """
 
+import threading
 import logging
 import time
 from functools import partial
@@ -125,16 +126,8 @@ class CommandsMixin:
     def _autotag(self) -> None:
         """Apply the auto-tagging rules to the whole library, with a progress window.
 
-        The rules live in a file, so this is the same work `meret autotag` does - the
-        window only decides when. No `only_untagged` override and no `dry_run`: the
-        config decides, exactly as it does for the CLI, so one file drives both.
-
-        The poll is stopped for the duration, like a scan: the run commits the whole
-        time, and a refresh every 1.5 s would rebuild the tree and the grid underneath
-        it. The task is sticky, so browsing during a long run cannot swallow its end.
-
-        The tagger reports (done, total) and has no phases, so the phase argument is
-        empty: the dialog then keeps whatever label it already has.
+        Cancel is a `threading.Event` owned here and asked by the tagger before each
+        file, so the library is left with every processed file fully tagged.
         """
         tagger = AutoTagger.from_config()
         if not tagger.rules:
@@ -143,6 +136,8 @@ class CommandsMixin:
 
         self._poll.stop()
         dialog = ProgressDialog(_("Tagging..."), self)
+        stop = threading.Event()
+        dialog.cancelled.connect(stop.set)
         dialog.show()
 
         def report(done: int, total: int) -> None:
@@ -150,12 +145,15 @@ class CommandsMixin:
             dialog.report("", done, total)
 
         def done(stats: dict) -> None:
-            dialog.close()
-            self._say(
-                _("Tagged: {files} files, {tags} tags").format(
-                    files=stats["changed"], tags=stats["tags"]
+            dialog.finish()
+            if stats.get("interrupted"):
+                self._say(_("Tagging cancelled"))
+            else:
+                self._say(
+                    _("Tagged: {files} files, {tags} tags").format(
+                        files=stats["changed"], tags=stats["tags"]
+                    )
                 )
-            )
             # the run itself was the change: re-baseline, so the first poll after it
             # does not refresh a second time on data the refresh below already read
             self._version = None
@@ -163,7 +161,7 @@ class CommandsMixin:
             self._poll.start()
 
         def failed(error: Exception) -> None:
-            dialog.close()
+            dialog.finish()
             logger.warning("autotag failed: %s", error)
             self._say(_("Error: {error}").format(error=error))
             self._version = None
@@ -174,7 +172,7 @@ class CommandsMixin:
             on_done=done,
             on_failed=failed,
             args=(self._repo,),
-            kwargs={"progress": report},
+            kwargs={"progress": report, "should_stop": stop.is_set},
             sticky=True,
         )
 
@@ -222,9 +220,8 @@ class CommandsMixin:
         refresh every 1.5 s would rebuild the tree and the grid underneath it. The task
         is sticky, so browsing during a long scan cannot swallow its end.
 
-        The callback handed to the indexer is the dialog's `report`, which only emits a
-        signal: the indexer calls it from a pool thread, and a widget touched there is
-        a crash, not a glitch.
+        Cancel is the indexer's own flag, not a killed thread: what was written stays
+        written, and the run stops on a file boundary.
         """
         target = self.fs.current_path()
         if target is None:
@@ -234,16 +231,16 @@ class CommandsMixin:
         folder = target if target.is_dir() else target.parent
         self._poll.stop()
         dialog = ProgressDialog(_("Scanning {path}").format(path=folder), self)
+        indexer = Indexer(self._repo, folder)
+        dialog.cancelled.connect(indexer.cancel)
         dialog.show()
 
-        indexer = Indexer(self._repo, folder)
-
         def done(stats: dict) -> None:
-            dialog.close()
+            dialog.finish()
             self._on_scan_done(stats)
 
         def failed(error: Exception) -> None:
-            dialog.close()
+            dialog.finish()
             self._on_scan_failed(error)
 
         self._tasks.run(
@@ -254,8 +251,11 @@ class CommandsMixin:
             sticky=True,
         )
 
-    def _on_scan_done(self, _stats: dict) -> None:
-        self._say(_("Scan complete!"))
+    def _on_scan_done(self, stats: dict) -> None:
+        if stats.get("interrupted"):
+            self._say(_("Scan cancelled"))
+        else:
+            self._say(_("Scan complete!"))
         # The scan itself was the change: re-baseline, so the first poll after it
         # does not refresh a second time on data the refresh below already read
         self._version = None

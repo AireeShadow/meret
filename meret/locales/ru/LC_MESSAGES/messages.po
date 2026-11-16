@@ -973,3 +973,12 @@ msgstr "Не уложилось в {seconds:.0f} с"
 
 msgid "Scanning {path}"
 msgstr "Сканирую {path}"
+
+msgid "Cancelling..."
+msgstr "Отменяю..."
+
+msgid "Scan cancelled"
+msgstr "Сканирование отменено"
+
+msgid "Tagging cancelled"
+msgstr "Теггирование отменено"

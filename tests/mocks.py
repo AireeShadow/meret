@@ -134,7 +134,7 @@ class MockRepository(AbstractRepository):
         return file.id
 
     @_mutates
-    def save_files(self, files, chunk_size: int = 1000, on_progress=None) -> dict[str, int]:
+    def save_files(self, files, chunk_size=1000, on_progress=None, should_stop=None):
         stats = {"indexed": 0, "updated": 0, "errors": 0}
         total = len(files)
         for i, entry in enumerate(files, start=1):
