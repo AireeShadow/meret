@@ -17,7 +17,7 @@ from PySide6.QtCore import QModelIndex
 
 @pytest.fixture
 def panel(qapp, qtbot):
-    from meret.gui.app import RealFsPanel
+    from meret.gui.fs_panel import RealFsPanel
 
     widget = RealFsPanel()
     qtbot.addWidget(widget)

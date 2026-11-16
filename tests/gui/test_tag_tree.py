@@ -131,7 +131,7 @@ def test_a_failed_listing_is_visible(tmp_path, qapp, qtbot, tagged):
 
 def test_a_failed_row_is_marked_as_filled(window):
     """FILLED is what keeps the next expand from queueing the same broken listing."""
-    from meret.gui.app import TagTree
+    from meret.gui.tag_tree import TagTree
 
     row = window.tags.topLevelItem(0)
     calls = _break_one_folder(window)

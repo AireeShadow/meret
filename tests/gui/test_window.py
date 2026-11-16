@@ -67,8 +67,9 @@ def test_tag_tree_is_filled_on_start(tmp_path, qapp, qtbot):
 def test_toolbar_exposes_every_command(tmp_path, qapp, qtbot):
     """All of them, not a comfortable subset: the empty tail was the bug."""
     from meret.core.sqlite_repo import SQLiteRepository
-    from meret.gui.app import TOOLBAR, MainWindow
+    from meret.gui.app import MainWindow
     from meret.gui.commands import command_table, short_label
+    from meret.gui.window.constants import TOOLBAR
 
     repo = SQLiteRepository(str(tmp_path / "meret.db"))
     window = MainWindow(repo, tmp_path / "meret.db")
@@ -87,7 +88,8 @@ def test_toolbar_exposes_every_command(tmp_path, qapp, qtbot):
 def test_toolbar_fits_without_an_overflow_menu(tmp_path, qapp, qtbot):
     """Qt hides buttons behind ">>" when they do not fit, and that reads as missing."""
     from meret.core.sqlite_repo import SQLiteRepository
-    from meret.gui.app import ICON, TOOLBAR, MainWindow
+    from meret.gui.app import MainWindow
+    from meret.gui.window.constants import ICON, TOOLBAR
 
     repo = SQLiteRepository(str(tmp_path / "meret.db"))
     window = MainWindow(repo, tmp_path / "meret.db")
@@ -142,7 +144,8 @@ def test_preview_updates_for_the_selected_file(tmp_path, qapp, qtbot):
 def test_thumbnails_are_batched_and_the_queue_refills_on_completion(tmp_path, qapp, qtbot):
     """The bug: a zero-timer refilled the queue at once, so BATCH limited nothing."""
     from meret.core.sqlite_repo import SQLiteRepository
-    from meret.gui.app import BATCH, MainWindow
+    from meret.gui.app import MainWindow
+    from meret.gui.window.contents import BATCH
 
     repo = SQLiteRepository(str(tmp_path / "meret.db"))
     window = MainWindow(repo, tmp_path / "meret.db")

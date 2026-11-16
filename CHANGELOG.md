@@ -7,6 +7,40 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.9\] — 2026-11-16
+
+### Added
+
+- **`meret/gui/window/layout.py` — `LayoutMixin`.** `_build_ui`, `_apply_split`,
+  `_build_actions`, `_build_toolbar` and `_build_menus` left `app.py`. Nothing there
+  decides what a command does — it decides where the command lives, which is why it is
+  the one mixin with no business logic in it.
+
+### Changed
+
+- **`meret/gui/app.py` is the assembly now: about ninety lines instead of 1978.**
+  It holds the module docstring, `MainWindow` with its `__init__` forwarder, and
+  `run_gui`. The window is `class MainWindow(WindowBase, LayoutMixin, ContentsMixin,
+  CommandsMixin, DatabaseMixin, MountMixin, PollMixin)`, and the docstring says what
+  the order is for: `WindowBase` first, so its `__init__` runs before anything else.
+- `BATCH`, `PREVIEW`, `POLL_MS`, `ICON`, `TOOLBAR` and `NAVIGATION_COMMANDS` live in
+  the modules that read them — `window/contents.py`, `window/polling.py`,
+  `window/constants.py`. `app.py` no longer re-exports any of them.
+
+### Fixed
+
+- Tests stopped importing names from `meret.gui.app` that had moved:
+  `RealFsPanel` from `meret.gui.fs_panel`, `TagTree` from `meret.gui.tag_tree`,
+  `TOOLBAR`/`ICON` from `meret.gui.window.constants`, `BATCH` from
+  `meret.gui.window.contents`. The rule is one line and it has now bitten four times:
+  **a monkeypatch, an import and a `from ... import` all have to name the module that
+  actually reads or defines the name**, and a module that merely used to hold it will
+  fail with `ImportError` or, worse, with a patch that silently does nothing.
+- Three handlers were left behind in `app.py` after they had already moved
+  (`_show_tree`, `_prune`, `_on_pruned`): the class inherited a working copy from
+  `CommandsMixin` and carried a dead one of its own. `Select-String` on the method
+  names is what caught it, and it is now part of the checklist for every move.
+
 ## \[0.9.8\] — 2026-11-16
 
 ### Added
