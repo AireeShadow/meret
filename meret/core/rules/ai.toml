@@ -1,0 +1,56 @@
+# The AI tagging policy: which model to ask, and what to do with the answer.
+#
+# Kept apart from the metadata rules on purpose. That file runs on any machine with a
+# database; this one needs a model runtime, weights on disk and time. A user who has
+# none of those never reads this file, and nothing here runs by accident.
+#
+# Every fact a rule can see comes from the detector: `detect.<label>` is the best
+# confidence for that label, `detect.<label>.count` is how many, and `detect.classes`
+# is all the labels as one comma-separated string.
+
+[detector]
+backend = "yolo"
+model = "yolo26n.pt"
+confidence = 0.3
+imgsz = 640
+# device = "cuda:0"
+
+[[rules]]
+tag = "people"
+
+[[rules.conditions]]
+field = "detect.person"
+op = "gte"
+value = 0.5
+
+[[rules]]
+tag = "people/crowd"
+
+[[rules.conditions]]
+field = "detect.person.count"
+op = "gte"
+value = 5
+
+[[rules]]
+tag = "animals/cat"
+
+[[rules.conditions]]
+field = "detect.cat"
+op = "gte"
+value = 0.5
+
+[[rules]]
+tag = "animals/dog"
+
+[[rules.conditions]]
+field = "detect.dog"
+op = "gte"
+value = 0.5
+
+[[rules]]
+tag = "transport/car"
+
+[[rules.conditions]]
+field = "detect.car"
+op = "gte"
+value = 0.5

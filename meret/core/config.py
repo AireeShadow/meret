@@ -95,6 +95,39 @@ class AutoTagConfig(BaseModel):
         return normalize_root(value)
 
 
+class AiTagConfig(BaseModel):
+    """AI auto-tagging settings — the second, independent tagging pass.
+
+    Separate from `autotag` on purpose. This pass needs a model runtime, weights on
+    disk and minutes of GPU or CPU; the metadata pass needs nothing but a database.
+    Folding them into one section would mean every user of the cheap pass pays for
+    the expensive one's settings, and `scan --autotag` would have to decide whether
+    it is allowed to download a checkpoint.
+
+    `enabled` defaults to False and stays there unless someone says otherwise: it is
+    the one switch in this config whose "on" costs gigabytes.
+    """
+
+    enabled: bool = Field(default=False, description="Default for `meret aitag --enabled`")
+    only_untagged: bool = Field(
+        default=False, description="Leave files that already have tags alone"
+    )
+    root: str = Field(
+        default="ai",
+        description="Parent tag for every produced tag; empty means no parent",
+    )
+    rules_file: str | None = Field(
+        default=None,
+        description="TOML/JSON file with a [detector] section and the AI rules",
+    )
+
+    @field_validator("root")
+    @classmethod
+    def _normalize_root(cls, value: str) -> str:
+        """`/ai/` and `ai` are the same parent — one spelling in the file."""
+        return normalize_root(value)
+
+
 class MeretConfig(BaseModel):
     """Root configuration model."""
 
@@ -103,6 +136,7 @@ class MeretConfig(BaseModel):
     gui: GUIConfig = Field(default_factory=GUIConfig)
     locale: LocaleConfig = Field(default_factory=LocaleConfig)
     autotag: AutoTagConfig = Field(default_factory=AutoTagConfig)
+    aitag: AiTagConfig = Field(default_factory=AiTagConfig)
 
     # Allow extra fields for forward compatibility
     model_config = {"extra": "allow"}

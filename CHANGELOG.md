@@ -7,6 +7,36 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.10.0\] - 2026-11-26
+
+### Added
+
+- **AI auto-tagging as a second, independent pass.** `meret aitag` runs a detector over
+  the library and tags what it finds; `meret autotag` is untouched and still reads
+  nothing but metadata. Two commands, two config sections (`aitag`), two rule files and
+  two roots — `metadata/` for what a file says about itself, `ai/` for what a model saw
+  in it — so a user without a GPU never pays for the other one's dependencies.
+- `meret/core/detectors/`: the abstract half. `Detection` and the `Detector` protocol,
+  a registry by name, and the `[detector]` section of a rules file. The YOLO backend is
+  one implementation and imports `ultralytics` inside the function that needs it, so
+  `core` stays importable without torch.
+- Detections are stored in `metadata`, not in a new table: the fact builder already
+  flattens one level of nested metadata, so `detect.cat` is an ordinary fact and the
+  rule engine needs no knowledge of models at all.
+- `detect.<label>` is the best confidence, `detect.<label>.count` is how many, and
+  `detect.classes` is every label as one comma-separated string — three keys, because
+  "is there a cat", "how many" and "what else" are three different questions.
+- `model` and `mtime` in the stored block are the whole cache: a changed file or a
+  changed checkpoint re-runs the detector, anything else is skipped. `--force` overrides.
+- `ultralytics` is an extra (`pip install 'meret[ai]'`) and its absence is reported
+  before the first file rather than during the run.
+
+### Fixed
+
+- `Detector.detect` returns `None` when the model could not answer, and an empty list
+  when it looked and found nothing. Both used to be `[]`, which meant a file that
+  failed to decode got an empty block cached forever and was never asked about again.
+
 ## \[0.9.13\] — 2026-11-16
 
 ### Added

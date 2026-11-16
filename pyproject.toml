@@ -29,6 +29,9 @@ build-backend = "hatchling.build"
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.21.0", "pytest-qt>=4.2", "black", "ruff", "mypy"]
 gui = ["PySide6>=6.6.0"]
+# The AI tagger: a model runtime and torch. An extra, never a dependency - `core`,
+# `vfs` and `cli` have to stay importable on a machine that has neither.
+ai = ["ultralytics>=8.4.0"]
 
 [project.scripts]
 meret = "meret.cli.app:app"
@@ -148,9 +151,6 @@ markers = [
 input_files = "meret/**/*.py"
 output_file = "meret/locales/messages.pot"
 
-[tool.setuptools.package-data]
-meret = ["locales/**/*.mo", "locales/**/*.po", "core/rules/*.toml"]
-
 [tool.mypy]
 python_version = "3.11"
 # The job is advisory, but it has to be about our own code: these two keep the
@@ -159,9 +159,10 @@ warn_unused_ignores = true
 show_error_codes = true
 
 # Modules with no stubs and no py.typed marker. Analysed as Any, which is what they
-# are to us: the mount backends and fsspec never reach core or the GUI.
+# are to us: the mount backends and fsspec never reach core or the GUI, and
+# `ultralytics` is imported inside a function for exactly that reason.
 [[tool.mypy.overrides]]
-module = ["fsspec", "fsspec.*", "fuse", "winfspy", "winfspy.*"]
+module = ["fsspec", "fsspec.*", "fuse", "winfspy", "winfspy.*", "ultralytics", "ultralytics.*"]
 ignore_missing_imports = true
 
 # Typer's translated group overrides click hooks, and Textual's annotations describe

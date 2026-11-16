@@ -35,6 +35,7 @@ from meret.core.autotag import AutoTagger
 from meret.core.debug import names as debug_names
 from meret.core.debug import parse as parse_debug
 from meret.core.debug import set_enabled as set_debug_flags
+from meret.core.aitag import AiTagger
 
 
 def _language_in(args: Sequence[str]) -> str | None:
@@ -366,6 +367,91 @@ def autotag(
             changed=stats["changed"], tags=stats["tags"]
         )
         console.print(f"[green]✓ {msg}[/green]")
+
+
+@app.command(
+    "aitag",
+    help=_("Tag indexed files by what a detector finds in them (needs the 'ai' extra)."),
+)
+def aitag(
+    db_path: Path | None = DB_OPTION,
+    rules: Path | None = typer.Option(
+        None, "--rules", "-r", help=_("Rules file (TOML or JSON) instead of the config")
+    ),
+    root: str | None = typer.Option(
+        None, "--root", help=_("Parent tag for every produced tag (default: the config)")
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help=_("Run the detector again on files that already have an answer"),
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help=_("Show what would be tagged")),
+    only_untagged: bool | None = typer.Option(
+        None,
+        "--only-untagged/--all",
+        help=_("Skip files that already have tags (default: the config decides)"),
+    ),
+    limit: int | None = typer.Option(None, "--limit", "-l", help=_("Stop after N files")),
+):
+    """Tag indexed files by what a detector finds in them."""
+    if rules is not None and not rules.exists():
+        console.print(f"[red]{_('No such rules file: {path}').format(path=rules)}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        tagger = AiTagger.from_config(rules, only_untagged=only_untagged, root=root, force=force)
+    except ImportError as e:
+        msg = _("The AI tagger needs ultralytics: {error}").format(error=e)
+        console.print(f"[red]{msg}[/red]")
+        console.print("[dim]pip install 'meret[ai]'[/dim]")
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+
+    if not tagger.rules.rules:
+        msg = _("No AI tagging rules: pass --rules or set aitag.rules_file")
+        console.print(f"[red]{msg}[/red]")
+        raise typer.Exit(1)
+
+    repo = get_repo(db_path)
+    with Progress(
+        TextColumn("[cyan]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task(_("Detecting"), total=None)
+
+        def on_progress(done: int, total: int | None) -> None:
+            progress.update(task, completed=done, total=total)
+
+        stats = tagger.run(
+            repo,
+            limit=limit,
+            dry_run=dry_run,
+            only_untagged=only_untagged,
+            progress=on_progress,
+        )
+
+    if stats["interrupted"]:
+        console.print(f"[yellow]⚠ {_('Interrupted by user')}[/yellow]")
+
+    if dry_run:
+        msg = _("Would tag: {changed} files, {tags} tags").format(
+            changed=stats["changed"], tags=stats["tags"]
+        )
+        console.print(f"[cyan]{msg}[/cyan]")
+    else:
+        msg = _("Tagged: {changed} files, {tags} tags").format(
+            changed=stats["changed"], tags=stats["tags"]
+        )
+        console.print(f"[green]✓ {msg}[/green]")
+        msg = _("Detections stored: {n}").format(n=stats["detected"])
+        console.print(f"[dim]{msg}[/dim]")
 
 
 # ----- search -----

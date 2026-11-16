@@ -982,3 +982,35 @@ msgstr "Сканирование отменено"
 
 msgid "Tagging cancelled"
 msgstr "Теггирование отменено"
+
+# AI auto-tagging (meret/cli/app.py, meret/gui/settings.py)
+
+msgid "Tag indexed files by what a detector finds in them (needs the 'ai' extra)."
+msgstr "Протеггировать проиндексированные файлы по тому, что находит детектор (нужен extra 'ai')."
+
+msgid "Run the detector again on files that already have an answer"
+msgstr "Прогнать детектор заново по файлам, у которых уже есть ответ"
+
+msgid "The AI tagger needs ultralytics: {error}"
+msgstr "ИИ-теггеру нужен ultralytics: {error}"
+
+msgid "No AI tagging rules: pass --rules or set aitag.rules_file"
+msgstr "Нет правил ИИ-теггинга: передай --rules или задай aitag.rules_file"
+
+msgid "Detecting"
+msgstr "Распознаю объекты"
+
+msgid "Detections stored: {n}"
+msgstr "Сохранено детекций: {n}"
+
+msgid "AI auto-tagging"
+msgstr "ИИ-автотеггинг"
+
+msgid "AI tagging enabled"
+msgstr "ИИ-теггинг включён"
+
+msgid "AI tag root"
+msgstr "Корневой тег ИИ"
+
+msgid "AI rules file"
+msgstr "Файл правил ИИ"

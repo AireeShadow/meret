@@ -59,6 +59,7 @@ def sections() -> tuple[tuple[str, str], ...]:
         ("paths", _("Paths")),
         ("scan", _("Scan")),
         ("autotag", _("Auto-tagging")),
+        ("aitag", _("AI auto-tagging")),
         ("gui", _("GUI")),
         ("locale", _("Locale")),
     )
@@ -67,10 +68,13 @@ def sections() -> tuple[tuple[str, str], ...]:
 def settings_table() -> list[Setting]:
     """Every field of the config. A function, so labels translate on call.
 
-    The auto-tagging rules themselves are not here: they are a list of lists, and
-    this table has one row per scalar field. The rows below point at the file that
-    holds them and at the parent tag the results are filed under — the only parts a
-    form can edit.
+    The rules themselves are not here, for either tagger: they are a list of lists, and
+    this table has one row per scalar field. The rows below point at the file that holds
+    them and at the parent tag the results are filed under — the only parts a form can
+    edit.
+
+    The two taggers are two groups, not one with a switch: a field that only the AI pass
+    reads must not look like something the metadata pass also honours.
     """
     return [
         Setting("paths", "default_db", _("Default database"), "path"),
@@ -82,6 +86,10 @@ def settings_table() -> list[Setting]:
         Setting("autotag", "only_untagged", _("Only untagged files"), "bool"),
         Setting("autotag", "root", _("Tag root"), "text"),
         Setting("autotag", "rules_file", _("Rules file"), "path"),
+        Setting("aitag", "enabled", _("AI tagging enabled"), "bool"),
+        Setting("aitag", "only_untagged", _("Only untagged files"), "bool"),
+        Setting("aitag", "root", _("AI tag root"), "text"),
+        Setting("aitag", "rules_file", _("AI rules file"), "path"),
         Setting("gui", "theme", _("Theme"), "choice", ("system", "light", "dark")),
         Setting("gui", "thumbnail_size", _("Thumbnail size"), "int"),
         Setting("gui", "window_width", _("Window width"), "int"),
