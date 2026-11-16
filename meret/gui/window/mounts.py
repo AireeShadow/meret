@@ -9,6 +9,7 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QInputDialog
 
@@ -21,8 +22,13 @@ logger = logging.getLogger(__name__)
 #: end - without this the task would hold its pool thread forever.
 CLI_TIMEOUT = 30.0
 
+if TYPE_CHECKING:
+    from meret.gui.window.base import WindowBase
+else:
+    WindowBase = object
 
-class MountMixin:
+
+class MountMixin(WindowBase):
     """`mount`, `umount`, and the CLI plumbing they share."""
 
     def _mount(self) -> None:

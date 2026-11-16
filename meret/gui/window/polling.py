@@ -2,6 +2,8 @@
 
 import logging
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QTimer
 
 logger = logging.getLogger(__name__)
@@ -9,8 +11,13 @@ logger = logging.getLogger(__name__)
 #: How often the database's data_version is checked for outside changes.
 POLL_MS = 1500
 
+if TYPE_CHECKING:
+    from meret.gui.window.base import WindowBase
+else:
+    WindowBase = object
 
-class PollMixin:
+
+class PollMixin(WindowBase):
     """The poll that picks up tagging done by the CLI, a mount or a scan."""
 
     def _start_poll(self) -> None:

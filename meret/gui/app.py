@@ -34,28 +34,33 @@ from meret.gui.window.polling import PollMixin
 
 
 class MainWindow(
-    WindowBase,
     LayoutMixin,
     ContentsMixin,
     CommandsMixin,
     DatabaseMixin,
     MountMixin,
     PollMixin,
+    WindowBase,
 ):
     """Browse the tag tree, the files under one tag, and a preview.
 
-    The explicit __init__ is not decoration. Without it the call is forwarded by
-    whatever happens to be first in the MRO, and a plain-class mixin in the chain turns
-    `MainWindow(repo, db_path)` into `WindowBase.__init__()` with the arguments eaten -
-    a TypeError about a missing parameter, nowhere near the real cause.
+    WindowBase is last, and that is load-bearing twice over.
+
+    For mypy: every mixin inherits WindowBase under TYPE_CHECKING, so listing it first
+    would put a parent before its own subclasses and the MRO cannot be linearised.
+
+    At runtime: the mixins are plain `object` subclasses, so the chain walks past all
+    of them and lands on WindowBase.__init__ - which is the only real constructor here.
+    Reversed, `super().__init__(repo, db_path, parent)` would reach `object.__init__`
+    with three arguments.
+
+    The explicit __init__ is not decoration either: without it the call is forwarded by
+    whatever happens to be first in the MRO, and a plain-class mixin turns
+    `MainWindow(repo, db_path)` into `WindowBase.__init__()` with the arguments eaten.
 
     It must not do any of the building itself. WindowBase.__init__ builds the widgets,
     and a second copy here does not replace them: the menu bar is one object per window,
-    so `_build_menus` runs twice on it and every menu appears twice, while `self.toolbar`
-    is merely overwritten and the duplicate hides.
-
-    The order matters only for `super()`: WindowBase first, so its `__init__` runs before
-    anything else, and the rest in the order the window is described.
+    so `_build_menus` runs twice on it and every menu appears twice.
     """
 
     def __init__(self, repo, db_path, parent: QWidget | None = None) -> None:

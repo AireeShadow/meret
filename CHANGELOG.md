@@ -7,6 +7,61 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.12\] — 2026-11-16
+
+### Added
+
+- **A Cancel button in the progress window, and a cancel that is honest about what it
+  can do.** `Indexer.cancel()` sets a `threading.Event` that is checked between files
+  while metadata is read and between chunks while rows are written, so a cancel lands
+  on a boundary where everything already committed stays committed. `AutoTagger.run()`
+  takes `should_stop()` for the same reason, and reports `interrupted` in its stats:
+  `Indexer` keeps `self.interrupted`, but a tagger is stateless and can run twice.
+- `AbstractRepository.save_files(..., should_stop=None)`: the batch write asks between
+  chunks, never inside one. A half-written transaction is the one thing a cancel must
+  not leave behind.
+- `meret/gui/window/base.py` declares the mixin contract under `TYPE_CHECKING` — the
+  widgets `LayoutMixin` builds and the methods the other five provide. It is the only
+  place the mixins see each other, and the only place to extend when a member is shared
+  by two of them.
+
+### Changed
+
+- **The progress window refuses to close while work runs.** No X, `Esc` ignored, and
+  the button asks the work to stop. A window that closes and leaves the work behind it
+  is a lie: the poll stays stopped and the application looks dead. It is closed by the
+  completion callback, so `dialog.finish()` replaced `dialog.close()` in both handlers.
+- **The mixins are typed, not silenced.** Each one inherits `WindowBase` under
+  `TYPE_CHECKING` and `object` at runtime, and `MainWindow` lists `WindowBase` last:
+  for mypy that is a consistent diamond, for the interpreter a flat chain where
+  `super().__init__` walks past the plain classes and lands on the real constructor.
+  `mypy meret` went from 237 findings to none, and the ones that survived the first pass
+  were real: attributes inferred as `None`, a handler dict joined to `object`.
+
+### Fixed
+
+- **Auto-tagging was slow because every tag was its own transaction.**
+  `repo.add_tag()` opens a connection and commits per call — right for a GUI where each
+  call arrives on a different thread, catastrophic for a batch. A 10 000-file library
+  with three tags each was 30 000 connections and 30 000 commits, each waiting on
+  fsync. `add_tags` does one session and one commit per file.
+- **The auto-tag progress bar could not move.** `run()` passed `progress(done, None)`,
+  so the dialog never left its busy state and the run looked stuck while it worked. The
+  total is counted up front: one `COUNT`, or the number of paths when a scan narrows the
+  walk, capped by `--limit`.
+- **`icons.py` cached `QPixmap` objects, which crashed the suite at random.** A
+  `QPixmap` belongs to the `QGuiApplication` that created it; `@lru_cache` kept them
+  across applications, and `_build_actions` then drew a pixmap whose application was
+  gone — an access violation inside Qt, with no exception and no traceback. The cache
+  holds the SVG bytes now, which belong to no application.
+- `AutoTagger.run()` had `else untagged_only` where it meant `else only_untagged`, which
+  raised `UnboundLocalError` whenever `only_untagged=True` was passed. `mypy` names this
+  as `used-before-assignment`; `ruff` cannot, because it is a syntactically valid
+  reference to a local name.
+- A duplicate `if limit is not None` block in `run()` clamped the total twice, and a
+  `noqa: SIM108` sat on the `else` branch while the rule is reported on the `if` — a
+  directive in the wrong place reads as a decision and silences nothing.
+
 ## \[0.9.11\] — 2026-11-16
 
 ### Added

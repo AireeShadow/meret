@@ -10,6 +10,8 @@ import threading
 import logging
 import time
 from functools import partial
+from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QMessageBox
@@ -31,8 +33,13 @@ from meret.gui.window.progress import ProgressDialog
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from meret.gui.window.base import WindowBase
+else:
+    WindowBase = object
 
-class CommandsMixin:
+
+class CommandsMixin(WindowBase):
     """The command table, its handlers, the settings dialog and the help."""
 
     # ---------- dispatch ----------
@@ -47,10 +54,17 @@ class CommandsMixin:
             self.run_command(command)
 
     def run_command(self, cmd: str) -> None:
-        """Run a command. The table is the TUI's bindings and palette, plus untag."""
+        """Run a command. The table is the TUI's bindings and palette, plus untag.
+
+        The dict is annotated, not inferred. Its values are a `functools.partial`, a
+        dozen bound methods and `self.close` - which returns bool - so mypy joins them
+        all to `object` and `handler()` becomes "object not callable". `Callable[[], object]`
+        says what the code actually assumes: anything callable with no arguments, and
+        the return value is nobody's business.
+        """
         logger.info("palette: %s", cmd)
         self._notice = None  # a new action replaces whatever was on the line
-        handlers = {
+        handlers: dict[str, Callable[[], object]] = {
             # the one command that re-reads the disk: see _refresh's `panel`
             "refresh": partial(self._refresh, panel=True),
             "scan": self._scan,

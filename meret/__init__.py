@@ -1,6 +1,6 @@
 import logging
 
-__version__ = "0.9.11"
+__version__ = "0.9.12"
 
 __all__ = ["__version__"]
 

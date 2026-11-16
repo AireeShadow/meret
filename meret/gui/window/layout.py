@@ -8,6 +8,7 @@ the overflow menu is still reachable by its shortcut, and the palette is for dis
 import logging
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QAction
@@ -35,8 +36,13 @@ from meret.gui.window.constants import ICON, TOOLBAR
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from meret.gui.window.base import WindowBase
+else:
+    WindowBase = object
 
-class LayoutMixin:
+
+class LayoutMixin(WindowBase):
     """`_build_ui` and the three builders that hang off it."""
 
     def _build_ui(self) -> None:

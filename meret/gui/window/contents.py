@@ -8,6 +8,7 @@ carrying a generation, so a result that arrives late cannot paint over a newer o
 import logging
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
@@ -27,6 +28,11 @@ BATCH = 24
 #: Preview size, in pixels.
 PREVIEW = 512
 
+if TYPE_CHECKING:
+    from meret.gui.window.base import WindowBase
+else:
+    WindowBase = object
+
 
 def _reason_text(reason: str) -> str:
     """Translated tooltip for a missing preview. Resolved at call time."""
@@ -39,7 +45,7 @@ def _reason_text(reason: str) -> str:
     return table.get(reason, "")
 
 
-class ContentsMixin:
+class ContentsMixin(WindowBase):
     """The browser: listings, thumbnails, the preview and the status line."""
 
     # ---------- listings ----------

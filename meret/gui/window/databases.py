@@ -12,6 +12,7 @@ import logging
 import sqlite3
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
@@ -22,8 +23,13 @@ from meret.vfs.tree import VirtualTree
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from meret.gui.window.base import WindowBase
+else:
+    WindowBase = object
 
-class DatabaseMixin:
+
+class DatabaseMixin(WindowBase):
     """`init_db`, the switch to another database, and the wipe that precedes it."""
 
     def _init_db(self) -> None:
