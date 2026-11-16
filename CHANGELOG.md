@@ -7,6 +7,29 @@ Two rules: one file, one line per patch release unless the change needs explaini
 The repository has no git tags, so older entries are kept as a plain version log
 rather than as comparison links.
 
+## \[0.9.13\] — 2026-11-16
+
+### Added
+
+- **`docs/core.md`, `docs/autotag.md`, `docs/vfs.md`, `docs/cli.md`.** `gui.md` was the
+  only document in `docs/`, and it described a window that no longer exists. The four
+  new ones cover the parts a reader has to be told rather than infer: why
+  `files.metadata` is a blob nothing searches, why tag uniqueness is per sibling, why
+  `iter_files` is a paged generator, why rules are a file and not config fields, why
+  the mount is read-only, and why `--lang` is read from `sys.argv` at import time.
+- `README.md` links them from a `## Documentation` table, so the set is discoverable
+  instead of being five files nobody opens.
+
+### Changed
+
+- `README.md` rewritten for 0.9: an Auto-tagging section (the feature had none),
+  `--debug` instead of the diagnostic environment variables, the real-FS panel described
+  as one folder plus a drive selector, the progress windows and their Cancel button, and
+  a module table for `meret/gui`.
+- `docs/gui.md` rewritten: the module map, the mixin typing trick, the progress window's
+  three rules, the drive letters from `GetLogicalDrives()`, and a *Traps already paid
+  for* section that grew from three entries to six.
+
 ## \[0.9.12\] — 2026-11-16
 
 ### Added
